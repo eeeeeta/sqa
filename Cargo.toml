@@ -1,0 +1,10 @@
+[package]
+name = "sqa"
+version = "0.1.0"
+authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
+
+[dependencies]
+libc = "0.2.8"
+enum_primitive = "0.1.0"
+num = "0.1.31"
+portaudio = "0.6.3"
