@@ -50,6 +50,7 @@ impl<'a> Stream<'a> {
                 thread::sleep(self.controller.as_mut().unwrap().accuracy());
             }
         }
+        self.pa_stream.stop().unwrap();
     }
     pub fn attach(&mut self, sc: Box<StreamController>) {
         self.controller = Some(sc);
