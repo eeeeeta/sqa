@@ -1,5 +1,6 @@
 extern crate rsndfile;
 extern crate portaudio;
+extern crate chrono;
 use rsndfile::SndFile;
 use std::thread;
 use std::time::Duration;
