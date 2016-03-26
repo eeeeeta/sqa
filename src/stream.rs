@@ -5,12 +5,12 @@
 
 use portaudio as pa;
 use rsndfile::{SndFile, SndFileInfo};
-use std::sync::mpsc::{Sender, Receiver, channel};
+use std::sync::mpsc::{Sender, Receiver, channel, TryRecvError};
 use std::time::Duration;
 use chrono::duration::Duration as CDuration;
 use std::thread;
 use std::sync::{Arc, Mutex};
-
+use std::mem;
 /// Controls the number of samples per PortAudio callback.
 ///
 /// If you're experiencing underruns, raise this number. Note that
@@ -62,7 +62,9 @@ pub trait StreamController {
 // Type sent to a `ThreadStream` to ask it to carry out an action.
 enum ThreadAction {
     // Request to attach a `StreamController` to the stream.
-    AttachController(Box<StreamController + Send>)
+    AttachController(Box<StreamController + Send>),
+    ILive,
+    BeginPlayback
 }
 /// A stream of playing music.
 ///
@@ -70,8 +72,6 @@ enum ThreadAction {
 /// spawn, instruct, and share state with a thread containing a `ThreadStream`, which controls
 /// the stream itself.
 pub struct Stream {
-    /// The soundfile to be played (goes away when we give it to the thread)
-    file: Option<SndFile>,
     /// Information about the soundfile to be played
     info: SndFileInfo,
     /// What this stream currently knows about its state.
@@ -80,8 +80,8 @@ pub struct Stream {
     state: Arc<Mutex<LiveParameters>>,
     /// Channel to this stream's underlying `ThreadStream` to send actions to be executed.
     ts_tx: Sender<ThreadAction>,
-    /// The pair receiver for `ts_tx` (goes away when we give it to the thread)
-    ts_pair: Option<Receiver<ThreadAction>>
+    ts_rx: Receiver<ThreadAction>,
+    jh: Option<thread::JoinHandle<Result<(), pa::error::Error>>>
 }
 /// Thread-local stream that communicates with a host `Stream`.
 ///
@@ -97,41 +97,47 @@ struct ThreadStream<'a> {
     info: SndFileInfo,
     /// Reciever for `ThreadActions` from host `Stream`
     s_rx: Receiver<ThreadAction>,
+    s_tx: Sender<ThreadAction>
+}
+#[derive(Debug)]
+pub enum StreamError {
+    PaError(pa::error::Error),
+    ThreadPanicked
 }
 
 impl Stream {
     /// Make a new stream to play a file.
-    pub fn new(file: SndFile) -> Self {
+    pub fn new(mut file: SndFile) -> Result<Self, StreamError> {
         let (ts_tx, ts_rx) = channel();
+        let (ts_tx1, ts_rx1) = channel();
         let info = file.info.clone();
-        Stream {
+        let mut stream = Stream {
             state: Arc::new(Mutex::new(LiveParameters {
                 vol: 0.0,
                 frames_written: 0,
-                frames_total: file.info.frames as u64
+                frames_total: info.frames as u64
             })),
-            file: Some(file),
             info: info,
             ts_tx: ts_tx,
-            ts_pair: Some(ts_rx)
-        }
-    }
-    /// Start playing a stream, including initialisation of audio.
-    ///
-    /// Takes a mutex to a PortAudio instance, though in practice I don't think
-    /// sharing those works out.
-    ///
-    /// FIXME: Can fail. This should'nt fail here but should only be a wrapper
-    /// to telling the stream to play - we should stuff all the audio setting crap
-    /// in `Stream::new()` and clean up some of the stuff in there.
-    pub fn run(&mut self, pa_mtx: Arc<Mutex<pa::PortAudio>>) -> thread::JoinHandle<Result<(), pa::error::Error>> {
-        let mut file = self.file.take().unwrap();
-        let ts_rx = self.ts_pair.take().unwrap();
-        let stream_state = self.state.clone();
-
-        thread::spawn(move || {
-            let pa = pa_mtx.lock().unwrap();
-            let def_output = try!(pa.default_output_device());
+            ts_rx: ts_rx1,
+            jh: None
+        };
+        let stream_state = stream.state.clone();
+        stream.jh = Some(thread::spawn(move || {
+            let pa = try!(pa::PortAudio::new());
+            let num_devices = try!(pa.device_count());
+            println!("Number of devices = {}", num_devices);
+            let mut def_output = try!(pa.default_output_device());
+            for device in try!(pa.devices()) {
+                let (idx, info) = try!(device);
+                println!("--------------------------------------- {:?}", idx);
+                println!("{:#?}", &info);
+                if info.name.contains("system") && info.host_api == 2 {
+                    println!("is JACK");
+                    def_output = idx;
+                    break;
+                }
+            }
             let output_info = try!(pa.device_info(def_output));
             let output_params: pa::StreamParameters<f32> = pa::StreamParameters::new(def_output, file.info.channels, true, output_info.default_low_output_latency);
             try!(pa.is_output_format_supported(output_params, file.info.samplerate as f64));
@@ -168,12 +174,36 @@ impl Stream {
                 controller: None,
                 state: stream_state.clone(),
                 info: file_info,
-                s_rx: ts_rx
+                s_rx: ts_rx,
+                s_tx: ts_tx1
             };
-
+            thread_stream.check();
             thread_stream.run();
             Ok(())
-        })
+        }));
+        // Block until stream is usable.
+        let msg = stream.ts_rx.recv();
+        if let Ok(_) = msg {
+            Ok(stream)
+        }
+        else {
+            let join_result = stream.jh.take().unwrap().join();
+            if let Ok(res) = join_result {
+                Err(StreamError::PaError(res.unwrap_err())) /* if this is Ok, something's gone terribly wrong */
+            }
+            else {
+                Err(StreamError::ThreadPanicked)
+            }
+        }
+
+    }
+    /// Start playing a stream, including initialisation of audio.
+    ///
+    /// Takes a mutex to a PortAudio instance, though in practice I don't think
+    /// sharing those works out.
+    pub fn run(&mut self) -> thread::JoinHandle<Result<(), pa::error::Error>> {
+        self.ts_tx.send(ThreadAction::BeginPlayback).unwrap();
+        self.jh.take().unwrap()
     }
     /// Attach a controller to this stream.
     ///
@@ -186,6 +216,21 @@ impl Stream {
 
 }
 impl<'a> ThreadStream<'a> {
+    pub fn check(&mut self) {
+        self.s_tx.send(ThreadAction::ILive);
+        loop {
+            let msg = self.s_rx.recv();
+            if let Ok(ThreadAction::BeginPlayback) = msg {
+                break;
+            }
+            else if let Ok(ta) = msg {
+                self.handle_ta(ta);
+            }
+            else {
+                msg.unwrap();
+            }
+        }
+    }
     /// Starts the main thread loop - processing controllers and running them.
     pub fn run(&mut self) {
         self.pa_stream.start().unwrap();
@@ -209,9 +254,8 @@ impl<'a> ThreadStream<'a> {
                          ca_str
                 );
             }
-            if let Ok(ThreadAction::AttachController(ctlr)) = self.s_rx.try_recv() {
-                println!("thread: controller attached");
-                self.attach(ctlr);
+            if let Ok(ta) = self.s_rx.try_recv() {
+                self.handle_ta(ta);
             }
             if self.controller.is_some() {
                 {
@@ -232,6 +276,12 @@ impl<'a> ThreadStream<'a> {
             }
         }
         self.pa_stream.stop().unwrap();
+    }
+    pub fn handle_ta(&mut self, ta: ThreadAction) {
+        match ta {
+            ThreadAction::AttachController(ctl) => self.attach(ctl),
+            _ => panic!("unexpected ThreadAction")
+        }
     }
     /// Attaches a `StreamController` to this stream.
     pub fn attach(&mut self, sc: Box<StreamController>) {
