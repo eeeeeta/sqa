@@ -128,16 +128,6 @@ impl Stream {
             let num_devices = try!(pa.device_count());
             println!("Number of devices = {}", num_devices);
             let mut def_output = try!(pa.default_output_device());
-            for device in try!(pa.devices()) {
-                let (idx, info) = try!(device);
-                println!("--------------------------------------- {:?}", idx);
-                println!("{:#?}", &info);
-                if info.name.contains("system") && info.host_api == 2 {
-                    println!("is JACK");
-                    def_output = idx;
-                    break;
-                }
-            }
             let output_info = try!(pa.device_info(def_output));
             let output_params: pa::StreamParameters<f32> = pa::StreamParameters::new(def_output, file.info.channels, true, output_info.default_low_output_latency);
             try!(pa.is_output_format_supported(output_params, file.info.samplerate as f64));
