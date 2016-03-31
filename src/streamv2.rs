@@ -41,8 +41,13 @@ impl LiveParameters {
         }
     }
 }
-fn update_slp<'a>(slp: &'a mut Arc<Mutex<LiveParameters>>) -> ::std::sync::MutexGuard<'a, LiveParameters> {
+fn update_slp<'a>(olp: &'a mut Arc<Mutex<LiveParameters>>, slp: &'a mut Arc<Mutex<LiveParameters>>) -> ::std::sync::MutexGuard<'a, LiveParameters> {
     let mut lp = slp.lock().unwrap();
+    let olp = olp.lock().unwrap();
+    lp.pos = olp.pos;
+    lp.start = olp.start;
+    lp.end = olp.end;
+    lp.active = olp.active;
     lp.ver = lp.ver + 1;
     lp
 }
@@ -55,7 +60,7 @@ pub struct FileStreamX {
 impl FileStreamX {
     /// Resets the FileStream to a given position.
     pub fn reset_pos(&mut self, pos: u64) {
-        let mut lp = update_slp(&mut self.shared_lp);
+        let mut lp = update_slp(&mut self.lp, &mut self.shared_lp);
         let mut file = self.file.lock().unwrap();
         let mut fill_len = self.fill_len.write().unwrap();
         lp.pos = pos as usize;
@@ -66,11 +71,11 @@ impl FileStreamX {
     pub fn start(&mut self) {
         let start_pos = self.shared_lp.lock().unwrap().start;
         self.reset_pos(start_pos);
-        update_slp(&mut self.shared_lp).active = true;
+        update_slp(&mut self.lp, &mut self.shared_lp).active = true;
     }
     /// Pauses the FileStream.
     pub fn pause(&mut self) {
-        update_slp(&mut self.shared_lp).active = false;
+        update_slp(&mut self.lp, &mut self.shared_lp).active = false;
     }
     /// Resumes the FileStream.
     ///
@@ -78,7 +83,7 @@ impl FileStreamX {
     /// reset the stream's position - whereas this just sets the stream as active and
     /// calls it good.
     pub fn unpause(&mut self) {
-        update_slp(&mut self.shared_lp).active = true;
+        update_slp(&mut self.lp, &mut self.shared_lp).active = true;
     }
     /// Get this FileStream's current LiveParameters.
     pub fn lp(&self) -> LiveParameters {
