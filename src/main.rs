@@ -1,16 +1,18 @@
 extern crate rsndfile;
 extern crate portaudio;
 extern crate chrono;
+extern crate uuid;
 use rsndfile::SndFile;
 use std::thread;
 use std::time::Duration;
 mod streamv2;
 mod mixer;
-use mixer::*;
+use mixer::{Source, Sink};
 use portaudio as pa;
 fn main() {
     let mut pa = pa::PortAudio::new().unwrap();
     let mut mixer = mixer::RudimentaryMixer::new(&mut pa, 500).unwrap();
+    let mut mstr = mixer::Magister::new();
     let file = SndFile::open("test.aiff").unwrap();
     let file2 = SndFile::open("meows.aiff").unwrap();
     println!("Loading file...");
@@ -18,24 +20,42 @@ fn main() {
     let mut xctl = streams[0].get_x();
     let mut rxctl = streams[1].get_x();
     let streams2 = streamv2::FileStream::new(file2);
+
     let mut chan_l = mixer::QChannel::new(44_100);
+    let chan_l_x = chan_l.get_x();
+    let c1_u = chan_l_x.uuid();
+    mstr.add_sink(Box::new(chan_l_x));
+
     let mut chan_r = mixer::QChannel::new(44_100);
+    let chan_r_x = chan_r.get_x();
+    let c2_u = chan_r_x.uuid();
+    mstr.add_sink(Box::new(chan_r_x));
+
+    println!("L channel UUID: {}", c1_u);
+    println!("R channel UUID: {}", c2_u);
     for (i, ch) in streams.into_iter().enumerate() {
+        let uuid = ch.uuid();
+        println!("Stream 1: source UUID: {}", uuid);
+        mstr.add_source(Box::new(ch));
         if i == 0 {
-            chan_l.add_client(Box::new(ch));
+            println!("Wiring to L channel: {:?}", mstr.wire(uuid, c1_u));
         }
         else {
-            chan_r.add_client(Box::new(ch));
+            println!("Wiring to R channel: {:?}", mstr.wire(uuid, c2_u));
         }
     }
     for (i, ch) in streams2.into_iter().enumerate() {
+        let uuid = ch.uuid();
+        println!("Stream 2: source UUID: {}", uuid);
+        mstr.add_source(Box::new(ch));
         if i == 0 {
-            chan_l.add_client(Box::new(ch));
+            println!("Wiring to L channel: {:?}", mstr.wire(uuid, c1_u));
         }
         else {
-            chan_r.add_client(Box::new(ch));
+            println!("Wiring to R channel: {:?}", mstr.wire(uuid, c2_u));
         }
     }
+
 
     println!("Here goes nothing...");
     chan_l.frames_hint(500);
