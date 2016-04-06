@@ -2,8 +2,12 @@
 use portaudio as pa;
 use uuid::Uuid;
 use std::ops::DerefMut;
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::collections::BTreeMap;
+
+const FRAMES_PER_CALLBACK: u32 = 500;
 /// Fills a given buffer with silence.
 pub fn fill_with_silence(buf: &mut [f32]) {
     for smpl in buf.iter_mut() {
@@ -64,14 +68,14 @@ pub enum WireResult {
 /// Contains various `BTreeMap`s of everything related to mixing.
 ///
 /// *magister, magistri (2nd declension masculine): master, teacher*
-pub struct Magister {
+pub struct Magister<'a> {
     /// Map of sink UUIDs to sinks.
-    sinks: BTreeMap<Uuid, Box<Sink>>,
+    sinks: BTreeMap<Uuid, Box<Sink + 'a>>,
     /// Map of source UUIDs to sources.
     sources: BTreeMap<Uuid, Box<Source>>
 }
 
-impl Magister {
+impl<'a> Magister<'a> {
     pub fn new() -> Self {
         let ms = Magister {
             sinks: BTreeMap::new(),
@@ -84,7 +88,7 @@ impl Magister {
             panic!("UUID collision")
         }
     }
-    pub fn add_sink(&mut self, sink: Box<Sink>) {
+    pub fn add_sink(&mut self, sink: Box<Sink + 'a>) {
         if let Some(_) = self.sinks.insert(sink.uuid(), sink) {
             panic!("UUID collision")
         }
@@ -118,6 +122,128 @@ impl Magister {
         else {
             Ok(WireResult::Uneventful)
         }
+    }
+}
+
+pub struct DeviceSink<'a> {
+    pub stream: Rc<RefCell<pa::stream::Stream<'a, pa::stream::NonBlocking, pa::stream::Output<f32>>>>,
+    chans: Arc<Mutex<Vec<Option<Box<Source>>>>>,
+    id: usize,
+    shared_uuid: Uuid,
+    uuid: Uuid
+}
+impl<'a> Sink for DeviceSink<'a> {
+    fn wire(&mut self, cli: Box<Source>) -> Option<Box<Source>> {
+        let mut ret = None;
+        {
+            let ref mut this = self.chans.lock().unwrap()[self.id];
+            if this.is_some() {
+                ret = Some(this.take().unwrap());
+            }
+            *this = Some(cli);
+        }
+        self.start_stop_ck();
+        ret
+    }
+    fn unwire(&mut self, uuid: Uuid) -> Option<Box<Source>> {
+        let ret: Option<Box<Source>>;
+        {
+            let ref mut this = self.chans.lock().unwrap()[self.id];
+            if this.is_some() && this.as_ref().unwrap().uuid() == uuid {
+                ret = Some(this.take().unwrap());
+            }
+            else {
+                ret = None;
+            }
+        }
+        if ret.is_some() {
+            self.start_stop_ck();
+        }
+        ret
+    }
+    fn uuid(&self) -> Uuid {
+        self.uuid.clone()
+    }
+}
+impl<'a> DeviceSink<'a> {
+    fn start_stop_ck(&mut self) {
+        /*
+        println!("SS cking");
+        let chans = self.chans.lock().unwrap();
+        let mut stream = self.stream.borrow_mut();
+        let mut start = false;
+        for chan in chans.iter() {
+            if chan.is_some() {
+                start = true;
+                break;
+            }
+        }
+        if start && stream.is_stopped().unwrap() {
+            println!("Starting");
+            stream.start().unwrap();
+        }
+        else if stream.is_active().unwrap() {
+            println!("Stopping");
+            stream.stop().unwrap();
+        }
+        */
+    }
+    pub fn from_device_chans(pa: &'a mut pa::PortAudio, dev: pa::DeviceIndex) -> Result<Vec<Self>, pa::error::Error> {
+        println!("PortAudio:");
+        println!("version: {}", pa.version());
+        println!("version text: {:?}", pa.version_text());
+        println!("host count: {}", try!(pa.host_api_count()));
+
+        let dev_info = try!(pa.device_info(dev));
+        println!("Output device info: {:#?}", &dev_info);
+        let params: pa::StreamParameters<f32> = pa::StreamParameters::new(dev, dev_info.max_output_channels, true, dev_info.default_low_output_latency);
+        try!(pa.is_output_format_supported(params, 44_100.0_f64));
+        let settings = pa::stream::OutputSettings::new(params, 44_100.0_f64, FRAMES_PER_CALLBACK);
+
+        let mut chans: Arc<Mutex<Vec<Option<Box<Source>>>>> = Arc::new(Mutex::new(Vec::new()));
+        let mut chans_cb = chans.clone();
+        let mut bufs: Vec<Vec<f32>> = Vec::new();
+        let mut chans_lk = chans.lock().unwrap();
+        for _ in 0..dev_info.max_output_channels {
+            chans_lk.push(None);
+            let mut buf: Vec<f32> = Vec::new();
+            for _ in 0..FRAMES_PER_CALLBACK {
+                buf.push(0.0);
+            }
+            bufs.push(buf);
+        }
+        let callback = move |pa::stream::OutputCallbackArgs { buffer, frames, .. }| {
+            assert!(frames <= FRAMES_PER_CALLBACK as usize, "PA demanded more frames/cb than we asked for");
+            for (i, ch) in chans_cb.lock().unwrap().iter_mut().enumerate() {
+                if ch.is_some() {
+                    ch.as_mut().unwrap().callback(&mut bufs[i], frames);
+                }
+            }
+            let num_chans = bufs.len();
+            for frame in 0..frames {
+                for (chan, cbuf) in bufs.iter_mut().enumerate() {
+                    buffer[(frame * num_chans) + chan] = cbuf[frame];
+                    cbuf[frame] = 0.0;
+                }
+            }
+            pa::Continue
+        };
+        let stream = Rc::new(RefCell::new(try!(pa.open_non_blocking_stream(settings, callback))));
+        {
+            stream.borrow_mut().start().unwrap();
+        }
+        let uuid = Uuid::new_v4();
+        let mut rets: Vec<Self> = Vec::new();
+        for id in 0..chans_lk.len() {
+            rets.push(DeviceSink {
+                stream: stream.clone(),
+                chans: chans.clone(),
+                id: id,
+                shared_uuid: uuid.clone(),
+                uuid: Uuid::new_v4()
+            })
+        }
+        Ok(rets)
     }
 }
 
@@ -198,7 +324,7 @@ pub struct QChannelX {
     uuid_pair: Uuid
 }
 impl QChannelX {
-    fn uuid_pair(&self) -> Uuid {
+    pub fn uuid_pair(&self) -> Uuid {
         self.uuid_pair.clone()
     }
 }

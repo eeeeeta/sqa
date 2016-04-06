@@ -159,7 +159,7 @@ impl FileStream {
         let mut file = self.file.lock().unwrap();
         let mut refill_buf = self.refill_buf.lock().unwrap();
         let mut read = self.fill_len.write().unwrap();
-        let mut to_read: usize = 1000;
+        let mut to_read: usize = 700;
         if (to_read + *read) > (file.info.frames as usize) {
             to_read = file.info.frames as usize - *read;
         }
