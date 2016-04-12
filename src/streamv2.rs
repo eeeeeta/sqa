@@ -1,10 +1,16 @@
 //! Extraction of audio from files, and control of the resulting stream.
 
-use rsndfile::SndFile;
+use rsndfile::{SndFile, SndFileInfo};
 use std::sync::{Arc, RwLock, Mutex};
 use std::io::{Seek, SeekFrom};
 use mixer;
 use uuid::Uuid;
+use std::thread;
+use std::sync::mpsc;
+use crossbeam::sync::MsQueue;
+use std::ops::Rem;
+use mixer::FRAMES_PER_CALLBACK;
+
 /// Converts a linear amplitude to decibels.
 pub fn lin_db(lin: f32) -> f32 {
     lin.log10() * 20.0
@@ -25,13 +31,7 @@ pub struct LiveParameters {
     /// The start position of this stream, in frames past the start of the file.
     start: u64,
     /// The end position of this stream.
-    end: u64,
-    /// The version of this LiveParameters.
-    ///
-    /// This field is used when a LiveParameters is shared amongst FileStreams with
-    /// their own LiveParameters, so they can compare the shared LP's version with
-    /// their LP's version and update it accordingly.
-    ver: usize
+    end: u64
 }
 impl LiveParameters {
     /// Make a new set of LiveParameters about a file with a given start and end position.
@@ -41,56 +41,37 @@ impl LiveParameters {
             pos: 0,
             active: true,
             start: start,
-            end: end,
-            ver: 0
+            end: end
         }
     }
 }
-/// Helper function for updating a shared LiveParameters.
-///
-/// Takes a stream's current LiveParameters and the shared LiveParameters,
-/// copies most attributes from the current to the shared, and increments
-/// the shared's `ver` before returning it to be further modified.
-fn update_slp<'a>(olp: &'a mut Arc<Mutex<LiveParameters>>, slp: &'a mut Arc<Mutex<LiveParameters>>) -> ::std::sync::MutexGuard<'a, LiveParameters> {
-    let mut lp = slp.lock().unwrap();
-    let olp = olp.lock().unwrap();
-    lp.pos = olp.pos;
-    lp.start = olp.start;
-    lp.end = olp.end;
-    lp.active = olp.active;
-    lp.ver = lp.ver + 1;
-    lp
+
+enum SpoolerCtl {
+    Seek(u64)
 }
 /// Controller struct for a `FileStream`.
 ///
 /// See the FileStream documentation for info about what these
 /// fields are.
 pub struct FileStreamX {
-    file: Arc<Mutex<SndFile>>,
-    fill_len: Arc<RwLock<usize>>,
     lp: Arc<Mutex<LiveParameters>>,
-    shared_lp: Arc<Mutex<LiveParameters>>,
+    run: Arc<RwLock<bool>>,
+    tx: mpsc::Sender<SpoolerCtl>,
     uuid: Uuid
 }
 impl FileStreamX {
     /// Resets the FileStream to a given position.
     pub fn reset_pos(&mut self, pos: u64) {
-        let mut lp = update_slp(&mut self.lp, &mut self.shared_lp);
-        let mut file = self.file.lock().unwrap();
-        let mut fill_len = self.fill_len.write().unwrap();
-        lp.pos = pos as usize;
-        *fill_len = pos as usize;
-        assert!(file.seek(SeekFrom::Start(pos)).unwrap() == pos);
+        self.tx.send(SpoolerCtl::Seek(pos));
     }
     /// Starts playing the FileStream from the beginning.
     pub fn start(&mut self) {
-        let start_pos = self.shared_lp.lock().unwrap().start;
-        self.reset_pos(start_pos);
-        update_slp(&mut self.lp, &mut self.shared_lp).active = true;
+        self.reset_pos(0);
+        *self.run.write().unwrap() = true;
     }
     /// Pauses the FileStream.
     pub fn pause(&mut self) {
-        update_slp(&mut self.lp, &mut self.shared_lp).active = false;
+        *self.run.write().unwrap() = false;
     }
     /// Resumes the FileStream.
     ///
@@ -98,7 +79,7 @@ impl FileStreamX {
     /// reset the stream's position - whereas this just sets the stream as active and
     /// calls it good.
     pub fn unpause(&mut self) {
-        update_slp(&mut self.lp, &mut self.shared_lp).active = true;
+        *self.run.write().unwrap() = true;
     }
     /// Get this FileStream's current LiveParameters.
     pub fn lp(&self) -> LiveParameters {
@@ -110,114 +91,143 @@ impl FileStreamX {
         lp.vol = vol;
     }
 }
+struct FileStreamSpooler {
+    file: SndFile,
+    pos: usize,
+    rx: mpsc::Receiver<SpoolerCtl>,
+    splitting_buf: Vec<f32>,
+    chan_bufs: Vec<Vec<f32>>,
+    chans: Vec<Arc<MsQueue<(usize, Vec<f32>)>>>
+}
+impl FileStreamSpooler {
+    fn new(file: SndFile, rx: mpsc::Receiver<SpoolerCtl>) -> (Self, Vec<Arc<MsQueue<(usize, Vec<f32>)>>>) {
+        let mut chans = Vec::with_capacity(file.info.channels as usize);
+        let mut cbs = Vec::with_capacity(file.info.channels as usize);
+        let mut sb = Vec::with_capacity(file.info.channels as usize);
+        for _ in 0..(file.info.channels as usize) {
+            chans.push(Arc::new(MsQueue::new()));
+            sb.push(0.0);
+            cbs.push((0..FRAMES_PER_CALLBACK).into_iter().map(|_| 0.0).collect());
+        }
+        let cc = chans.clone();
+        (FileStreamSpooler {
+            file: file,
+            rx: rx,
+            pos: 0,
+            chans: chans,
+            splitting_buf: sb,
+            chan_bufs: cbs
+        }, cc)
+    }
+    fn reset_self(&mut self) {
+        let mut run = true;
+        while run {
+            for i in 0..(self.file.info.channels as usize) {
+                run = self.chans[i].try_pop().is_some();
+            }
+        }
+    }
+    fn handle(&mut self, msg: SpoolerCtl) {
+        match msg {
+            SpoolerCtl::Seek(to) => {
+                assert!(self.file.seek(SeekFrom::Start(to)).unwrap() == to);
+                self.reset_self();
+                self.pos = to as usize;
+            }
+        }
+    }
+    fn spool(&mut self) {
+        loop {
+            if let Ok(msg) = self.rx.try_recv() {
+                self.handle(msg);
+            }
+            let mut to_read: usize = 1000;
+            if (to_read + self.pos) > self.file.info.frames as usize {
+                to_read = self.file.info.frames as usize - self.pos;
+            }
+            if to_read == 0 {
+                let msg = self.rx.recv().unwrap();
+                self.handle(msg);
+                continue;
+            }
+            let mut start = false;
+            for n in 0..to_read {
+                assert!(self.file.read_into_fslice(&mut self.splitting_buf) == 1);
+                let send = n.rem(FRAMES_PER_CALLBACK) == 0 && start;
+                start = true;
+                for i in 0..(self.file.info.channels as usize) {
+                    /*
+                     * Fun fact: this if statement used to be AFTER the line after it,
+                     * meaning that you would hear annoying clicks and pops when audio
+                     * was played back.
+                     *
+                     * This was a nightmare to debug.
+                     */
+                    if send {
+                        self.chans[i].push((self.pos + n, self.chan_bufs[i].clone()));
+                    }
+                    self.chan_bufs[i][n.rem(FRAMES_PER_CALLBACK)] = self.splitting_buf[i];
+                }
+            }
+            for i in 0..(self.file.info.channels as usize) {
+                self.chans[i].push((self.pos + to_read, self.chan_bufs[i].clone()));
+            }
+            self.pos += to_read;
+        }
+    }
+}
+
+
 /// One-channel stream created from a multi-channel file that reads from the file as it plays.
 ///
 /// Multiple interlinked FileStreams will usually be created from the same file.
 pub struct FileStream {
-    /// This FileStream's underlying file, shared between it and other channel FileStreams.
-    file: Arc<Mutex<SndFile>>,
-    /// A shared buffer, the size of the number of channels in the file, for refilling the main buffer of data (`buf`).
-    refill_buf: Arc<Mutex<Vec<f32>>>,
-    /// A shared buffer, containing a vector of audio data vectors for each channel.
-    buf: Arc<RwLock<Vec<Vec<f32>>>>,
-    /// Lock held by a refilling thread.
-    refilling: Arc<Mutex<()>>,
-    /// How much of the `buf` is filled with actual data.
-    fill_len: Arc<RwLock<usize>>,
+    buf: Arc<MsQueue<(usize, Vec<f32>)>>,
+    info: SndFileInfo,
     /// The sample rate of the underlying file.
     sample_rate: u64,
-    /// Which channel of the file this FileStream is responsible for.
-    id: usize,
     /// This FileStream's LiveParameters.
     lp: Arc<Mutex<LiveParameters>>,
-    /// A set of LiveParameters shared amongst all FileStreams that share this FileStream's `file`.
-    ///
-    /// This exists so that commands like `FileStreamX::reset_pos()` don't cause the channels of a FileStream
-    /// to be in an inconsistent position - which would cause them to "fight" over seeking the file to their
-    /// playback position, generally causing havoc and not resulting in anything useful.
-    shared_lp: Arc<Mutex<LiveParameters>>,
+    run: Arc<RwLock<bool>>,
+    spooler_tx: mpsc::Sender<SpoolerCtl>,
     uuid: Uuid
 }
 impl FileStream {
-    /// Refills the shared `buf` of this FileStream.
-    ///
-    /// Usually reads 1000 frames and fills up the `buf`, adjusting the `fill_len`
-    /// as it does so. If `up_to` is a valid position in the file, but is greater than
-    /// (our current position + 1000 frames), we seek the file to it. (This is why the
-    /// `shared_lp` exists.)
-    ///
-    /// Has protections to prevent against reading past the end of a file.
-    fn refill(&mut self, up_to: usize) {
-        let write_lck = self.refilling.try_lock();
-        let mut vecs: ::std::sync::RwLockWriteGuard<Vec<Vec<f32>>>;
-        if let Ok(_) = write_lck {
-            vecs = self.buf.write().unwrap();
-        }
-        else {
-            return;
-        }
-        let mut file = self.file.lock().unwrap();
-        let mut refill_buf = self.refill_buf.lock().unwrap();
-        let mut read = self.fill_len.write().unwrap();
-        let mut to_read: usize = 700;
-        if (to_read + *read) > (file.info.frames as usize) {
-            to_read = file.info.frames as usize - *read;
-        }
-        if (to_read + *read) < up_to && up_to < (file.info.frames as usize) {
-            *read = up_to - to_read;
-            assert!(file.seek(SeekFrom::Start(up_to as u64)).unwrap() == up_to as u64);
-        }
-
-        if to_read == 0 {
-            return;
-        }
-        assert!(refill_buf.len() == file.info.channels as usize);
-        for n in 0..to_read {
-            assert!(file.read_into_fslice(&mut refill_buf) == 1);
-            for i in 0..(file.info.channels as usize) {
-                vecs[i][*read + n] = refill_buf[i];
-            }
-        }
-        *read = *read + to_read;
-    }
     /// Makes a new set of FileStreams, one for each channel, from a given file.
     pub fn new(file: SndFile) -> Vec<Self> {
         let n_chans = file.info.channels as usize;
         let n_frames = file.info.frames as u64;
         let sample_rate = file.info.samplerate as u64;
         let lp = LiveParameters::new(0, n_frames);
-        let shared_lp = LiveParameters::new(0, n_frames);
-        let mut fs = FileStream {
-            file: Arc::new(Mutex::new(file)),
-            refill_buf: Arc::new(Mutex::new(Vec::with_capacity(n_chans))),
-            buf: Arc::new(RwLock::new(Vec::with_capacity(n_chans))),
-            refilling: Arc::new(Mutex::new(())),
-            fill_len: Arc::new(RwLock::new(0)),
+        let sfi = file.info.clone();
+        let (stx, srx) = mpsc::channel();
+        let (mut spooler, qvec) = FileStreamSpooler::new(file, srx);
+        let mut qvec = qvec.into_iter();
+        thread::spawn(move || {
+            spooler.spool();
+            println!("Spooler quit");
+        });
+
+        let fs = FileStream {
+            buf: qvec.next().unwrap(),
             sample_rate: sample_rate,
-            id: 0,
             lp: Arc::new(Mutex::new(lp)),
-            shared_lp: Arc::new(Mutex::new(shared_lp)),
-            uuid: Uuid::new_v4()
+            run: Arc::new(RwLock::new(true)),
+            uuid: Uuid::new_v4(),
+            spooler_tx: stx,
+            info: sfi
         };
-        for _ in 0..n_chans {
-            fs.refill_buf.lock().unwrap().push(0.0);
-            fs.buf.write().unwrap().push((0..n_frames).map(|_| 0.0).collect());
-        }
-        fs.refill(0);
         let mut fs_vec = vec![fs];
-        for id in 1..n_chans {
+        for _ in 1..n_chans {
             let lp = LiveParameters::new(0, n_frames);
             let fs = FileStream {
-                file: fs_vec[0].file.clone(),
-                refill_buf: fs_vec[0].refill_buf.clone(),
-                buf: fs_vec[0].buf.clone(),
-                refilling: fs_vec[0].refilling.clone(),
-                fill_len: fs_vec[0].fill_len.clone(),
+                buf: qvec.next().unwrap(),
                 sample_rate: fs_vec[0].sample_rate,
                 lp: Arc::new(Mutex::new(lp)),
-                shared_lp: fs_vec[0].shared_lp.clone(),
-                id: id,
-                uuid: Uuid::new_v4()
+                run: fs_vec[0].run.clone(),
+                uuid: Uuid::new_v4(),
+                info: fs_vec[0].info.clone(),
+                spooler_tx: fs_vec[0].spooler_tx.clone()
             };
             fs_vec.push(fs);
         }
@@ -226,10 +236,9 @@ impl FileStream {
     /// Gets an associated `FileStreamX` for this stream.
     pub fn get_x(&self) -> FileStreamX {
         FileStreamX {
-            file: self.file.clone(),
-            fill_len: self.fill_len.clone(),
             lp: self.lp.clone(),
-            shared_lp: self.shared_lp.clone(),
+            run: self.run.clone(),
+            tx: self.spooler_tx.clone(),
             uuid: self.uuid.clone()
         }
     }
@@ -237,48 +246,28 @@ impl FileStream {
 
 impl mixer::Source for FileStream {
     fn callback(&mut self, buffer: &mut [f32], frames: usize) {
-        if self.shared_lp.lock().unwrap().ver > self.lp.lock().unwrap().ver {
-            println!("Updating!");
-            let slp = self.shared_lp.lock().unwrap();
-            let mut lp = self.lp.lock().unwrap();
-            lp.active = slp.active;
-            lp.pos = slp.pos;
-            lp.start = slp.start;
-            lp.end = slp.end;
-            lp.ver = slp.ver;
-        }
-        if self.lp.lock().unwrap().active == false {
-            mixer::fill_with_silence(buffer);
-            return;
-        }
-        let refill = {
-            if *self.fill_len.read().unwrap() < (self.lp.lock().unwrap().pos + frames) {
-                true
-            }
-            else {
-                false
-            }
-        };
-        if refill {
-            let pos = self.lp.lock().unwrap().pos + frames;
-            self.refill(pos);
-        }
         let mut lp = self.lp.lock().unwrap();
-        let read_lck = self.buf.read().unwrap();
-        if *self.fill_len.read().unwrap() < (lp.pos + frames) {
-            lp.active = false;
+        if let Ok(r) = self.run.try_read() {
+            lp.active = *r;
+        }
+        if lp.active == false {
             mixer::fill_with_silence(buffer);
             return;
         }
-        let buf = &read_lck[self.id];
-        let mut data = buf.split_at(lp.pos).1;
-        if data.len() > lp.pos + frames {
-            data = data.split_at(lp.pos + frames).0;
+        if let Some((pos, buf)) = self.buf.try_pop() {
+            assert!(buf.len() == frames);
+            for (out, inp) in buffer.iter_mut().zip(buf.into_iter()) {
+                *out = inp * lp.vol;
+            }
+            lp.pos = pos;
+            if pos >= lp.end as usize {
+                println!("Ended");
+                lp.active = false;
+            }
         }
-        for (input, output) in data.iter().zip(buffer.iter_mut()) {
-            *output = input * lp.vol;
+        else {
+            mixer::fill_with_silence(buffer);
         }
-        lp.pos += frames;
     }
     fn sample_rate(&self) -> u64 {
         self.sample_rate

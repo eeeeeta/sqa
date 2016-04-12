@@ -2,14 +2,14 @@ extern crate rsndfile;
 extern crate portaudio;
 extern crate chrono;
 extern crate uuid;
+extern crate crossbeam;
 use rsndfile::SndFile;
 use std::thread;
-use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use std::time::Duration;
 mod streamv2;
 mod mixer;
-use mixer::{Source,Sink};
+use mixer::{Source,Sink, FRAMES_PER_CALLBACK};
 use portaudio as pa;
 
 fn main() {
@@ -46,30 +46,29 @@ fn main() {
     let c2_u = chan_r_x.uuid();
     let c2_up = chan_r_x.uuid_pair();
     mstr.add_sink(Box::new(chan_r_x));
-
     println!("L channel UUID: {}", c1_u);
     println!("R channel UUID: {}", c2_u);
     for (i, ch) in streams.into_iter().enumerate() {
         let uuid = ch.uuid();
         println!("Stream 1-{}: source UUID: {}", i, uuid);
         mstr.add_source(Box::new(ch));
-            println!("Wiring to L channel: {:?}", mstr.wire(uuid, c1_u));
+        println!("Wiring to Q1: {:?}", mstr.wire(uuid, c1_u));
     }
     for (i, ch) in streams2.into_iter().enumerate() {
         let uuid = ch.uuid();
         println!("Stream 2-{}: source UUID: {}", i, uuid);
         mstr.add_source(Box::new(ch));
-            println!("Wiring to R channel: {:?}", mstr.wire(uuid, c2_u));
+        println!("Wiring to Q2: {:?}", mstr.wire(uuid, c2_u));
     }
-    chan_l.frames_hint(500);
-    chan_r.frames_hint(500);
+    chan_l.frames_hint(FRAMES_PER_CALLBACK);
+    chan_r.frames_hint(FRAMES_PER_CALLBACK);
     mstr.add_source(Box::new(chan_l));
     mstr.add_source(Box::new(chan_r));
     for (i, out) in out_uuids.iter().enumerate() {
         println!("Output chan {} UUID: {}", i, out);
         match i {
-            0 => println!("Wiring L channel: {:?}", mstr.wire(c1_up, *out)),
-            1 => println!("Wiring R channel: {:?}", mstr.wire(c2_up, *out)),
+            0 => println!("Wiring Q1 to output: {:?}", mstr.wire(c1_up, *out)),
+            1 => println!("Wiring Q2 to output: {:?}", mstr.wire(c2_up, *out)),
             _ => println!("unknown :(")
         }
     }
@@ -93,5 +92,5 @@ fn main() {
     println!("Testing wiring...");
     println!("Rewiring Q1 -> R: {:?}", mstr.wire(c1_up, out_uuids[1]));
     println!("Rewiring Q2 -> L: {:?}", mstr.wire(c2_up, out_uuids[0]));
-    loop {};
+    thread::sleep(Duration::from_millis(100000));
 }

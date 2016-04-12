@@ -11,3 +11,4 @@ portaudio = "0.6.3"
 rsndfile = { path = "../rsndfile/" }
 chrono = "0.2.20"
 uuid = { git = "https://github.com/rust-lang-nursery/uuid", rev = "34ff260", features = ["use_std", "v4"] }
+crossbeam = "0.2.5"
