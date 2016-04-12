@@ -15,8 +15,9 @@ I just wanted to have a title that didn't contain expletives.
 
 Uh...
 
-All it does currently is plays back two audio streams fading in over each other. While it may not look like much, that's
-actually a significant amount of work in multithreading crap and sound control. It's coming along, and there'll be a
+All it does currently is plays back two audio streams ~~fading in over each other~~ in different channels,
+with one of them pausing and jumping and doing random stuff. While it may not look like much, that's
+actually a significant amount of work in multithreading and sound control. It's coming along, and there'll be a
 hopefully decent CLI for it soon.
 
 This uses my [rsndfile](https://github.com/eeeeeta/rsndfile) bindings to provide audio loading & data extraction.
