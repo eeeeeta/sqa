@@ -93,7 +93,7 @@ impl<'a> Magister<'a> {
             panic!("UUID collision")
         }
     }
-    pub fn wire(&mut self, from: Uuid, to: Uuid) -> Result<WireResult, WireResult> {
+    pub fn locate_source(&mut self, from: Uuid) -> Option<Box<Source>> {
         let mut source: Option<Box<Source>> = self.sources.remove(&from);
         if source.is_none() {
             for (_, val) in self.sinks.iter_mut() {
@@ -103,6 +103,10 @@ impl<'a> Magister<'a> {
                 }
             }
         }
+        source
+    }
+    pub fn wire(&mut self, from: Uuid, to: Uuid) -> Result<WireResult, WireResult> {
+        let source = self.locate_source(from);
         if source.is_none() {
             return Err(WireResult::SourceNotAvailable)
         }
@@ -123,6 +127,7 @@ impl<'a> Magister<'a> {
             Ok(WireResult::Uneventful)
         }
     }
+
 }
 
 pub struct DeviceSink<'a> {
@@ -167,7 +172,7 @@ impl<'a> Sink for DeviceSink<'a> {
 }
 impl<'a> DeviceSink<'a> {
     fn start_stop_ck(&mut self) {
-        /*
+        /* FIXME FIXME FIXME
         println!("SS cking");
         let chans = self.chans.lock().unwrap();
         let mut stream = self.stream.borrow_mut();
@@ -189,13 +194,7 @@ impl<'a> DeviceSink<'a> {
         */
     }
     pub fn from_device_chans(pa: &'a mut pa::PortAudio, dev: pa::DeviceIndex) -> Result<Vec<Self>, pa::error::Error> {
-        println!("PortAudio:");
-        println!("version: {}", pa.version());
-        println!("version text: {:?}", pa.version_text());
-        println!("host count: {}", try!(pa.host_api_count()));
-
         let dev_info = try!(pa.device_info(dev));
-        println!("Output device info: {:#?}", &dev_info);
         let params: pa::StreamParameters<f32> = pa::StreamParameters::new(dev, dev_info.max_output_channels, true, dev_info.default_low_output_latency);
         try!(pa.is_output_format_supported(params, 44_100.0_f64));
         let settings = pa::stream::OutputSettings::new(params, 44_100.0_f64, FRAMES_PER_CALLBACK as u32);

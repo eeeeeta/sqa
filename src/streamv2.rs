@@ -25,13 +25,13 @@ pub struct LiveParameters {
     /// Current volume (linear amplitude)
     pub vol: f32,
     /// Amount of frames written so far.
-    pos: usize,
+    pub pos: usize,
     /// Whether this stream is active (playing)
-    active: bool,
+    pub active: bool,
     /// The start position of this stream, in frames past the start of the file.
-    start: u64,
+    pub start: u64,
     /// The end position of this stream.
-    end: u64
+    pub end: u64
 }
 impl LiveParameters {
     /// Make a new set of LiveParameters about a file with a given start and end position.
@@ -39,7 +39,7 @@ impl LiveParameters {
         LiveParameters {
             vol: 1.0,
             pos: 0,
-            active: true,
+            active: false,
             start: start,
             end: end
         }
@@ -64,9 +64,13 @@ impl FileStreamX {
     pub fn reset_pos(&mut self, pos: u64) {
         self.tx.send(SpoolerCtl::Seek(pos));
     }
+    /// Resets the FileStream to its start position.
+    pub fn reset(&mut self) {
+        self.reset_pos(0);
+    }
     /// Starts playing the FileStream from the beginning.
     pub fn start(&mut self) {
-        self.reset_pos(0);
+        self.reset();
         *self.run.write().unwrap() = true;
     }
     /// Pauses the FileStream.
@@ -89,6 +93,9 @@ impl FileStreamX {
     pub fn set_vol(&mut self, vol: f32) {
         let mut lp = self.lp.lock().unwrap();
         lp.vol = vol;
+    }
+    pub fn uuid(&self) -> Uuid {
+        self.uuid
     }
 }
 struct FileStreamSpooler {
