@@ -1,6 +1,6 @@
 extern crate rsndfile;
 extern crate portaudio;
-extern crate chrono;
+extern crate time;
 extern crate uuid;
 extern crate crossbeam;
 
@@ -10,19 +10,17 @@ mod cues;
 
 use std::thread;
 use uuid::Uuid;
-use std::time::Duration;
+use time::Duration;
 use std::rc::Rc;
 use std::cell::RefCell;
 use mixer::{Source, Sink, FRAMES_PER_CALLBACK};
-use cues::{Q, AudioQ, QParam, WireableInfo};
+use cues::{Q, AudioQ, FadeQ, QParam, WireableInfo, QList};
 use portaudio as pa;
-
 fn inspect_q_params(q: &Q) {
-    for (uuid, qp) in q.get_params() {
-        println!("[*] UUID {}: {:?}", uuid, qp);
+    for (strn, uuid, qp) in q.get_params() {
+        println!("[*] \"{}\" (UUID {}): {:?}", strn, uuid, qp);
     }
 }
-
 fn main() {
     let mut pa = pa::PortAudio::new().unwrap();
     let mut mstr = mixer::Magister::new();
@@ -72,17 +70,20 @@ fn main() {
     let wrapped_mstr = Rc::new(RefCell::new(mstr));
     println!("[+] Creating some cool Audio Cues...");
     let mut aq1 = AudioQ::new(wrapped_mstr.clone());
+    let uu1 = aq1.uuid();
     println!("[+] AQ1 parameter listing:");
     inspect_q_params(&aq1);
     let mut aq2 = AudioQ::new(wrapped_mstr.clone());
+    let uu2 = aq2.uuid();
     println!("[+] AQ2 parameter listing:");
     inspect_q_params(&aq1);
-
+    println!("[+] Setting up QList...");
+    let mut ql = QList::new();
     println!("[+] Setting file paths...");
-    let fpu1 = aq1.get_params()[0].0;
-    let fpu2 = aq2.get_params()[0].0;
-    println!("[*] Setting AQ1's path as './test.aiff': {:?}", aq1.set_param(fpu1, QParam::FilePath(format!("./test.aiff"))));
-    println!("[*] Setting AQ2's path as './meows.aiff': {:?}", aq2.set_param(fpu2, QParam::FilePath(format!("./meows.aiff"))));
+    let fpu1 = aq1.get_params()[0].1;
+    let fpu2 = aq2.get_params()[0].1;
+    println!("[*] Setting AQ1's path as './test.aiff': {:?}", aq1.set_param(fpu1, QParam::FilePath(Some(format!("./test.aiff")))));
+    println!("[*] Setting AQ2's path as './meows.aiff': {:?}", aq2.set_param(fpu2, QParam::FilePath(Some(format!("./meows.aiff")))));
     println!("[+] AQ1 parameter listing:");
     inspect_q_params(&aq1);
     println!("[+] AQ2 parameter listing:");
@@ -99,36 +100,36 @@ fn main() {
         println!("[*] Wireable: source {}, cid {}, uuid {}", is_source, cid, uuid);
         println!("[*] Wiring to Q2... {:?}", wrapped_mstr.borrow_mut().wire(uuid, c2_u));
     }
-    println!("\n[+] Here goes nothing! Hitting GO on AQ1...");
-    aq1.go();
-    thread::sleep(Duration::from_millis(5000));
-    println!("[+] and on AQ2...");
-    aq2.go();
-    thread::sleep(Duration::from_millis(1000));
-    println!("\n[+] Yay (hopefully)! Now for some tests...");
-    thread::sleep(Duration::from_millis(5000));
-    println!("[*] Resetting AQ1...");
-    aq1.reset();
-    thread::sleep(Duration::from_millis(1000));
-    println!("[*] Hitting GO on AQ1...");
-    aq1.go();
-    thread::sleep(Duration::from_millis(7000));
-    println!("[*] Pausing AQ2...");
-    aq2.pause();
-    thread::sleep(Duration::from_millis(3000));
-    println!("[*] Hitting GO on AQ2...");
-    aq2.go();
-    thread::sleep(Duration::from_millis(3000));
-    println!("[*] Screwing with the volume of AQ1...");
-    for (uuid, qp) in aq1.get_params() {
-        if let QParam::Volume(ch, vol) = qp {
-            println!("[*] Setting ch{}'s vol to 0.5 (from {})... {:?}", ch, vol, aq1.set_param(uuid, QParam::Volume(ch, 0.5)));
+    ql.insert(Box::new(aq1));
+    ql.insert(Box::new(aq2));
+
+    println!("\n[+] Creating Fade Cue...");
+    let mut fq1 = FadeQ::new();
+    println!("[*] FQ params:");
+    inspect_q_params(&fq1);
+    let fpu25 = fq1.get_params()[3].1;
+    println!("[+] Setting fade time to 10s... {:?}", fq1.set_param(fpu25, QParam::Duration(Duration::milliseconds(10000))));
+    println!("[*] FQ warnings: {:?}", fq1.warnings(&ql));
+    println!("[+] Targeting chans of AQ1...");
+    let fpu3 = fq1.get_params()[1].1;
+    let fpu4 = fq1.get_params()[0].1;
+    println!("[*] Targeting AQ1... {:?}", fq1.set_param(fpu3, QParam::UuidTarget(Some(uu1))));
+    println!("[*] FQ warnings: {:?}", fq1.warnings(&ql));
+    for ch in ql.cues.get(&uu1).unwrap().get_params() {
+        if let QParam::Volume(chan, _) = ch.2 {
+            println!("[*] Targeting channel {}... {:?}", chan, fq1.set_param(fpu4, QParam::VecInsert(0, Box::new(QParam::UuidTarget(Some(ch.1))))));
         }
     }
-    thread::sleep(Duration::from_millis(3000));
-    println!("[*] Testing wiring...");
-    println!("[*] Rewiring Q1 -> R: {:?}", wrapped_mstr.borrow_mut().wire(c1_up, out_uuids[1]));
-    println!("[*] Rewiring Q2 -> L: {:?}", wrapped_mstr.borrow_mut().wire(c2_up, out_uuids[0]));
-    println!("\n[+] Testing complete. Dying in 100 seconds...");
-    thread::sleep(Duration::from_millis(100000));
+    println!("[*] FQ warnings: {:?}", fq1.warnings(&ql));
+    println!("\n[+] Coolio. Hitting go on all cues...");
+    ql.cues.get_mut(&uu1).unwrap().go();
+    ql.cues.get_mut(&uu2).unwrap().go();
+    fq1.go();
+        thread::sleep(::std::time::Duration::from_millis(3000));
+    println!("[+] Starting FQ loop...");
+    loop {
+        println!("polling...");
+        thread::sleep(::std::time::Duration::from_millis(100));
+        fq1.poll(&mut ql, Duration::milliseconds(100));
+    }
 }
