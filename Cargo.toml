@@ -12,3 +12,4 @@ rsndfile = { path = "../rsndfile/" }
 uuid = { git = "https://github.com/rust-lang-nursery/uuid", rev = "34ff260", features = ["use_std", "v4"] }
 crossbeam = "0.2.5"
 time = "0.1.35"
+nom = "~1.2.2"
