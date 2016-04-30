@@ -24,7 +24,6 @@ impl LoadCommand {
         }
     }
 }
-
 impl Command for LoadCommand {
     fn execute(&mut self, ctx: &mut Context) {
         let file = self.file.take();

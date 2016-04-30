@@ -11,29 +11,24 @@ mod parser;
 mod command;
 mod state;
 
-use std::thread;
-use std::io;
-use streamv2::db_lin;
-use rsndfile::SndFile;
-use std::io::BufRead;
-use std::collections::BTreeMap;
-use uuid::Uuid;
-use time::Duration;
-use std::rc::Rc;
-use std::cell::RefCell;
-use mixer::{Source, Sink, FRAMES_PER_CALLBACK};
-use streamv2::{FileStream, FileStreamX};
+use mixer::{Source, Sink};
 use portaudio as pa;
-
 use command::CmdParserFSM;
 use state::Context;
 use std::error::Error;
 use rustbox::{Key, RustBox, Color, InitOptions, InputMode};
 
 fn w(rb: &mut RustBox, x: usize, y: usize, text: &str) {
-    rb.print(x, y, rustbox::RB_BOLD, Color::White, Color::Black, text);
+    rb.print(x, y, rustbox::RB_NORMAL, Color::White, Color::Default, text);
 }
-
+struct Counter(usize);
+impl Counter {
+    fn incr(&mut self) -> usize {
+        let x = self.0;
+        self.0 += 1;
+        x
+    }
+}
 fn main() {
     let mut rb = match RustBox::init(InitOptions {
             input_mode: InputMode::Current,
@@ -55,14 +50,34 @@ fn main() {
         }
     }
     let mut cmdline = String::new();
-    let mut error = String::new();
+    let mut error = "Ready.".to_owned();
     loop {
         rb.clear();
-        w(&mut rb, 0, 0, &format!("parser: {}", parser.debug_remove_me(&ctx)));
-        w(&mut rb, 0, 1, &format!("last error: {}", error));
-        w(&mut rb, 0, 2, &format!("> {}", cmdline));
+        let mut ln = Counter(0);
+        let half: isize = (rb.width() / 2) as isize - 22;
+        if half > 2 {
+            let half = half as usize;
+            w(&mut rb, half, ln.incr(), &format!(" ____   ___      _    "));
+            w(&mut rb, half, ln.incr(), &format!("/ ___| / _ \\    / \\   "));
+            w(&mut rb, half, ln.incr(), &format!("\\___ \\| | | |  / _ \\  "));
+            w(&mut rb, half, ln.incr(), &format!(" ___) | |_| | / ___ \\ "));
+            w(&mut rb, half, ln.incr(), &format!("|____/ \\__\\_\\/_/   \\_\\"));
+            w(&mut rb, half, ln.incr(), &format!("                      "));
+            w(&mut rb, half-1, ln.incr(), &format!("alpha 1 - an eta project"));
+        }
+        w(&mut rb, 0, ln.incr(), &format!("{}", error));
+        w(&mut rb, 0, ln.incr(), &format!("> {}", cmdline));
+        ln.incr();
+        w(&mut rb, 0, ln.incr(), &format!("Loaded audio files:"));
+        w(&mut rb, 0, ln.incr(), &format!("------------------"));
+        for (k, v) in ctx.idents.iter() {
+            for (i, ch) in v.iter().enumerate() {
+                let lp = ch.lp();
+                w(&mut rb, 0, ln.incr(), &format!("${}:{} - {}dB, {:.1}%", k, i, lp.vol, 100 as f64 * (lp.pos as f64 / lp.end as f64)));
+            }
+        }
         rb.present();
-        match rb.poll_event(false) {
+        match rb.peek_event(::std::time::Duration::from_millis(500), false) {
             Ok(rustbox::Event::KeyEvent(key)) => {
                 match key {
                     Key::Ctrl('c') => { break; }
@@ -99,7 +114,6 @@ fn main() {
                     _ => {}
                 }
             },
-            Err(e) => panic!("{}", e.description()),
             _ => {}
         }
     }

@@ -212,7 +212,6 @@ impl FileStream {
         let mut qvec = qvec.into_iter();
         thread::spawn(move || {
             spooler.spool();
-            println!("Spooler quit");
         });
 
         let fs = FileStream {
@@ -268,7 +267,6 @@ impl mixer::Source for FileStream {
             }
             lp.pos = pos;
             if pos >= lp.end as usize {
-                println!("Ended");
                 lp.active = false;
             }
         }
