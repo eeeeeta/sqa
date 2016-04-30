@@ -16,11 +16,16 @@ use portaudio as pa;
 use command::CmdParserFSM;
 use state::Context;
 use std::error::Error;
+use streamv2::lin_db;
 use rustbox::{Key, RustBox, Color, InitOptions, InputMode};
 
 fn w(rb: &mut RustBox, x: usize, y: usize, text: &str) {
     rb.print(x, y, rustbox::RB_NORMAL, Color::White, Color::Default, text);
 }
+fn w_emp(rb: &mut RustBox, x: usize, y: usize, text: &str) {
+    rb.print(x, y, rustbox::RB_BOLD, Color::Yellow, Color::Default, text);
+}
+
 struct Counter(usize);
 impl Counter {
     fn incr(&mut self) -> usize {
@@ -65,7 +70,8 @@ fn main() {
             w(&mut rb, half, ln.incr(), &format!("                      "));
             w(&mut rb, half-1, ln.incr(), &format!("alpha 1 - an eta project"));
         }
-        w(&mut rb, 0, ln.incr(), &format!("{}", error));
+        w(&mut rb, 0, ln.incr(), &format!("{}", parser.debug_remove_me(&ctx)));
+        w_emp(&mut rb, 0, ln.incr(), &format!("{}", error));
         w(&mut rb, 0, ln.incr(), &format!("> {}", cmdline));
         ln.incr();
         w(&mut rb, 0, ln.incr(), &format!("Loaded audio files:"));
@@ -73,7 +79,7 @@ fn main() {
         for (k, v) in ctx.idents.iter() {
             for (i, ch) in v.iter().enumerate() {
                 let lp = ch.lp();
-                w(&mut rb, 0, ln.incr(), &format!("${}:{} - {}dB, {:.1}%", k, i, lp.vol, 100 as f64 * (lp.pos as f64 / lp.end as f64)));
+                w(&mut rb, 0, ln.incr(), &format!("${}:{} - {}dB, {:.1}%", k, i, lin_db(lp.vol), 100 as f64 * (lp.pos as f64 / lp.end as f64)));
             }
         }
         rb.present();
@@ -89,7 +95,7 @@ fn main() {
                             },
                             Err((p, e)) => {
                                 parser = p;
-                                error = format!("{:?}", e);
+                                error = format!("{}", Into::<String>::into(e));
                             }
                         }
                     },

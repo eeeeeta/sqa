@@ -11,6 +11,8 @@ pub enum Tokens {
     Identifier(String),
     /// An integer.
     Num(u16),
+    /// A negative integer.
+    NegNum(i16),
     /// A floating-point number.
     Float(f32),
     /// `LOAD` command.
@@ -30,7 +32,9 @@ pub enum Tokens {
     /// `STOP` command.
     Stop,
     /// `ALL` qualifier.
-    All
+    All,
+    /// `FADE` qualifier.
+    Fade
 }
 impl fmt::Display for Tokens {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -38,6 +42,7 @@ impl fmt::Display for Tokens {
             &Tokens::Path(ref st) => write!(f, "\"{}\"", st),
             &Tokens::Identifier(ref id) => write!(f, "${}", id),
             &Tokens::Num(n) => write!(f, "{}", n),
+            &Tokens::NegNum(n) => write!(f, "{}", n),
             &Tokens::Float(n) => write!(f, "{}", n),
             &Tokens::Load => write!(f, "Load"),
             &Tokens::As => write!(f, "As"),
@@ -47,7 +52,8 @@ impl fmt::Display for Tokens {
             &Tokens::Pos => write!(f, "Pos"),
             &Tokens::Start => write!(f, "Start"),
             &Tokens::Stop => write!(f, "Stop"),
-            &Tokens::All => write!(f, "All")
+            &Tokens::All => write!(f, "All"),
+            &Tokens::Fade => write!(f, "Fade")
         }
     }
 }
@@ -75,7 +81,11 @@ pub enum EtokenFSM {
     /// A number with a decimal point `42.`.
     NumberDot(String),
     /// A floating-point number `42.2`.
-    NumberDec(String, String)
+    NumberDec(String, String),
+    /// The start of a negative number `-`.
+    NegNumStart,
+    /// A negative number `-42`.
+    NegNum(String)
 }
 use self::EtokenFSM::*;
 impl fmt::Display for EtokenFSM {
@@ -89,7 +99,9 @@ impl fmt::Display for EtokenFSM {
             &IdentifierFragment(ref frag) => write!(f, "${}", frag),
             &Number(ref frag) => write!(f, "{}", frag),
             &NumberDot(ref frag) => write!(f, "{}.", frag),
-            &NumberDec(ref orig, ref frag) => write!(f, "{}.{}", orig, frag)
+            &NumberDec(ref orig, ref frag) => write!(f, "{}.{}", orig, frag),
+            &NegNumStart => write!(f, "-"),
+            &NegNum(ref frag) => write!(f, "-{}", frag)
         }
     }
 }
@@ -152,6 +164,13 @@ impl EtokenFSM {
             FilePathComplete(frag) => SpaceRet::Parsed(Tokens::Path(frag)),
             IdentifierStart => SpaceRet::Incomplete(self),
             IdentifierFragment(frag) => SpaceRet::Parsed(Tokens::Identifier(frag)),
+            NegNumStart => SpaceRet::Incomplete(self),
+            NegNum(frag) => {
+                match i16::from_str(&frag) {
+                    Ok(i) => SpaceRet::Parsed(Tokens::NegNum(i * -1)),
+                    Err(e) => SpaceRet::IntErr(Number(frag), e)
+                }
+            },
             Number(frag) => {
                 match u16::from_str(&frag) {
                     Ok(i) => SpaceRet::Parsed(Tokens::Num(i)),
@@ -189,6 +208,15 @@ impl EtokenFSM {
                          IdentifierStart
                      })
             },
+            NegNumStart => None,
+            NegNum(mut frag) => {
+                Some(if frag.pop().is_some() && frag.len() > 0 {
+                    NegNum(frag)
+                }
+                     else {
+                         NegNumStart
+                     })
+            },
             Number(mut frag) => {
                 if frag.pop().is_some() && frag.len() > 0 {
                     Some(Number(frag))
@@ -216,7 +244,8 @@ impl EtokenFSM {
                     '"' => Ok(FilePathStart),
                     '$' => Ok(IdentifierStart),
                     num @ '0' ... '9' => Ok(Number(string_from_char(num))),
-                    _ => Err((Some(Idle), ParserErr::Expected("'\"', '$' or 0..9")))
+                    '-' => Ok(NegNumStart),
+                    _ => Err((Some(Idle), ParserErr::Expected("'\"', '$', '-' or 0..9")))
                 }
             },
             FilePathStart => Ok(FilePathFragment(string_from_char(c))),
@@ -234,6 +263,23 @@ impl EtokenFSM {
             IdentifierFragment(mut frag) => {
                 frag.push(c);
                 Ok(IdentifierFragment(frag))
+            },
+            NegNumStart => {
+                if let num @ '0' ... '9' = c {
+                    Ok(NegNum(string_from_char(c)))
+                }
+                else {
+                    Err((Some(NegNumStart), ParserErr::Expected("0..9")))
+                }
+            },
+            NegNum(mut frag) => {
+                if let num @ '0' ... '9' = c {
+                    frag.push(c);
+                    Ok(NegNum(frag))
+                }
+                else {
+                    Err((Some(NegNum(frag)), ParserErr::Expected("0..9")))
+                }
             },
             Number(mut frag) => {
                 match c {

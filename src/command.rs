@@ -1,7 +1,7 @@
 use parser::{Tokens, EtokenFSM, ParserErr, SpaceRet};
 use state::Context;
 use rsndfile::SndFile;
-use streamv2::FileStream;
+use streamv2::{FileStream, LiveParameters, db_lin};
 use std::string::ToString;
 pub trait Command {
     fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr>;
@@ -9,6 +9,188 @@ pub trait Command {
     fn is_complete(&self, ctx: &Context) -> Result<(), String>;
     fn line(&self) -> (Tokens, &Vec<Tokens>);
     fn execute(&mut self, ctx: &mut Context);
+}
+pub struct VolCommand {
+    cli: Vec<Tokens>,
+    ident: Option<String>,
+    chan: isize,
+    target: Option<i16>,
+    fade: Option<f32>
+}
+impl VolCommand {
+    fn new() -> Self {
+        VolCommand {
+            cli: Vec::new(),
+            ident: None,
+            chan: -1,
+            target: None,
+            fade: None
+        }
+    }
+}
+impl Command for VolCommand {
+    fn execute(&mut self, ctx: &mut Context) {
+        let (ident, chan, target) = (self.ident.take().unwrap(), self.chan, db_lin(self.target.take().unwrap() as f32));
+        let fsx = ctx.idents.get_mut(&ident).unwrap();
+        let mut lp: Option<LiveParameters> = None;
+        for (i, ch) in fsx.iter_mut().enumerate() {
+            if i == 0 {
+                lp = Some(ch.lp());
+            }
+            if chan == i as isize || chan == -1 {
+                ch.set_vol(target);
+            }
+        }
+    }
+    fn is_complete(&self, ctx: &Context) -> Result<(), String> {
+        if self.ident.is_none() { Err(format!("No identifier to fade.")) }
+        else if self.target.is_none() { Err(format!("No volume to fade to.")) }
+        else {
+            if ctx.idents.get(self.ident.as_ref().unwrap()).is_none() {
+                Err(format!("The identifier ${} does not exist.", self.ident.as_ref().unwrap()))
+            }
+            else {
+                if self.chan != -1 && ctx.idents.get(self.ident.as_ref().unwrap()).unwrap().len() <= self.chan as usize {
+                    Err(format!("The identifier ${} does not have a channel numbered {}.", self.ident.as_ref().unwrap(), self.chan))
+                }
+                else {
+                    Ok(())
+                }
+            }
+        }
+    }
+    fn line(&self) -> (Tokens, &Vec<Tokens>) {
+        (Tokens::Vol, &self.cli)
+    }
+    fn back(&mut self) -> Option<Tokens> {
+        {
+            let ld = Tokens::Vol; // to appease borrowck
+            let mut biter = self.cli.iter();
+            let last = biter.next_back().unwrap_or(&ld);
+            match last {
+                &Tokens::Vol => {},
+                &Tokens::Fade => {},
+                &Tokens::At => {},
+                &Tokens::Chan => {},
+                &Tokens::Identifier(_) => { self.ident = None },
+                &Tokens::Num(_) | &Tokens::NegNum(_) => {
+                    match biter.next_back().unwrap() {
+                        &Tokens::At => { self.target = None },
+                        &Tokens::Chan => { self.chan = -1 },
+                        &Tokens::Fade => { self.fade = None },
+                        _ => unreachable!()
+                    }
+                },
+                &Tokens::Float(_) => { self.fade = None },
+                _ => unreachable!()
+            }
+        }
+        self.cli.pop()
+
+    }
+    fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
+        let last = self.cli.iter().next_back().unwrap_or(&Tokens::Vol).clone();
+        match last {
+            Tokens::Vol => {
+                if let Tokens::Identifier(id) = tok {
+                    if ctx.idents.get(&id).is_none() {
+                        Err(ParserErr::ArgumentError(format!("The identifier ${} does not exist.", id)))
+                    }
+                    else {
+                        self.ident = Some(id.clone());
+                        self.cli.push(Tokens::Identifier(id));
+                        Ok(())
+                    }
+                }
+                else {
+                    Err(ParserErr::Expected("[identifier]"))
+                }
+            },
+            Tokens::Identifier(_) => {
+                match tok {
+                    Tokens::At => {
+                        self.cli.push(Tokens::At);
+                        Ok(())
+                    },
+                    Tokens::Chan => {
+                        self.cli.push(Tokens::Chan);
+                        Ok(())
+                    },
+                    _ => Err(ParserErr::Expected("@ or Chan"))
+                }
+            },
+            Tokens::Chan => {
+                if let Tokens::Num(n) = tok {
+                    self.chan = n as isize;
+                    self.cli.push(Tokens::Num(n));
+                    Ok(())
+                }
+                else {
+                    Err(ParserErr::Expected("Num"))
+                }
+            },
+            Tokens::At => {
+                match tok {
+                    Tokens::Num(n) => {
+                        self.target = Some(n as i16);
+                        self.cli.push(Tokens::Num(n));
+                        Ok(())
+                    },
+                    Tokens::NegNum(n) => {
+                        self.target = Some(n);
+                        self.cli.push(Tokens::NegNum(n));
+                        Ok(())
+                    },
+                    _ => Err(ParserErr::Expected("Num or NegNum"))
+                }
+            },
+            Tokens::Num(_) | Tokens::NegNum(_) => {
+                match {
+                    let mut i = self.cli.iter();
+                    i.next_back();
+                    i.next_back().unwrap().clone()
+                } {
+                    Tokens::At => {
+                        if let Tokens::Fade = tok {
+                            self.cli.push(Tokens::Fade);
+                            Ok(())
+                        }
+                        else {
+                            Err(ParserErr::Expected("Fade or [finish]"))
+                        }
+                    },
+                    Tokens::Chan => {
+                        if let Tokens::At = tok {
+                            self.cli.push(Tokens::At);
+                            Ok(())
+                        }
+                        else {
+                            Err(ParserErr::Expected("@"))
+                        }
+                    },
+                    Tokens::Fade => Err(ParserErr::Expected("[finish]")),
+                    _ => unreachable!()
+                }
+            },
+            Tokens::Fade => {
+                match tok {
+                    Tokens::Num(n) => {
+                        self.fade = Some(n as f32);
+                        self.cli.push(Tokens::Num(n));
+                        Ok(())
+                    },
+                    Tokens::Float(f) => {
+                        self.fade = Some(f);
+                        self.cli.push(Tokens::Float(f));
+                        Ok(())
+                    }
+                    _ => Err(ParserErr::Expected("Num or Float"))
+                }
+            },
+            Tokens::Float(_) => Err(ParserErr::Expected("[finish]")),
+            _ => unreachable!()
+        }
+    }
 }
 pub struct LoadCommand {
     cli: Vec<Tokens>,
@@ -175,9 +357,10 @@ impl CmdParserFSM {
             's' => Some(Tokens::Start),
             'o' => Some(Tokens::Stop),
             'a' => Some(Tokens::As),
-            '0' => Some(Tokens::All),
+            '#' => Some(Tokens::All),
             'c' => Some(Tokens::Chan),
             '@' => Some(Tokens::At),
+            'f' => Some(Tokens::Fade),
             _ => None
         }
     }
@@ -286,8 +469,11 @@ impl CmdParserFSM {
                 match CmdParserFSM::char_tok(c) {
                     Some(Tokens::Load) => {
                         Ok(CmdParserFSM::Parsing(Box::new(LoadCommand::new())))
+                    },
+                    Some(Tokens::Vol) => {
+                        Ok(CmdParserFSM::Parsing(Box::new(VolCommand::new())))
                     }
-                    _ => Err((CmdParserFSM::Idle, ParserErr::Expected("Load")))
+                    _ => Err((CmdParserFSM::Idle, ParserErr::Expected("Load or Vol")))
                 }
             },
             CmdParserFSM::Parsing(mut cmd) => {

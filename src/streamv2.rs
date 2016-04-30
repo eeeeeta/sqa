@@ -57,9 +57,16 @@ pub struct FileStreamX {
     lp: Arc<Mutex<LiveParameters>>,
     run: Arc<RwLock<bool>>,
     tx: mpsc::Sender<SpoolerCtl>,
+    fader: Arc<RwLock<Option<Box<Fn(usize, &mut f32, &mut bool) -> bool>>>>,
     uuid: Uuid
 }
 impl FileStreamX {
+    pub fn set_fader(&mut self, fader: Box<Fn(usize, &mut f32, &mut bool) -> bool>) {
+        *self.fader.write().unwrap() = Some(fader);
+    }
+    pub fn is_fading(&self) -> bool {
+        self.fader.read().unwrap().is_some()
+    }
     /// Resets the FileStream to a given position.
     pub fn reset_pos(&mut self, pos: u64) {
         self.tx.send(SpoolerCtl::Seek(pos));
@@ -196,6 +203,7 @@ pub struct FileStream {
     /// This FileStream's LiveParameters.
     lp: Arc<Mutex<LiveParameters>>,
     run: Arc<RwLock<bool>>,
+    fader: Arc<RwLock<Option<Box<Fn(usize, &mut f32, &mut bool) -> bool>>>>,
     spooler_tx: mpsc::Sender<SpoolerCtl>,
     uuid: Uuid
 }
@@ -218,6 +226,7 @@ impl FileStream {
             buf: qvec.next().unwrap(),
             sample_rate: sample_rate,
             lp: Arc::new(Mutex::new(lp)),
+            fader: Arc::new(RwLock::new(None)),
             run: Arc::new(RwLock::new(true)),
             uuid: Uuid::new_v4(),
             spooler_tx: stx,
@@ -230,6 +239,7 @@ impl FileStream {
                 buf: qvec.next().unwrap(),
                 sample_rate: fs_vec[0].sample_rate,
                 lp: Arc::new(Mutex::new(lp)),
+                fader: Arc::new(RwLock::new(None)),
                 run: fs_vec[0].run.clone(),
                 uuid: Uuid::new_v4(),
                 info: fs_vec[0].info.clone(),
@@ -245,7 +255,8 @@ impl FileStream {
             lp: self.lp.clone(),
             run: self.run.clone(),
             tx: self.spooler_tx.clone(),
-            uuid: self.uuid.clone()
+            uuid: self.uuid.clone(),
+            fader: self.fader.clone()
         }
     }
 }
@@ -253,6 +264,12 @@ impl FileStream {
 impl mixer::Source for FileStream {
     fn callback(&mut self, buffer: &mut [f32], frames: usize) {
         let mut lp = self.lp.lock().unwrap();
+        let mut fader = self.fader.write().unwrap();
+        let mut vol = lp.vol;
+        if fader.is_some() && !fader.as_ref().unwrap()(lp.pos, &mut vol, &mut lp.active) {
+            *fader = None;
+        }
+        lp.vol = vol;
         if let Ok(r) = self.run.try_read() {
             lp.active = *r;
         }
