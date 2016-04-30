@@ -1,6 +1,7 @@
 //! Command-line parsing functions.
 use std::str::FromStr;
 use std::fmt;
+use std::convert::{From, Into};
 /// A set of valid tokens on a command line.
 #[derive(Debug, Clone)]
 pub enum Tokens {
@@ -100,6 +101,17 @@ pub enum ParserErr {
     IncompleteEtoken,
     NumError
 }
+impl Into<String> for ParserErr {
+    fn into(self) -> String {
+        match self {
+            ParserErr::Expected(st) => format!("Expected {}", st),
+            ParserErr::ArgumentError(st) => format!("Argument error: {}", st),
+            ParserErr::InvalidToken => format!("Invalid token."),
+            ParserErr::IncompleteEtoken => format!("Incomplete token."),
+            ParserErr::NumError => format!("Error converting number (this should rarely happen)")
+        }
+    }
+}
 pub enum SpaceRet {
     Parsed(Tokens),
     Continue(EtokenFSM),
@@ -115,6 +127,14 @@ pub fn string_from_char(c: char) -> String {
 impl EtokenFSM {
     pub fn new() -> Self {
         Idle
+    }
+    pub fn from_token(tok: Tokens) -> Option<Self> {
+        // FIXME: Numbers are a bit hard.
+        match tok {
+            Tokens::Path(st) => Some(FilePathComplete(st)),
+            Tokens::Identifier(st) => Some(IdentifierFragment(st)),
+            _ => None
+        }
     }
     pub fn finish(self, spc: bool) -> SpaceRet {
         match self {

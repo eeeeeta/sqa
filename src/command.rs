@@ -1,12 +1,14 @@
 use parser::{Tokens, EtokenFSM, ParserErr, SpaceRet};
 use state::Context;
 use rsndfile::SndFile;
+use streamv2::FileStream;
 use std::string::ToString;
 pub trait Command {
     fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr>;
-    fn back(&mut self);
+    fn back(&mut self) -> Option<Tokens>;
     fn is_complete(&self, ctx: &Context) -> Result<(), String>;
     fn line(&self) -> (Tokens, &Vec<Tokens>);
+    fn execute(&mut self, ctx: &mut Context);
 }
 pub struct LoadCommand {
     cli: Vec<Tokens>,
@@ -22,7 +24,33 @@ impl LoadCommand {
         }
     }
 }
+
 impl Command for LoadCommand {
+    fn execute(&mut self, ctx: &mut Context) {
+        let file = self.file.take();
+        let mut ident = self.ident.take();
+        let mut cvec = vec![];
+        for stream in FileStream::new(file.unwrap()) {
+            cvec.push(stream.get_x());
+            ctx.mstr.add_source(Box::new(stream));
+        }
+        for (i, ch) in cvec.iter().enumerate() {
+            if i > 15 { continue; }
+            ctx.mstr.wire(ch.uuid(), ctx.qchans[i]).unwrap();
+        }
+        if ident.is_none() {
+            let mut path = None;
+            for tok in self.cli.iter() {
+                if let &Tokens::Path(ref p) = tok {
+                    path = Some(p.clone());
+                    break;
+                }
+            }
+            let filen = path.expect("invariant violated: file, but no Path in cli");
+            ident = Some(::std::path::Path::new(&filen).file_stem().map(|x| x.to_str()).unwrap().unwrap().to_owned());
+        }
+        ctx.idents.insert(ident.unwrap(), cvec);
+    }
     fn line(&self) -> (Tokens, &Vec<Tokens>) {
         (Tokens::Load, &self.cli)
     }
@@ -63,7 +91,7 @@ impl Command for LoadCommand {
             }
         }
     }
-    fn back(&mut self) {
+    fn back(&mut self) -> Option<Tokens> {
         {
             let ld = Tokens::Load; // to appease borrowck
             let last = self.cli.iter().next_back().unwrap_or(&ld);
@@ -75,7 +103,7 @@ impl Command for LoadCommand {
                 _ => unreachable!()
             }
         }
-        self.cli.pop();
+        self.cli.pop()
     }
     fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
         let last = self.cli.iter().next_back().unwrap_or(&Tokens::Load).clone();
@@ -85,6 +113,9 @@ impl Command for LoadCommand {
                     let file = SndFile::open(&path);
                     if let Err(e) = file {
                         Err(ParserErr::ArgumentError(format!("Failed to open file: {}", e.expl)))
+                    }
+                    else if file.as_ref().unwrap().info.samplerate != 44_100 {
+                        Err(ParserErr::ArgumentError(format!("Sample rate mismatch.")))
                     }
                     else {
                         self.file = Some(file.unwrap());
@@ -178,7 +209,16 @@ impl CmdParserFSM {
         match self {
             CmdParserFSM::Idle => CmdParserFSM::Idle,
             CmdParserFSM::Parsing(mut cmd) => {
-                if cmd.line().1.len() == 0 {
+                let popped = cmd.back();
+                if let Some(Some(pos_etok)) = popped.map(|x| EtokenFSM::from_token(x)) {
+                    if let Some(new_etok) = pos_etok.back() {
+                        CmdParserFSM::ParsingEtokFor(cmd, new_etok)
+                    }
+                    else {
+                        CmdParserFSM::Parsing(cmd)
+                    }
+                }
+                else if cmd.line().1.len() == 0 {
                     CmdParserFSM::Idle
                 }
                 else {
@@ -191,6 +231,52 @@ impl CmdParserFSM {
                 }
                 else {
                     CmdParserFSM::Parsing(cmd)
+                }
+            }
+        }
+    }
+    pub fn enter(self, ctx: &mut Context) -> Result<Self, (Self, String)> {
+        match self {
+            CmdParserFSM::Idle => Ok(CmdParserFSM::Idle),
+            CmdParserFSM::Parsing(mut cmd) => {
+                if let Err(e) = cmd.is_complete(ctx) {
+                    Err((CmdParserFSM::Parsing(cmd), e))
+                }
+                else {
+                    cmd.execute(ctx);
+                    Ok(CmdParserFSM::Idle)
+                }
+            },
+            CmdParserFSM::ParsingEtokFor(mut cmd, etok) => {
+                // TODO: needs more DRY
+                let oe = etok.clone();
+                match etok.finish(false) {
+                    SpaceRet::Parsed(tok) => {
+                        match cmd.add(tok, ctx) {
+                            Ok(_) => {
+                                if let Err(e) = cmd.is_complete(ctx) {
+                                    Err((CmdParserFSM::Parsing(cmd), e))
+                                }
+                                else {
+                                    cmd.execute(ctx);
+                                    Ok(CmdParserFSM::Idle)
+                                }
+                            }
+                            Err(e) => Err((CmdParserFSM::ParsingEtokFor(cmd, oe), Into::into(e)))
+                        }
+                    },
+                    SpaceRet::Continue(fsm) => {
+                        Err((CmdParserFSM::ParsingEtokFor(cmd, fsm), Into::into(ParserErr::IncompleteEtoken)))
+                    },
+                    SpaceRet::Incomplete(fsm) => {
+                        Err((CmdParserFSM::ParsingEtokFor(cmd, fsm), Into::into(ParserErr::IncompleteEtoken)))
+                    },
+                    SpaceRet::IntErr(fsm, _) => {
+                        Err((CmdParserFSM::ParsingEtokFor(cmd, fsm), Into::into(ParserErr::NumError)))
+                    },
+                    SpaceRet::FloatErr(fsm, _) => {
+                        Err((CmdParserFSM::ParsingEtokFor(cmd, fsm), Into::into(ParserErr::NumError)))
+                    }
                 }
             }
         }
