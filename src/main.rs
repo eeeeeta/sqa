@@ -1,14 +1,15 @@
 extern crate rsndfile;
 extern crate portaudio;
-#[macro_use]
-extern crate nom;
 extern crate time;
 extern crate uuid;
 extern crate crossbeam;
+extern crate rustbox;
 
 mod streamv2;
 mod mixer;
-mod cmdi;
+mod parser;
+mod command;
+mod state;
 
 use std::thread;
 use std::io;
@@ -23,8 +24,58 @@ use std::cell::RefCell;
 use mixer::{Source, Sink, FRAMES_PER_CALLBACK};
 use streamv2::{FileStream, FileStreamX};
 use portaudio as pa;
-use cmdi::Command;
+
+use command::CmdParserFSM;
+use state::Context;
+use std::error::Error;
+use rustbox::{Key, RustBox, Color};
+fn w(rb: &mut RustBox, x: usize, y: usize, text: &str) {
+    rb.print(x, y, rustbox::RB_BOLD, Color::White, Color::Black, text);
+}
+
 fn main() {
+    let mut rb = match RustBox::init(Default::default()) {
+        Result::Ok(v) => v,
+        Result::Err(e) => panic!("{}", e),
+    };
+    let mut parser = CmdParserFSM::new();
+    let mut ctx = Context::new();
+    let mut cmdline = String::new();
+    let mut error = String::new();
+    loop {
+        rb.clear();
+        w(&mut rb, 0, 0, &format!("parser: {}", parser.debug_remove_me(&ctx)));
+        w(&mut rb, 0, 1, &format!("last error: {}", error));
+        w(&mut rb, 0, 2, &format!("> {}", cmdline));
+        rb.present();
+        match rb.poll_event(false) {
+            Ok(rustbox::Event::KeyEvent(key)) => {
+                match key {
+                    Key::Ctrl('c') => { break; }
+                    Key::Char(ch) => {
+                        match parser.addc(ch, &ctx) {
+                            Ok(p) => {
+                                parser = p;
+                                cmdline = parser.cmdline();
+                            },
+                            Err((p, e)) => {
+                                parser = p;
+                                error = format!("{:?}", e);
+                            }
+                        }
+                    },
+                    Key::Backspace => {
+                        parser = parser.back();
+                        cmdline = parser.cmdline();
+                    },
+                    _ => {}
+                }
+            },
+            Err(e) => panic!("{}", e.description()),
+            _ => {}
+        }
+    }
+    /*
     let mut pa = pa::PortAudio::new().unwrap();
     let mut mstr = mixer::Magister::new();
     let mut streams: BTreeMap<String, Vec<FileStreamX>> = BTreeMap::new();
@@ -129,5 +180,5 @@ fn main() {
         else {
             println!("[-] parse failed: {:?}", res);
         }
-    }
+    }*/
 }
