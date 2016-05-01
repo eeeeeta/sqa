@@ -79,7 +79,7 @@ fn main() {
         for (k, v) in ctx.idents.iter() {
             for (i, ch) in v.iter().enumerate() {
                 let lp = ch.lp();
-                w(&mut rb, 0, ln.incr(), &format!("${}:{} - {}dB, {:.1}%", k, i, lin_db(lp.vol), 100 as f64 * (lp.pos as f64 / lp.end as f64)));
+                w(&mut rb, 0, ln.incr(), &format!("${}:{} - {:.2}dB, {:.1}%", k, i, lin_db(lp.vol), 100 as f64 * (lp.pos as f64 / lp.end as f64)));
             }
         }
         rb.present();

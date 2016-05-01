@@ -11,6 +11,241 @@ pub trait Command {
     fn line(&self) -> (Tokens, &Vec<Tokens>);
     fn execute(&mut self, ctx: &mut Context);
 }
+pub struct StartCommand {
+    cli: Vec<Tokens>,
+    ident: Option<String>
+}
+impl StartCommand {
+    fn new() -> Self {
+        StartCommand {
+            cli: Vec::new(),
+            ident: None
+        }
+    }
+}
+impl Command for StartCommand {
+    fn line(&self) -> (Tokens, &Vec<Tokens>) {
+        (Tokens::Start, &self.cli)
+    }
+    fn execute(&mut self, ctx: &mut Context) {
+        for (k, v) in ctx.idents.iter_mut() {
+            if self.ident.is_none() || (self.ident.is_some() && k == self.ident.as_ref().unwrap()) {
+                for ch in v {
+                    ch.unpause();
+                }
+            }
+        }
+    }
+    fn is_complete(&self, ctx: &Context) -> Result<(), String> {
+        if self.ident.is_some() && ctx.idents.get(self.ident.as_ref().unwrap()).is_none() {
+            Err(format!("The identifier ${} does not exist.", self.ident.as_ref().unwrap()))
+        }
+        else {
+            Ok(())
+        }
+    }
+    fn back(&mut self) -> Option<Tokens> {
+        {
+            let ld = Tokens::Start;
+            let mut biter = self.cli.iter();
+            let last = biter.next_back().unwrap_or(&ld);
+            match last {
+                &Tokens::Start => {},
+                &Tokens::Identifier(_) => { self.ident = None },
+                _ => unreachable!()
+            }
+        }
+        self.cli.pop()
+    }
+    fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
+        let last = self.cli.iter().next_back().unwrap_or(&Tokens::Start).clone();
+        match last {
+            Tokens::Start => {
+                if let Tokens::Identifier(id) = tok {
+                    if ctx.idents.get(&id).is_none() {
+                        Err(ParserErr::ArgumentError(format!("The identifier ${} does not exist.", id)))
+                    }
+                    else {
+                        self.ident = Some(id.clone());
+                        self.cli.push(Tokens::Identifier(id));
+                        Ok(())
+                    }
+                }
+                else {
+                    Err(ParserErr::Expected("[identifier] or [finish]"))
+                }
+            },
+            Tokens::Identifier(_) => Err(ParserErr::Expected("[finish]")),
+            _ => unreachable!()
+        }
+    }
+}
+
+pub struct StopCommand {
+    cli: Vec<Tokens>,
+    ident: Option<String>
+}
+impl StopCommand {
+    fn new() -> Self {
+        StopCommand {
+            cli: Vec::new(),
+            ident: None
+        }
+    }
+}
+impl Command for StopCommand {
+    fn line(&self) -> (Tokens, &Vec<Tokens>) {
+        (Tokens::Stop, &self.cli)
+    }
+    fn execute(&mut self, ctx: &mut Context) {
+        for (k, v) in ctx.idents.iter_mut() {
+            if self.ident.is_none() || (self.ident.is_some() && k == self.ident.as_ref().unwrap()) {
+                for ch in v {
+                    ch.pause();
+                }
+            }
+        }
+    }
+    fn is_complete(&self, ctx: &Context) -> Result<(), String> {
+        if self.ident.is_some() && ctx.idents.get(self.ident.as_ref().unwrap()).is_none() {
+            Err(format!("The identifier ${} does not exist.", self.ident.as_ref().unwrap()))
+        }
+        else {
+            Ok(())
+        }
+    }
+    fn back(&mut self) -> Option<Tokens> {
+        {
+            let ld = Tokens::Stop;
+            let mut biter = self.cli.iter();
+            let last = biter.next_back().unwrap_or(&ld);
+            match last {
+                &Tokens::Stop => {},
+                &Tokens::Identifier(_) => { self.ident = None },
+                _ => unreachable!()
+            }
+        }
+        self.cli.pop()
+    }
+    fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
+        let last = self.cli.iter().next_back().unwrap_or(&Tokens::Stop).clone();
+        match last {
+            Tokens::Stop => {
+                if let Tokens::Identifier(id) = tok {
+                    if ctx.idents.get(&id).is_none() {
+                        Err(ParserErr::ArgumentError(format!("The identifier ${} does not exist.", id)))
+                    }
+                    else {
+                        self.ident = Some(id.clone());
+                        self.cli.push(Tokens::Identifier(id));
+                        Ok(())
+                    }
+                }
+                else {
+                    Err(ParserErr::Expected("[identifier] or [finish]"))
+                }
+            },
+            Tokens::Identifier(_) => Err(ParserErr::Expected("[finish]")),
+            _ => unreachable!()
+        }
+    }
+}
+pub struct PosCommand {
+    cli: Vec<Tokens>,
+    ident: Option<String>,
+    pos: Option<u16>
+}
+impl PosCommand {
+    fn new() -> Self {
+        PosCommand {
+            cli: Vec::new(),
+            ident: None,
+            pos: None
+        }
+    }
+}
+impl Command for PosCommand {
+    fn line(&self) -> (Tokens, &Vec<Tokens>) {
+        (Tokens::Pos, &self.cli)
+    }
+    fn execute(&mut self, ctx: &mut Context) {
+        let (ident, pos) = (self.ident.take().unwrap(), self.pos.take().unwrap());
+        ctx.idents.get_mut(&ident).unwrap()[0].reset_pos(pos as u64);
+    }
+    fn is_complete(&self, ctx: &Context) -> Result<(), String> {
+        if self.ident.is_none() {
+            Err(format!("No identifier."))
+        }
+        else if self.pos.is_none() {
+            Err(format!("No target position."))
+        }
+        else if ctx.idents.get(self.ident.as_ref().unwrap()).is_none() {
+            Err(format!("The identifier ${} does not exist.", self.ident.as_ref().unwrap()))
+        }
+        else if ctx.idents.get(self.ident.as_ref().unwrap()).as_ref().unwrap()[0].lp().end < (44_100 * self.pos.unwrap()) as u64 {
+            Err(format!("The target position is greater than the endpoint of the selected identifier."))
+        }
+        else {
+            Ok(())
+        }
+    }
+    fn back(&mut self) -> Option<Tokens> {
+        {
+            let ld = Tokens::Pos;
+            let mut biter = self.cli.iter();
+            let last = biter.next_back().unwrap_or(&ld);
+            match last {
+                &Tokens::Pos => {},
+                &Tokens::At => {},
+                &Tokens::Identifier(_) => { self.ident = None },
+                &Tokens::Num(_) => { self.pos = None },
+                _ => unreachable!()
+            }
+        }
+        self.cli.pop()
+    }
+    fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
+        let last = self.cli.iter().next_back().unwrap_or(&Tokens::Pos).clone();
+        match last {
+            Tokens::Pos => {
+                if let Tokens::Identifier(id) = tok {
+                    if ctx.idents.get(&id).is_none() {
+                        Err(ParserErr::ArgumentError(format!("The identifier ${} does not exist.", id)))
+                    }
+                    else {
+                        self.ident = Some(id.clone());
+                        self.cli.push(Tokens::Identifier(id));
+                        Ok(())
+                    }
+                }
+                else {
+                    Err(ParserErr::Expected("[identifier]"))
+                }
+            },
+            Tokens::Identifier(_) => {
+                if let Tokens::At = tok {
+                    self.cli.push(Tokens::At);
+                    Ok(())
+                }
+                else {
+                    Err(ParserErr::Expected("@"))
+                }
+            },
+            Tokens::At => {
+                if let Tokens::Num(n) = tok {
+                    self.pos = Some(n);
+                    self.cli.push(Tokens::Num(n));
+                    Ok(())
+                }
+                else {
+                    Err(ParserErr::Expected("Num"))
+                }
+            },
+            Tokens::Num(_) => Err(ParserErr::Expected("[finish]")),
+            _ => unreachable!()
+        }
+    }
+}
 pub struct VolCommand {
     cli: Vec<Tokens>,
     ident: Option<String>,
@@ -102,7 +337,6 @@ impl Command for VolCommand {
             }
         }
         self.cli.pop()
-
     }
     fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
         let last = self.cli.iter().next_back().unwrap_or(&Tokens::Vol).clone();
@@ -488,8 +722,17 @@ impl CmdParserFSM {
                     },
                     Some(Tokens::Vol) => {
                         Ok(CmdParserFSM::Parsing(Box::new(VolCommand::new())))
-                    }
-                    _ => Err((CmdParserFSM::Idle, ParserErr::Expected("Load or Vol")))
+                    },
+                    Some(Tokens::Pos) => {
+                        Ok(CmdParserFSM::Parsing(Box::new(PosCommand::new())))
+                    },
+                    Some(Tokens::Stop) => {
+                        Ok(CmdParserFSM::Parsing(Box::new(StopCommand::new())))
+                    },
+                    Some(Tokens::Start) => {
+                        Ok(CmdParserFSM::Parsing(Box::new(StartCommand::new())))
+                    },
+                    _ => Err((CmdParserFSM::Idle, ParserErr::Expected("Load, Vol, Stop, Start or Pos")))
                 }
             },
             CmdParserFSM::Parsing(mut cmd) => {
