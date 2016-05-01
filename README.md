@@ -2,23 +2,23 @@ SQA: stuttery QLab alternative
 ==============================
 *Stability: "We maintain a 99.9% non-feature-parity with other audio solutions! That's right, almost nothing works!*
 
+![screenshot](http://i.imgur.com/YEF8xTl.jpg)
+
+*SQA running under [cool-retro-term](https://github.com/Swordfish90/cool-retro-term), playing back 3 different files with ease.*
+
 ## wat
 
 This project aims to be an audio player & cue system for live shows and staged productions,
 à la Figure53's [QLab](http://figure53.com/qlab/).
 
 Please note that, despite its name, this project probably won't reach the feature count, stability, and market share
-of QLab - it's mainly intended to be a fun side project. Please also note that it doesn't stutter on my machine (yet) -
-I just wanted to have a title that didn't contain expletives.
+of QLab - it's mainly intended to be a fun side project. I'd love it to, though!
 
 ## Cool! Does it work?
 
-Uh...
-
-All it does currently is plays back two audio streams ~~fading in over each other~~ in different channels,
-with one of them pausing and jumping and doing random stuff. While it may not look like much, that's
-actually a significant amount of work in multithreading and sound control. It's coming along, and there'll be a
-hopefully decent CLI for it soon.
+It doesn't have any QLab-like features yet (like cues), but you *can* play around with the audio engine, and there's a nice
+command line interface (pictured above). The audio engine works quite well, but can and will be altered slightly to increase
+playback quality and smoothness.
 
 This uses my [rsndfile](https://github.com/eeeeeta/rsndfile) bindings to provide audio loading & data extraction.
 These bindings weren't created to do much other than serve this project - but you may find them somewhat useful.
@@ -37,12 +37,33 @@ be arsed to find a better solution. Code:
     $ cd sqa
     $ cargo build
 
-At this point, put your favourite music (as `test.aiff`) and favourite cats meowing sound effects (as `meows.aiff`) in the `sqa`
-folder we're in (inside the `sqa-stuff` folder we created). These do both need to be AIFF files.
+Now, put your favourite AIFF files (or other libsndfile supported format) inside the current working directory.
 
     $ cargo run
 
-You should now hear your music fading in, accompanied by the wild mewling of cats. If you don't, raise an issue.
+If it's all worked out alright, you'll now see a lovely interface. Instructions for use:
+
+- The yellow line of text displays the last error encountered. If you can't type, see if it has something to say.
+- Use the following keybindings to insert tokens:
+- l for LOAD
+- a for AS
+- p for POS
+- s for START
+- o for STOP
+- c for CHAN
+- v for VOL
+- @ for @
+- `$[text] ` to insert an identifier
+- `"path" ` to insert a file path
+- [-]0..9 for numbers
+- The following commands are supported:
+- LOAD [path] (AS [identifier])
+- VOL [identifier] (CHAN [number]) @ [decibels] (FADE [seconds])
+- POS [identifier] @ [seconds]
+- START ([identifier], none to start all identifiers)
+- STOP ([identifier], none to stop all)
+
+Good luck, and have fun.
 
 ## Documentation plz.
 
