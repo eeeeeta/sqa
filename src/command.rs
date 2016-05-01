@@ -2,6 +2,7 @@ use parser::{Tokens, EtokenFSM, ParserErr, SpaceRet};
 use state::Context;
 use rsndfile::SndFile;
 use streamv2::{FileStream, LiveParameters, db_lin};
+use mixer::FRAMES_PER_CALLBACK;
 use std::string::ToString;
 pub trait Command {
     fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr>;
@@ -32,13 +33,28 @@ impl Command for VolCommand {
     fn execute(&mut self, ctx: &mut Context) {
         let (ident, chan, target) = (self.ident.take().unwrap(), self.chan, db_lin(self.target.take().unwrap() as f32));
         let fsx = ctx.idents.get_mut(&ident).unwrap();
-        let mut lp: Option<LiveParameters> = None;
         for (i, ch) in fsx.iter_mut().enumerate() {
-            if i == 0 {
-                lp = Some(ch.lp());
-            }
             if chan == i as isize || chan == -1 {
-                ch.set_vol(target);
+                if self.fade.is_some() {
+                    let lp = ch.lp();
+                    let end = lp.pos + (self.fade.unwrap() * 44_100 as f32) as usize;
+                    ch.set_fader(Box::new(move |pos, vol, _| {
+                        let fade_left = *vol - target;
+                        if fade_left == 0.0 { return false };
+                        let units_left = (end - pos) / FRAMES_PER_CALLBACK;
+                        if units_left == 0 {
+                            *vol = target;
+                            true
+                        }
+                        else {
+                            *vol = *vol - (fade_left / units_left as f32);
+                            true
+                        }
+                    }));
+                }
+                else {
+                    ch.set_vol(target);
+                }
             }
         }
     }
