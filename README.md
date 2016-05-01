@@ -57,11 +57,11 @@ If it's all worked out alright, you'll now see a lovely interface. Instructions 
 - `"path" ` to insert a file path
 - [-]0..9 for numbers
 - The following commands are supported:
-- LOAD [path] (AS [identifier])
-- VOL [identifier] (CHAN [number]) @ [decibels] (FADE [seconds])
-- POS [identifier] @ [seconds]
-- START ([identifier], none to start all identifiers)
-- STOP ([identifier], none to stop all)
+- LOAD path [AS identifier]
+- VOL identifier [CHAN number] @ decibels [FADE seconds]
+- POS identifier @ seconds
+- START [identifier]
+- STOP [identifier]
 
 Good luck, and have fun.
 
