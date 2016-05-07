@@ -4,13 +4,138 @@ extern crate time;
 extern crate uuid;
 extern crate crossbeam;
 extern crate rustbox;
+extern crate gtk;
+extern crate gdk;
 
 mod streamv2;
 mod mixer;
 mod parser;
 mod command;
+mod commands;
 mod state;
+mod backend;
 
+use mixer::{Source, Sink};
+use portaudio as pa;
+use command::CmdParserFSM;
+use std::error::Error;
+
+use gtk::prelude::*;
+use gtk::{Builder, Entry, Label, Window, ListBox, Arrow};
+use gdk::enums::key as gkey;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use state::{ReadableContext, WritableContext, ObjectType};
+use std::sync::mpsc::{Sender, Receiver, channel};
+use command::Command;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+fn update_arrow(err: bool, p: &mut CmdParserFSM, ctx: &ReadableContext, a: &Arrow) {
+    if err {
+        a.set(gtk::ArrowType::Up, gtk::ShadowType::None);
+    }
+    else {
+        if p.would_enter(&ctx) {
+            a.set(gtk::ArrowType::Down, gtk::ShadowType::None);
+        }
+        else {
+            a.set(gtk::ArrowType::Right, gtk::ShadowType::None);
+        }
+    }
+}
+fn update_list(ctx: &ReadableContext, list: &ListBox) {
+    for child in list.get_children() {
+        list.remove(&child);
+    }
+    for (k, v) in ctx.db.iter() {
+        if let ObjectType::FileStream(_, _) = v.typ {
+        let mut row = gtk::ListBoxRow::new();
+        let mut label = Label::new(Some(&format!("{} ({})", v, k)));
+        println!("{} ({})", v, k);
+        row.add(&label);
+            list.insert(&row, -1);
+        }
+
+    }
+    list.show_all();
+}
+fn main() {
+    let _ = gtk::init().unwrap();
+    let ui_src = include_str!("interface.glade");
+    let builder = Builder::new_from_string(ui_src);
+    let parser = Rc::new(RefCell::new(CmdParserFSM::new()));
+    let rc = Arc::new(Mutex::new(ReadableContext::new()));
+    let trc = rc.clone();
+    let (tx, rx): (Sender<Box<Command>>, Receiver<Box<Command>>) = channel();
+    thread::spawn(move || {
+        backend::backend_main(trc, rx);
+    });
+
+    let win: Window = builder.get_object("MainWindow").unwrap();
+    let cmdbox: Entry = builder.get_object("CmdBox").unwrap();
+    let cmdmsg: Label = builder.get_object("CmdMessage").unwrap();
+    let arrow: Arrow = builder.get_object("CmdArrow").unwrap();
+    let olist: ListBox = builder.get_object("ObjectList").unwrap();
+    win.connect_delete_event(|_, _| {
+        gtk::main_quit();
+        Inhibit(false)
+    });
+    cmdbox.connect_event(move |cbox, ev| {
+        if let gdk::EventType::KeyPress = ev.get_event_type() {
+            let k = ev.clone().downcast::<gdk::EventKey>().unwrap();
+            let keyval = k.get_keyval();
+            let mut p = parser.borrow_mut();
+            let ctx = rc.lock().unwrap();
+            if let gkey::BackSpace = keyval {
+                cmdmsg.set_text(&format!("SQA is ready."));
+                p.back();
+                update_arrow(false, &mut p, &ctx, &arrow);
+                cbox.set_text(&p.cmdline());
+            }
+            else if let gkey::Return = keyval {
+                match p.enter(&ctx) {
+                    Ok(cmd) => {
+                        cmdmsg.set_text(&format!("SQA is ready."));
+                        if let Some(cmd) = cmd {
+                            tx.send(cmd).unwrap();
+                            cmdmsg.set_text(&format!("Executed."));
+                        }
+                        cbox.set_text(&p.cmdline());
+                        update_arrow(false, &mut p, &ctx, &arrow);
+                    },
+                    Err(e) => {
+                        cmdmsg.set_markup(&format!("<span color=\"red\" weight=\"bold\">{}</span>", Into::<String>::into(e)));
+                        update_arrow(true, &mut p, &ctx, &arrow);
+                    }
+                }
+            }
+            else if let Some(ch) = gdk::keyval_to_unicode(keyval) {
+                match p.addc(ch, &ctx) {
+                    Ok(()) => {
+                        cmdmsg.set_text(&format!("SQA is ready."));
+                        cbox.set_text(&p.cmdline());
+                        update_arrow(false, &mut p, &ctx, &arrow);
+                    },
+                    Err(e) => {
+                        cmdmsg.set_markup(&format!("<span color=\"red\" weight=\"bold\">{}</span>", Into::<String>::into(e)));
+                        update_arrow(true, &mut p, &ctx, &arrow);
+                    }
+                }
+            }
+            cbox.set_position(-1);
+            update_list(&ctx, &olist);
+            Inhibit(true)
+        }
+        else {
+            Inhibit(false)
+        }
+    });
+
+    win.show_all();
+    gtk::main();
+}
+/*
 use mixer::{Source, Sink};
 use portaudio as pa;
 use command::CmdParserFSM;
@@ -124,3 +249,4 @@ fn main() {
         }
     }
 }
+*/

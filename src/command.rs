@@ -1,599 +1,24 @@
 use parser::{Tokens, EtokenFSM, ParserErr, SpaceRet};
-use state::Context;
+use state::{ReadableContext, WritableContext, ObjectType, Database};
 use rsndfile::SndFile;
-use streamv2::{FileStream, LiveParameters, db_lin};
+use streamv2::{FileStream, FileStreamX, LiveParameters, db_lin};
 use mixer::FRAMES_PER_CALLBACK;
 use std::string::ToString;
-pub trait Command {
-    fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr>;
+use uuid::Uuid;
+use commands::*;
+use std::mem;
+
+pub trait Command: Send {
+    fn add(&mut self, tok: Tokens, ctx: &ReadableContext) -> Result<(), ParserErr>;
     fn back(&mut self) -> Option<Tokens>;
-    fn is_complete(&self, ctx: &Context) -> Result<(), String>;
+    fn is_complete(&self, ctx: &ReadableContext) -> Result<(), String>;
     fn line(&self) -> (Tokens, &Vec<Tokens>);
-    fn execute(&mut self, ctx: &mut Context);
+    fn execute(&mut self, ctx: &mut WritableContext);
 }
-pub struct StartCommand {
-    cli: Vec<Tokens>,
-    ident: Option<String>
-}
-impl StartCommand {
-    fn new() -> Self {
-        StartCommand {
-            cli: Vec::new(),
-            ident: None
-        }
-    }
-}
-impl Command for StartCommand {
-    fn line(&self) -> (Tokens, &Vec<Tokens>) {
-        (Tokens::Start, &self.cli)
-    }
-    fn execute(&mut self, ctx: &mut Context) {
-        for (k, v) in ctx.idents.iter_mut() {
-            if self.ident.is_none() || (self.ident.is_some() && k == self.ident.as_ref().unwrap()) {
-                for ch in v {
-                    ch.unpause();
-                }
-            }
-        }
-    }
-    fn is_complete(&self, ctx: &Context) -> Result<(), String> {
-        if self.ident.is_some() && ctx.idents.get(self.ident.as_ref().unwrap()).is_none() {
-            Err(format!("The identifier ${} does not exist.", self.ident.as_ref().unwrap()))
-        }
-        else {
-            Ok(())
-        }
-    }
-    fn back(&mut self) -> Option<Tokens> {
-        {
-            let ld = Tokens::Start;
-            let mut biter = self.cli.iter();
-            let last = biter.next_back().unwrap_or(&ld);
-            match last {
-                &Tokens::Start => {},
-                &Tokens::Identifier(_) => { self.ident = None },
-                _ => unreachable!()
-            }
-        }
-        self.cli.pop()
-    }
-    fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
-        let last = self.cli.iter().next_back().unwrap_or(&Tokens::Start).clone();
-        match last {
-            Tokens::Start => {
-                if let Tokens::Identifier(id) = tok {
-                    if ctx.idents.get(&id).is_none() {
-                        Err(ParserErr::ArgumentError(format!("The identifier ${} does not exist.", id)))
-                    }
-                    else {
-                        self.ident = Some(id.clone());
-                        self.cli.push(Tokens::Identifier(id));
-                        Ok(())
-                    }
-                }
-                else {
-                    Err(ParserErr::Expected("[identifier] or [finish]"))
-                }
-            },
-            Tokens::Identifier(_) => Err(ParserErr::Expected("[finish]")),
-            _ => unreachable!()
-        }
-    }
-}
-
-pub struct StopCommand {
-    cli: Vec<Tokens>,
-    ident: Option<String>
-}
-impl StopCommand {
-    fn new() -> Self {
-        StopCommand {
-            cli: Vec::new(),
-            ident: None
-        }
-    }
-}
-impl Command for StopCommand {
-    fn line(&self) -> (Tokens, &Vec<Tokens>) {
-        (Tokens::Stop, &self.cli)
-    }
-    fn execute(&mut self, ctx: &mut Context) {
-        for (k, v) in ctx.idents.iter_mut() {
-            if self.ident.is_none() || (self.ident.is_some() && k == self.ident.as_ref().unwrap()) {
-                for ch in v {
-                    ch.pause();
-                }
-            }
-        }
-    }
-    fn is_complete(&self, ctx: &Context) -> Result<(), String> {
-        if self.ident.is_some() && ctx.idents.get(self.ident.as_ref().unwrap()).is_none() {
-            Err(format!("The identifier ${} does not exist.", self.ident.as_ref().unwrap()))
-        }
-        else {
-            Ok(())
-        }
-    }
-    fn back(&mut self) -> Option<Tokens> {
-        {
-            let ld = Tokens::Stop;
-            let mut biter = self.cli.iter();
-            let last = biter.next_back().unwrap_or(&ld);
-            match last {
-                &Tokens::Stop => {},
-                &Tokens::Identifier(_) => { self.ident = None },
-                _ => unreachable!()
-            }
-        }
-        self.cli.pop()
-    }
-    fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
-        let last = self.cli.iter().next_back().unwrap_or(&Tokens::Stop).clone();
-        match last {
-            Tokens::Stop => {
-                if let Tokens::Identifier(id) = tok {
-                    if ctx.idents.get(&id).is_none() {
-                        Err(ParserErr::ArgumentError(format!("The identifier ${} does not exist.", id)))
-                    }
-                    else {
-                        self.ident = Some(id.clone());
-                        self.cli.push(Tokens::Identifier(id));
-                        Ok(())
-                    }
-                }
-                else {
-                    Err(ParserErr::Expected("[identifier] or [finish]"))
-                }
-            },
-            Tokens::Identifier(_) => Err(ParserErr::Expected("[finish]")),
-            _ => unreachable!()
-        }
-    }
-}
-pub struct PosCommand {
-    cli: Vec<Tokens>,
-    ident: Option<String>,
-    pos: Option<u16>
-}
-impl PosCommand {
-    fn new() -> Self {
-        PosCommand {
-            cli: Vec::new(),
-            ident: None,
-            pos: None
-        }
-    }
-}
-impl Command for PosCommand {
-    fn line(&self) -> (Tokens, &Vec<Tokens>) {
-        (Tokens::Pos, &self.cli)
-    }
-    fn execute(&mut self, ctx: &mut Context) {
-        let (ident, pos) = (self.ident.take().unwrap(), self.pos.take().unwrap());
-        ctx.idents.get_mut(&ident).unwrap()[0].reset_pos(pos as u64);
-    }
-    fn is_complete(&self, ctx: &Context) -> Result<(), String> {
-        if self.ident.is_none() {
-            Err(format!("No identifier."))
-        }
-        else if self.pos.is_none() {
-            Err(format!("No target position."))
-        }
-        else if ctx.idents.get(self.ident.as_ref().unwrap()).is_none() {
-            Err(format!("The identifier ${} does not exist.", self.ident.as_ref().unwrap()))
-        }
-        else if ctx.idents.get(self.ident.as_ref().unwrap()).as_ref().unwrap()[0].lp().end < (44_100 * self.pos.unwrap()) as u64 {
-            Err(format!("The target position is greater than the endpoint of the selected identifier."))
-        }
-        else {
-            Ok(())
-        }
-    }
-    fn back(&mut self) -> Option<Tokens> {
-        {
-            let ld = Tokens::Pos;
-            let mut biter = self.cli.iter();
-            let last = biter.next_back().unwrap_or(&ld);
-            match last {
-                &Tokens::Pos => {},
-                &Tokens::At => {},
-                &Tokens::Identifier(_) => { self.ident = None },
-                &Tokens::Num(_) => { self.pos = None },
-                _ => unreachable!()
-            }
-        }
-        self.cli.pop()
-    }
-    fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
-        let last = self.cli.iter().next_back().unwrap_or(&Tokens::Pos).clone();
-        match last {
-            Tokens::Pos => {
-                if let Tokens::Identifier(id) = tok {
-                    if ctx.idents.get(&id).is_none() {
-                        Err(ParserErr::ArgumentError(format!("The identifier ${} does not exist.", id)))
-                    }
-                    else {
-                        self.ident = Some(id.clone());
-                        self.cli.push(Tokens::Identifier(id));
-                        Ok(())
-                    }
-                }
-                else {
-                    Err(ParserErr::Expected("[identifier]"))
-                }
-            },
-            Tokens::Identifier(_) => {
-                if let Tokens::At = tok {
-                    self.cli.push(Tokens::At);
-                    Ok(())
-                }
-                else {
-                    Err(ParserErr::Expected("@"))
-                }
-            },
-            Tokens::At => {
-                if let Tokens::Num(n) = tok {
-                    self.pos = Some(n);
-                    self.cli.push(Tokens::Num(n));
-                    Ok(())
-                }
-                else {
-                    Err(ParserErr::Expected("Num"))
-                }
-            },
-            Tokens::Num(_) => Err(ParserErr::Expected("[finish]")),
-            _ => unreachable!()
-        }
-    }
-}
-pub struct VolCommand {
-    cli: Vec<Tokens>,
-    ident: Option<String>,
-    chan: isize,
-    target: Option<i16>,
-    fade: Option<f32>
-}
-impl VolCommand {
-    fn new() -> Self {
-        VolCommand {
-            cli: Vec::new(),
-            ident: None,
-            chan: -1,
-            target: None,
-            fade: None
-        }
-    }
-}
-impl Command for VolCommand {
-    fn execute(&mut self, ctx: &mut Context) {
-        let (ident, chan, target) = (self.ident.take().unwrap(), self.chan, db_lin(self.target.take().unwrap() as f32));
-        let fsx = ctx.idents.get_mut(&ident).unwrap();
-        for (i, ch) in fsx.iter_mut().enumerate() {
-            if chan == i as isize || chan == -1 {
-                if self.fade.is_some() {
-                    let lp = ch.lp();
-                    let end = lp.pos + (self.fade.unwrap() * 44_100 as f32) as usize;
-                    ch.set_fader(Box::new(move |pos, vol, _| {
-                        let fade_left = *vol - target;
-                        if fade_left == 0.0 { return false };
-                        let units_left = (end - pos) / FRAMES_PER_CALLBACK;
-                        if units_left == 0 {
-                            *vol = target;
-                            true
-                        }
-                        else {
-                            *vol = *vol - (fade_left / units_left as f32);
-                            true
-                        }
-                    }));
-                }
-                else {
-                    ch.set_vol(target);
-                }
-            }
-        }
-    }
-    fn is_complete(&self, ctx: &Context) -> Result<(), String> {
-        if self.ident.is_none() { Err(format!("No identifier to fade.")) }
-        else if self.target.is_none() { Err(format!("No volume to fade to.")) }
-        else {
-            if ctx.idents.get(self.ident.as_ref().unwrap()).is_none() {
-                Err(format!("The identifier ${} does not exist.", self.ident.as_ref().unwrap()))
-            }
-            else {
-                if self.chan != -1 && ctx.idents.get(self.ident.as_ref().unwrap()).unwrap().len() <= self.chan as usize {
-                    Err(format!("The identifier ${} does not have a channel numbered {}.", self.ident.as_ref().unwrap(), self.chan))
-                }
-                else {
-                    Ok(())
-                }
-            }
-        }
-    }
-    fn line(&self) -> (Tokens, &Vec<Tokens>) {
-        (Tokens::Vol, &self.cli)
-    }
-    fn back(&mut self) -> Option<Tokens> {
-        {
-            let ld = Tokens::Vol; // to appease borrowck
-            let mut biter = self.cli.iter();
-            let last = biter.next_back().unwrap_or(&ld);
-            match last {
-                &Tokens::Vol => {},
-                &Tokens::Fade => {},
-                &Tokens::At => {},
-                &Tokens::Chan => {},
-                &Tokens::Identifier(_) => { self.ident = None },
-                &Tokens::Num(_) | &Tokens::NegNum(_) => {
-                    match biter.next_back().unwrap() {
-                        &Tokens::At => { self.target = None },
-                        &Tokens::Chan => { self.chan = -1 },
-                        &Tokens::Fade => { self.fade = None },
-                        _ => unreachable!()
-                    }
-                },
-                &Tokens::Float(_) => { self.fade = None },
-                _ => unreachable!()
-            }
-        }
-        self.cli.pop()
-    }
-    fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
-        let last = self.cli.iter().next_back().unwrap_or(&Tokens::Vol).clone();
-        match last {
-            Tokens::Vol => {
-                if let Tokens::Identifier(id) = tok {
-                    if ctx.idents.get(&id).is_none() {
-                        Err(ParserErr::ArgumentError(format!("The identifier ${} does not exist.", id)))
-                    }
-                    else {
-                        self.ident = Some(id.clone());
-                        self.cli.push(Tokens::Identifier(id));
-                        Ok(())
-                    }
-                }
-                else {
-                    Err(ParserErr::Expected("[identifier]"))
-                }
-            },
-            Tokens::Identifier(_) => {
-                match tok {
-                    Tokens::At => {
-                        self.cli.push(Tokens::At);
-                        Ok(())
-                    },
-                    Tokens::Chan => {
-                        self.cli.push(Tokens::Chan);
-                        Ok(())
-                    },
-                    _ => Err(ParserErr::Expected("@ or Chan"))
-                }
-            },
-            Tokens::Chan => {
-                if let Tokens::Num(n) = tok {
-                    self.chan = n as isize;
-                    self.cli.push(Tokens::Num(n));
-                    Ok(())
-                }
-                else {
-                    Err(ParserErr::Expected("Num"))
-                }
-            },
-            Tokens::At => {
-                match tok {
-                    Tokens::Num(n) => {
-                        self.target = Some(n as i16);
-                        self.cli.push(Tokens::Num(n));
-                        Ok(())
-                    },
-                    Tokens::NegNum(n) => {
-                        self.target = Some(n);
-                        self.cli.push(Tokens::NegNum(n));
-                        Ok(())
-                    },
-                    _ => Err(ParserErr::Expected("Num or NegNum"))
-                }
-            },
-            Tokens::Num(_) | Tokens::NegNum(_) => {
-                match {
-                    let mut i = self.cli.iter();
-                    i.next_back();
-                    i.next_back().unwrap().clone()
-                } {
-                    Tokens::At => {
-                        if let Tokens::Fade = tok {
-                            self.cli.push(Tokens::Fade);
-                            Ok(())
-                        }
-                        else {
-                            Err(ParserErr::Expected("Fade or [finish]"))
-                        }
-                    },
-                    Tokens::Chan => {
-                        if let Tokens::At = tok {
-                            self.cli.push(Tokens::At);
-                            Ok(())
-                        }
-                        else {
-                            Err(ParserErr::Expected("@"))
-                        }
-                    },
-                    Tokens::Fade => Err(ParserErr::Expected("[finish]")),
-                    _ => unreachable!()
-                }
-            },
-            Tokens::Fade => {
-                match tok {
-                    Tokens::Num(n) => {
-                        self.fade = Some(n as f32);
-                        self.cli.push(Tokens::Num(n));
-                        Ok(())
-                    },
-                    Tokens::Float(f) => {
-                        self.fade = Some(f);
-                        self.cli.push(Tokens::Float(f));
-                        Ok(())
-                    }
-                    _ => Err(ParserErr::Expected("Num or Float"))
-                }
-            },
-            Tokens::Float(_) => Err(ParserErr::Expected("[finish]")),
-            _ => unreachable!()
-        }
-    }
-}
-pub struct LoadCommand {
-    cli: Vec<Tokens>,
-    file: Option<SndFile>,
-    ident: Option<String>
-}
-impl LoadCommand {
-    fn new() -> Self {
-        LoadCommand {
-            cli: Vec::new(),
-            file: None,
-            ident: None
-        }
-    }
-}
-impl Command for LoadCommand {
-    fn execute(&mut self, ctx: &mut Context) {
-        let file = self.file.take();
-        let mut ident = self.ident.take();
-        let mut cvec = vec![];
-        for stream in FileStream::new(file.unwrap()) {
-            cvec.push(stream.get_x());
-            ctx.mstr.add_source(Box::new(stream));
-        }
-        for (i, ch) in cvec.iter().enumerate() {
-            if i > 15 { continue; }
-            ctx.mstr.wire(ch.uuid(), ctx.qchans[i]).unwrap();
-        }
-        if ident.is_none() {
-            let mut path = None;
-            for tok in self.cli.iter() {
-                if let &Tokens::Path(ref p) = tok {
-                    path = Some(p.clone());
-                    break;
-                }
-            }
-            let filen = path.expect("invariant violated: file, but no Path in cli");
-            ident = Some(::std::path::Path::new(&filen).file_stem().map(|x| x.to_str()).unwrap().unwrap().to_owned());
-        }
-        ctx.idents.insert(ident.unwrap(), cvec);
-    }
-    fn line(&self) -> (Tokens, &Vec<Tokens>) {
-        (Tokens::Load, &self.cli)
-    }
-    fn is_complete(&self, ctx: &Context) -> Result<(), String> {
-        if self.file.is_none() { Err(format!("No file.")) }
-        else {
-            if self.ident.is_none() {
-                let mut path = None;
-                for tok in self.cli.iter() {
-                    if let &Tokens::Path(ref p) = tok {
-                        path = Some(p.clone());
-                        break;
-                    }
-                }
-                let filen = path.expect("invariant violated: file, but no Path in cli");
-                let ident = ::std::path::Path::new(&filen).file_stem().map(|x| x.to_str());
-                if let Some(Some(id)) = ident {
-                    if ctx.idents.get(id).is_some() {
-                        Err(format!("The identifier ${} is already in use. Please manually specify an identifier name for this file.", id))
-                    }
-                    else {
-                        Ok(())
-                    }
-
-                }
-                else {
-                    Err(format!("Please manually specify an identifier name for this file."))
-                }
-            }
-            else {
-                let self_ident: &str = self.ident.as_ref().unwrap();
-                if ctx.idents.get(self_ident).is_some() {
-                    Err(format!("The identifier ${} is already in use. Please specify another.", self_ident))
-                }
-                else {
-                    Ok(())
-                }
-            }
-        }
-    }
-    fn back(&mut self) -> Option<Tokens> {
-        {
-            let ld = Tokens::Load; // to appease borrowck
-            let last = self.cli.iter().next_back().unwrap_or(&ld);
-            match last {
-                &Tokens::Load => {},
-                &Tokens::Path(_) => { self.file = None },
-                &Tokens::As => {},
-                &Tokens::Identifier(_) => { self.ident = None },
-                _ => unreachable!()
-            }
-        }
-        self.cli.pop()
-    }
-    fn add(&mut self, tok: Tokens, ctx: &Context) -> Result<(), ParserErr> {
-        let last = self.cli.iter().next_back().unwrap_or(&Tokens::Load).clone();
-        match last {
-            Tokens::Load => {
-                if let Tokens::Path(path) = tok {
-                    let file = SndFile::open(&path);
-                    if let Err(e) = file {
-                        Err(ParserErr::ArgumentError(format!("Failed to open file: {}", e.expl)))
-                    }
-                    else if file.as_ref().unwrap().info.samplerate != 44_100 {
-                        Err(ParserErr::ArgumentError(format!("Sample rate mismatch.")))
-                    }
-                    else {
-                        self.file = Some(file.unwrap());
-                        self.cli.push(Tokens::Path(path));
-                        Ok(())
-                    }
-                }
-                else {
-                    Err(ParserErr::Expected("Path"))
-                }
-            },
-            Tokens::Path(_) => {
-                if let Tokens::As = tok {
-                    self.cli.push(Tokens::As);
-                    Ok(())
-                }
-                else {
-                    Err(ParserErr::Expected("As or [finish]"))
-                }
-            },
-            Tokens::As => {
-                if let Tokens::Identifier(ident) = tok {
-                    if ctx.idents.get(&ident).is_some() {
-                        Err(ParserErr::ArgumentError(format!("The identifier ${} is already in use", ident)))
-                    }
-                    else {
-                        self.ident = Some(ident.clone());
-                        self.cli.push(Tokens::Identifier(ident));
-                        Ok(())
-                    }
-                }
-                else {
-                    Err(ParserErr::Expected("[identifier]"))
-                }
-            },
-            Tokens::Identifier(_) => {
-                Err(ParserErr::Expected("[finish]"))
-            },
-            _ => unreachable!()
-        }
-    }
-}
-
 pub enum CmdParserFSM {
     Idle,
     Parsing(Box<Command>),
-    ParsingEtokFor(Box<Command>, EtokenFSM)
+    ParsingEtokFor(Box<Command>, EtokenFSM),
 }
 impl CmdParserFSM {
     pub fn new() -> Self {
@@ -630,15 +55,15 @@ impl CmdParserFSM {
             &CmdParserFSM::ParsingEtokFor(ref cmd, ref etok) => CmdParserFSM::cmdline_from_cmd(cmd) + " " + &etok.to_string()
         }
     }
-    pub fn debug_remove_me(&self, ctx: &Context) -> String {
+    pub fn debug_remove_me(&self, ctx: &ReadableContext) -> String {
         match self {
             &CmdParserFSM::Idle => format!("idle"),
             &CmdParserFSM::Parsing(ref cmd) => format!("parsing command (complete: {:?})", cmd.is_complete(ctx)),
             &CmdParserFSM::ParsingEtokFor(ref cmd, ref etok) => format!("parsing etok {:?} for command (complete: {:?})", etok, cmd.is_complete(ctx))
         }
     }
-    pub fn back(self) -> Self {
-        match self {
+    pub fn back(&mut self){
+        *self = match mem::replace(self, CmdParserFSM::Idle) {
             CmdParserFSM::Idle => CmdParserFSM::Idle,
             CmdParserFSM::Parsing(mut cmd) => {
                 let popped = cmd.back();
@@ -667,15 +92,62 @@ impl CmdParserFSM {
             }
         }
     }
-    pub fn enter(self, ctx: &mut Context) -> Result<Self, (Self, String)> {
-        match self {
+    pub fn would_enter(&mut self, ctx: &ReadableContext) -> bool {
+        // TODO: not very DRY either
+        match *self {
+            CmdParserFSM::Idle => false,
+            CmdParserFSM::Parsing(ref cmd) => {
+                if let Err(_) = cmd.is_complete(ctx) {
+                    false
+                }
+                else {
+                    true
+                }
+            },
+            CmdParserFSM::ParsingEtokFor(ref mut cmd, ref etok) => {
+                // TODO: needs more DRY
+                match etok.clone().finish(false) {
+                    SpaceRet::Parsed(tok) => {
+                        match cmd.add(tok, ctx) {
+                            Ok(_) => {
+                                let ret = if let Err(_) = cmd.is_complete(ctx) {
+                                    false
+                                }
+                                else {
+                                    true
+                                };
+                                cmd.back();
+                                ret
+                            }
+                            Err(_) => false
+                        }
+                    },
+                    SpaceRet::Continue(_) => {
+                        false
+                    },
+                    SpaceRet::Incomplete(_) => {
+                        false
+                    },
+                    SpaceRet::IntErr(_, _) => {
+                        false
+                    },
+                    SpaceRet::FloatErr(_, _) => {
+                        false
+                    }
+                }
+            }
+        }
+    }
+    pub fn enter(&mut self, ctx: &ReadableContext) -> Result<Option<Box<Command>>, String> {
+        let mut exec = None;
+        let ret = match mem::replace(self, CmdParserFSM::Idle) {
             CmdParserFSM::Idle => Ok(CmdParserFSM::Idle),
             CmdParserFSM::Parsing(mut cmd) => {
                 if let Err(e) = cmd.is_complete(ctx) {
                     Err((CmdParserFSM::Parsing(cmd), e))
                 }
                 else {
-                    cmd.execute(ctx);
+                    exec = Some(cmd);
                     Ok(CmdParserFSM::Idle)
                 }
             },
@@ -690,7 +162,7 @@ impl CmdParserFSM {
                                     Err((CmdParserFSM::Parsing(cmd), e))
                                 }
                                 else {
-                                    cmd.execute(ctx);
+                                    exec = Some(cmd);
                                     Ok(CmdParserFSM::Idle)
                                 }
                             }
@@ -711,10 +183,20 @@ impl CmdParserFSM {
                     }
                 }
             }
+        };
+        match ret {
+            Ok(slf) => {
+                *self = slf;
+                Ok(exec)
+            },
+            Err((slf, e)) => {
+                *self = slf;
+                Err(e)
+            }
         }
     }
-    pub fn addc(self, c: char, ctx: &Context) -> Result<Self, (Self, ParserErr)> {
-        match self {
+    pub fn addc(&mut self, c: char, ctx: &ReadableContext) -> Result<(), ParserErr> {
+        let ret = match mem::replace(self, CmdParserFSM::Idle) {
             CmdParserFSM::Idle => {
                 match CmdParserFSM::char_tok(c) {
                     Some(Tokens::Load) => {
@@ -779,6 +261,16 @@ impl CmdParserFSM {
                         Err((opt, err)) => Err((CmdParserFSM::ParsingEtokFor(cmd, opt.unwrap()), err))
                     }
                 }
+            }
+        };
+        match ret {
+            Ok(slf) => {
+                *self = slf;
+                Ok(())
+            },
+            Err((slf, e)) => {
+                *self = slf;
+                Err(e)
             }
         }
     }
