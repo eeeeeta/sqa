@@ -2,6 +2,43 @@
 <!-- Generated with glade 3.20.0 -->
 <interface>
   <requires lib="gtk+" version="3.20"/>
+  <object class="GtkPopover" id="Edity">
+    <property name="can_focus">False</property>
+    <property name="position">bottom</property>
+    <child>
+      <object class="GtkFrame">
+        <property name="visible">True</property>
+        <property name="can_focus">False</property>
+        <property name="label_xalign">0</property>
+        <property name="shadow_type">none</property>
+        <child>
+          <object class="GtkAlignment">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="left_padding">12</property>
+            <child>
+              <object class="GtkEntry" id="EdityEntry">
+                <property name="width_request">160</property>
+                <property name="height_request">33</property>
+                <property name="visible">True</property>
+                <property name="can_focus">True</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child type="label">
+          <object class="GtkLabel">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="label" translatable="yes">Edity thingy of Pure Awesome</property>
+            <attributes>
+              <attribute name="variant" value="small-caps"/>
+            </attributes>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
   <object class="GtkApplicationWindow" id="SQA Main Window">
     <property name="can_focus">False</property>
     <child>

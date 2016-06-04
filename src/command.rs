@@ -1,15 +1,24 @@
-use parser::{Tokens, EtokenFSM, ParserErr, SpaceRet};
-use state::{ReadableContext, WritableContext, ObjectType, Database};
-use rsndfile::SndFile;
-use streamv2::{FileStream, FileStreamX, LiveParameters, db_lin};
-use mixer::FRAMES_PER_CALLBACK;
-use std::string::ToString;
-use uuid::Uuid;
+use state::{ReadableContext, WritableContext};
 use std::any::Any;
 use mopa;
-
+pub use commands::*;
 use std::rc::Rc;
 use std::cell::RefCell;
+/// State of a command.
+pub struct CommandState {
+    title: String,
+    desc: String,
+    exec: bool,
+    complete: bool
+}
+/// Command thingy.
+pub trait Command: mopa::Any + Send + 'static {
+    fn get_hunks(&self) -> Vec<Box<Hunk>>;
+    fn get_state(&self, ctx: &ReadableContext) -> CommandState;
+    fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String>;
+}
+
+mopafy!(Command);
 
 #[derive(Clone, Copy, Debug)]
 pub enum HunkTypes {
@@ -49,11 +58,14 @@ pub trait Hunk {
     /// A `None` value for `val` unsets the value.
     fn set_val(&mut self, ctx: &ReadableContext, val: Option<Box<Any>>) -> Result<(), String>;
 }
+
+/// Static hunk that displays a bit of text.
+/// Intended to add wording to a command line, like `As`.
 pub struct TextHunk {
     text: String
 }
 impl TextHunk {
-    fn new(s: String) -> Box<Hunk> {
+    pub fn new(s: String) -> Box<Hunk> {
         Box::new(TextHunk { text: s })
     }
 }
@@ -69,6 +81,7 @@ impl Hunk for TextHunk {
         Err(format!("Setting a text hunk should never happen. Something's gone wrong."))
     }
 }
+
 /// An implementation of the hunk API.
 pub struct GenericHunk<T, U> where T: Any, U: Command {
     /// A reference to the command this hunk is from.
@@ -77,8 +90,10 @@ pub struct GenericHunk<T, U> where T: Any, U: Command {
     get: Box<Fn(&U) -> Option<T>>,
     set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>
 }
+
+
 impl<T, U> GenericHunk<T, U> where T: Any, U: Command {
-    fn new(ty: HunkTypes, get: Box<Fn(&U) -> Option<T>>, set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>) -> Box<Hunk> {
+    pub fn new(ty: HunkTypes, get: Box<Fn(&U) -> Option<T>>, set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>) -> Box<Hunk> {
         Box::new(GenericHunk {
             ty: ty,
             command: None,
@@ -96,7 +111,7 @@ impl<T, U> Hunk for GenericHunk<T, U> where T: Any, U: Command {
     }
     fn get_val(&self) -> Option<Box<Any>> {
         let cmd = self.command.as_ref().unwrap().borrow();
-        let cmd = cmd.downcast_ref::<U>().unwrap();
+        let cmd = cmd.downcast_ref().unwrap();
         let getter = &self.get;
         getter(cmd).map(|x| Box::new(x) as Box<Any>)
     }
@@ -113,84 +128,3 @@ impl<T, U> Hunk for GenericHunk<T, U> where T: Any, U: Command {
         }
     }
 }
-
-pub struct LoadCommand {
-    file: Option<String>,
-    ident: Option<String>
-}
-impl LoadCommand {
-    pub fn new() -> Self {
-        LoadCommand {
-            file: None,
-            ident: None
-        }
-    }
-}
-impl Command for LoadCommand {
-    fn get_hunks(&self) -> Vec<Box<Hunk>> {
-        let file_getter = move |selfish: &Self| -> Option<String> {
-            selfish.file.as_ref().map(|x| x.clone())
-        };
-        let file_setter = move |selfish: &mut Self, _: &ReadableContext, val: Option<&String>| {
-            if let Some(val) = val {
-                let file = SndFile::open(val);
-                if let Err(e) = file {
-                    Err(format!("Failed to open file: {}", e.expl))
-                }
-                else if file.as_ref().unwrap().info.samplerate != 44_100 {
-                    Err(format!("SQA only supports files with a samplerate of 44.1kHz."))
-                }
-                else {
-                    selfish.file = Some(val.clone());
-                    Ok(())
-                }
-            }
-            else {
-                selfish.file = None;
-                Ok(())
-            }
-        };
-        let ident_getter = move |selfish: &Self| -> Option<String> {
-            selfish.ident.as_ref().map(|x| x.clone())
-        };
-        let ident_setter = move |selfish: &mut Self, ctx: &ReadableContext, val: Option<&String>| {
-            if let Some(val) = val {
-                if ctx.db.resolve_ident(val).is_some() {
-                    Err(format!("Identifier is already in use."))
-                }
-                else {
-                    selfish.ident = Some(val.clone());
-                    Ok(())
-                }
-            }
-            else {
-                selfish.ident = None;
-                Ok(())
-            }
-        };
-        vec![
-            GenericHunk::new(HunkTypes::FilePath, Box::new(file_getter), Box::new(file_setter)),
-            TextHunk::new(format!("As")),
-            GenericHunk::new(HunkTypes::String, Box::new(ident_getter), Box::new(ident_setter))
-        ]
-    }
-    fn get_state(&self, ctx: &ReadableContext) -> CommandState {
-        unimplemented!()
-    }
-    fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String> {
-        unimplemented!()
-    }
-}
-pub struct CommandState {
-    title: String,
-    desc: String,
-    exec: bool,
-    complete: bool
-}
-pub trait Command: mopa::Any + Send + 'static {
-    fn get_hunks(&self) -> Vec<Box<Hunk>>;
-    fn get_state(&self, ctx: &ReadableContext) -> CommandState;
-    fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String>;
-}
-
-mopafy!(Command);
