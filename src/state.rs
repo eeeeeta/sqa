@@ -7,7 +7,6 @@ use uuid::Uuid;
 use std::any::Any;
 use std::fmt;
 use std::sync::{Arc, Mutex};
-use portaudio as pa;
 #[derive(Clone)]
 /// The type of an object stored in the database.
 pub enum ObjectType {

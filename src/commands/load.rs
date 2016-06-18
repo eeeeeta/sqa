@@ -55,13 +55,32 @@ impl Command for LoadCommand {
             }
         };
         vec![
-            GenericHunk::new(HunkTypes::FilePath, Box::new(file_getter), Box::new(file_setter)),
+            GenericHunk::new(HunkTypes::FilePath,
+                             "Provide the file path to an audio file.",
+                             Box::new(file_getter), Box::new(file_setter)),
             TextHunk::new(format!("As")),
-            GenericHunk::new(HunkTypes::String, Box::new(ident_getter), Box::new(ident_setter))
+            GenericHunk::new(HunkTypes::String,
+                             "Provide an optional named identifier for the new stream.",
+                             Box::new(ident_getter), Box::new(ident_setter))
         ]
     }
     fn get_state(&self, ctx: &ReadableContext) -> CommandState {
-        unimplemented!()
+        if self.file.is_none() {
+            CommandState::bad(format!("Provide a filename to load."))
+        }
+        else {
+            if self.ident.is_some() {
+                if ctx.db.resolve_ident(self.ident.as_ref().unwrap()).is_some() {
+                    CommandState::bad(format!("Identifier ${} is already in use.", self.ident.as_ref().unwrap()))
+                }
+                else {
+                    CommandState::good(format!("Ready to load file (as ${})", self.ident.as_ref().unwrap()))
+                }
+            }
+            else {
+                CommandState::good(format!("Probably ready to load. I haven't bothered to check."))
+            }
+        }
     }
     fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String> {
         unimplemented!()

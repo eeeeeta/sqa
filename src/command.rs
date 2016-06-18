@@ -6,10 +6,22 @@ use std::rc::Rc;
 use std::cell::RefCell;
 /// State of a command.
 pub struct CommandState {
-    title: String,
-    desc: String,
-    exec: bool,
-    complete: bool
+    pub message: String,
+    pub complete: bool
+}
+impl CommandState {
+    pub fn good(st: String) -> Self {
+        CommandState {
+            message: st,
+            complete: true
+        }
+    }
+    pub fn bad(st: String) -> Self {
+        CommandState {
+            message: st,
+            complete: false
+        }
+    }
 }
 /// Command thingy.
 pub trait Command: mopa::Any + Send + 'static {
@@ -35,6 +47,35 @@ pub enum HunkTypes {
     /// Immutable text: `String` (setter always returns error)
     Label
 }
+macro_rules! get_str_and {
+    ($x:expr, $a:expr) => {{
+        get_typ_and!($x, String => str, $a)
+    }}
+}
+macro_rules! get_typ_and {
+    ($x:expr, $t1:ty => $t2:ty, $a:expr) => {{
+        match get_and_coerce!($x, $t1) {
+            Some(st) => {
+                let strn = Some(&*st as &$t2);
+                $a(strn)
+            },
+            None => $a(None)
+        }
+    }}
+}
+
+
+macro_rules! get_and_coerce {
+    ($x:expr, $t:ty) => {{
+        let val = $x.get_val();
+        match val {
+            Some(bx) => {
+                Some(bx.downcast::<$t>().expect("get_and_coerce!() called with incorrect type"))
+            }
+            None => None
+        }
+    }}
+}
 /// Describes a hunk of a command line that controls a specific parameter.
 ///
 /// # About hunks
@@ -48,6 +89,7 @@ pub trait Hunk {
     /// Gives this hunk a reference to its command.
     /// This must be called before attempting to do anything with the hunk.
     fn assoc(&mut self, host: Rc<RefCell<Box<Command>>>);
+    fn help(&self) -> &'static str { "If you're seeing this, someone forgot to add help." }
     /// Gives the type of this hunk - what UI element it should resemble.
     fn disp(&self) -> HunkTypes;
     /// Gets this hunk's value - dependent on what type it is.
@@ -86,6 +128,7 @@ impl Hunk for TextHunk {
 pub struct GenericHunk<T, U> where T: Any, U: Command {
     /// A reference to the command this hunk is from.
     command: Option<Rc<RefCell<Box<Command>>>>,
+    hlp: &'static str,
     ty: HunkTypes,
     get: Box<Fn(&U) -> Option<T>>,
     set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>
@@ -93,9 +136,10 @@ pub struct GenericHunk<T, U> where T: Any, U: Command {
 
 
 impl<T, U> GenericHunk<T, U> where T: Any, U: Command {
-    pub fn new(ty: HunkTypes, get: Box<Fn(&U) -> Option<T>>, set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>) -> Box<Hunk> {
+    pub fn new(ty: HunkTypes, hlp: &'static str, get: Box<Fn(&U) -> Option<T>>, set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>) -> Box<Hunk> {
         Box::new(GenericHunk {
             ty: ty,
+            hlp: hlp,
             command: None,
             get: get,
             set: set
@@ -108,6 +152,9 @@ impl<T, U> Hunk for GenericHunk<T, U> where T: Any, U: Command {
     }
     fn disp(&self) -> HunkTypes {
         self.ty
+    }
+    fn help(&self) -> &'static str {
+        self.hlp
     }
     fn get_val(&self) -> Option<Box<Any>> {
         let cmd = self.command.as_ref().unwrap().borrow();
