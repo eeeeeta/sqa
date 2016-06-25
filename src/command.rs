@@ -1,32 +1,10 @@
 use state::{ReadableContext, WritableContext};
 use std::any::Any;
 use mopa;
-pub use commands::*;
-use std::rc::Rc;
-use std::cell::RefCell;
-/// State of a command.
-pub struct CommandState {
-    pub message: String,
-    pub complete: bool
-}
-impl CommandState {
-    pub fn good(st: String) -> Self {
-        CommandState {
-            message: st,
-            complete: true
-        }
-    }
-    pub fn bad(st: String) -> Self {
-        CommandState {
-            message: st,
-            complete: false
-        }
-    }
-}
+
 /// Command thingy.
 pub trait Command: mopa::Any + Send + 'static {
     fn get_hunks(&self) -> Vec<Box<Hunk>>;
-    fn get_state(&self, ctx: &ReadableContext) -> CommandState;
     fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String>;
 }
 
@@ -47,34 +25,12 @@ pub enum HunkTypes {
     /// Immutable text: `String` (setter always returns error)
     Label
 }
-macro_rules! get_str_and {
-    ($x:expr, $a:expr) => {{
-        get_typ_and!($x, String => str, $a)
-    }}
-}
-macro_rules! get_typ_and {
-    ($x:expr, $t1:ty => $t2:ty, $a:expr) => {{
-        match get_and_coerce!($x, $t1) {
-            Some(st) => {
-                let strn = Some(&*st as &$t2);
-                $a(strn)
-            },
-            None => $a(None)
-        }
-    }}
-}
-
-
-macro_rules! get_and_coerce {
-    ($x:expr, $t:ty) => {{
-        let val = $x.get_val();
-        match val {
-            Some(bx) => {
-                Some(bx.downcast::<$t>().expect("get_and_coerce!() called with incorrect type"))
-            }
-            None => None
-        }
-    }}
+pub struct HunkState<'a> {
+    pub val: Option<Box<Any>>,
+    pub required: bool,
+    pub help: &'static str,
+    pub stored: Option<&'a Box<Any>>,
+    pub err: Option<String>
 }
 /// Describes a hunk of a command line that controls a specific parameter.
 ///
@@ -86,19 +42,15 @@ macro_rules! get_and_coerce {
 /// Hunks are expected to use given types for `get_val` and `set_val`, depending on their type.
 /// See the `HunkTypes` enum for which ones.
 pub trait Hunk {
-    /// Gives this hunk a reference to its command.
-    /// This must be called before attempting to do anything with the hunk.
-    fn assoc(&mut self, host: Rc<RefCell<Box<Command>>>);
-    fn help(&self) -> &'static str { "If you're seeing this, someone forgot to add help." }
-    /// Gives the type of this hunk - what UI element it should resemble.
     fn disp(&self) -> HunkTypes;
     /// Gets this hunk's value - dependent on what type it is.
-    fn get_val(&self) -> Option<Box<Any>>;
+    fn get_val(&self, cmd: &Box<Command>, ctx: &ReadableContext) -> HunkState;
     /// Sets this hunk's value - dependent on what type it is.
-    /// This may return with an error string if the value is invalid.
-    ///
-    /// A `None` value for `val` unsets the value.
-    fn set_val(&mut self, ctx: &ReadableContext, val: Option<Box<Any>>) -> Result<(), String>;
+    /// Can't fail - if there is a problem, the hunk should store the user's value (and return it
+    /// when get_val() is called)
+    fn set_val(&mut self, cmd: &mut Box<Command>, ctx: &ReadableContext, val: Option<Box<Any>>);
+    /// Clears this hunk's stored value.
+    fn clear(&mut self);
 }
 
 /// Static hunk that displays a bit of text.
@@ -112,66 +64,92 @@ impl TextHunk {
     }
 }
 impl Hunk for TextHunk {
-    fn assoc(&mut self, _: Rc<RefCell<Box<Command>>>) {}
     fn disp(&self) -> HunkTypes {
         HunkTypes::Label
     }
-    fn get_val(&self) -> Option<Box<Any>> {
-        Some(Box::new(self.text.clone()))
+    fn get_val(&self, _: &Box<Command>, _: &ReadableContext) -> HunkState {
+        HunkState {
+            val: Some(Box::new(self.text.clone())),
+            required: false,
+            help: "just a simple little text thing, doing its job",
+            stored: None,
+            err: None
+        }
     }
-    fn set_val(&mut self, _: &ReadableContext, _: Option<Box<Any>>) -> Result<(), String> {
-        Err(format!("Setting a text hunk should never happen. Something's gone wrong."))
+    fn set_val(&mut self, _: &mut Box<Command>, _: &ReadableContext, _: Option<Box<Any>>) {
+        panic!("Hunk method called on text hunk");
     }
+    fn clear(&mut self) {}
 }
 
 /// An implementation of the hunk API.
 pub struct GenericHunk<T, U> where T: Any, U: Command {
-    /// A reference to the command this hunk is from.
-    command: Option<Rc<RefCell<Box<Command>>>>,
     hlp: &'static str,
     ty: HunkTypes,
     get: Box<Fn(&U) -> Option<T>>,
-    set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>
+    set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>,
+    err: Box<Fn(&U, &ReadableContext) -> Option<String>>,
+    stored_val: Option<Box<Any>>,
+    stored_err: Option<String>,
+    required: bool
 }
 
 
 impl<T, U> GenericHunk<T, U> where T: Any, U: Command {
-    pub fn new(ty: HunkTypes, hlp: &'static str, get: Box<Fn(&U) -> Option<T>>, set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>) -> Box<Hunk> {
+    pub fn new(ty: HunkTypes, hlp: &'static str, reqd: bool,
+               get: Box<Fn(&U) -> Option<T>>,
+               set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>,
+               err: Box<Fn(&U, &ReadableContext) -> Option<String>>) -> Box<Hunk> {
         Box::new(GenericHunk {
             ty: ty,
             hlp: hlp,
-            command: None,
             get: get,
-            set: set
+            set: set,
+            err: err,
+            required: reqd,
+            stored_val: None,
+            stored_err: None
         })
     }
 }
 impl<T, U> Hunk for GenericHunk<T, U> where T: Any, U: Command {
-    fn assoc(&mut self, host: Rc<RefCell<Box<Command>>>) {
-        self.command = Some(host);
-    }
     fn disp(&self) -> HunkTypes {
         self.ty
     }
-    fn help(&self) -> &'static str {
-        self.hlp
-    }
-    fn get_val(&self) -> Option<Box<Any>> {
-        let cmd = self.command.as_ref().unwrap().borrow();
+    fn get_val(&self, cmd: &Box<Command>, ctx: &ReadableContext) -> HunkState {
         let cmd = cmd.downcast_ref().unwrap();
         let getter = &self.get;
-        getter(cmd).map(|x| Box::new(x) as Box<Any>)
+        let err_getter = &self.err;
+        HunkState {
+            val: getter(cmd).map(|x| Box::new(x) as Box<Any>),
+            required: self.required,
+            help: self.hlp,
+            stored: self.stored_val.as_ref(),
+            err: if self.stored_err.is_some() {
+                Some(self.stored_err.as_ref().unwrap().clone())
+            }
+            else {
+                err_getter(cmd, ctx)
+            }
+        }
     }
-    fn set_val(&mut self, ctx: &ReadableContext, val: Option<Box<Any>>) -> Result<(), String> {
-        let mut cmd = self.command.as_ref().unwrap().borrow_mut();
+    fn set_val(&mut self, cmd: &mut Box<Command>, ctx: &ReadableContext, val: Option<Box<Any>>) {
         let mut cmd = cmd.downcast_mut().unwrap();
         let setter = &mut self.set;
-        if let Some(ty) = val {
+        let ret = if let Some(ref ty) = val {
             let new_val = Some(ty.downcast_ref().expect("GenericHunk got wrong type for set()"));
             setter(cmd, ctx, new_val)
         }
         else {
             setter(cmd, ctx, None)
+        };
+        if ret.is_err() {
+            self.stored_val = val;
+            self.stored_err = ret.err();
         }
+    }
+    fn clear(&mut self) {
+        self.stored_val = None;
+        self.stored_err = None;
     }
 }

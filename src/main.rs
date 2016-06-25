@@ -32,6 +32,7 @@ use std::sync::mpsc::{Sender, Receiver, channel};
 use command::{Command, Hunk, HunkTypes};
 use std::rc::Rc;
 use std::cell::RefCell;
+use commands::*;
 use ui::CommandLine;
 
 fn main() {
@@ -41,8 +42,7 @@ fn main() {
     let win: Window = builder.get_object("SQA Main Window").unwrap();
     let ctx = Rc::new(RefCell::new(ReadableContext::new()));
     let mut cmdl = CommandLine::new(ctx.clone(), builder);
-    cmdl.set_cmd(Box::new(commands::LoadCommand::new()));
-    cmdl.build();
+    CommandLine::build(cmdl, Box::new(LoadCommand::new()));
     win.connect_delete_event(|_, _| {
         gtk::main_quit();
         Inhibit(false)

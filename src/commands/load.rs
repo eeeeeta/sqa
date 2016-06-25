@@ -36,6 +36,14 @@ impl Command for LoadCommand {
                 Ok(())
             }
         };
+        let file_egetter = move |selfish: &Self, _: &ReadableContext| -> Option<String> {
+            if selfish.file.is_none() {
+                Some(format!("A filename to open is required."))
+            }
+            else {
+                None
+            }
+        };
         let ident_getter = move |selfish: &Self| -> Option<String> {
             selfish.ident.as_ref().map(|x| x.clone())
         };
@@ -54,33 +62,23 @@ impl Command for LoadCommand {
                 Ok(())
             }
         };
+        let ident_egetter = move |selfish: &Self, ctx: &ReadableContext| -> Option<String> {
+            if selfish.ident.is_some() {
+                if ctx.db.resolve_ident(selfish.ident.as_ref().unwrap()).is_some() {
+                    return Some(format!("Identifier ${} is already in use.", selfish.ident.as_ref().unwrap()))
+                }
+            }
+            None
+        };
         vec![
             GenericHunk::new(HunkTypes::FilePath,
-                             "Provide the file path to an audio file.",
-                             Box::new(file_getter), Box::new(file_setter)),
+                             "Provide the file path to an audio file.", true,
+                             Box::new(file_getter), Box::new(file_setter), Box::new(file_egetter)),
             TextHunk::new(format!("As")),
             GenericHunk::new(HunkTypes::String,
-                             "Provide an optional named identifier for the new stream.",
-                             Box::new(ident_getter), Box::new(ident_setter))
+                             "Provide an optional named identifier for the new stream.", false,
+                             Box::new(ident_getter), Box::new(ident_setter), Box::new(ident_egetter))
         ]
-    }
-    fn get_state(&self, ctx: &ReadableContext) -> CommandState {
-        if self.file.is_none() {
-            CommandState::bad(format!("Provide a filename to load."))
-        }
-        else {
-            if self.ident.is_some() {
-                if ctx.db.resolve_ident(self.ident.as_ref().unwrap()).is_some() {
-                    CommandState::bad(format!("Identifier ${} is already in use.", self.ident.as_ref().unwrap()))
-                }
-                else {
-                    CommandState::good(format!("Ready to load file (as ${})", self.ident.as_ref().unwrap()))
-                }
-            }
-            else {
-                CommandState::good(format!("Probably ready to load. I haven't bothered to check."))
-            }
-        }
     }
     fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String> {
         unimplemented!()

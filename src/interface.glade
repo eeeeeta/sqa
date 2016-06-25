@@ -123,7 +123,7 @@
                   <object class="GtkLabel" id="line-hint-label">
                     <property name="visible">True</property>
                     <property name="can_focus">False</property>
-                    <property name="label" translatable="yes">Command contains 5 errors.</property>
+                    <property name="label" translatable="yes">Your command is bad, and you should feel bad.</property>
                   </object>
                   <packing>
                     <property name="expand">False</property>
