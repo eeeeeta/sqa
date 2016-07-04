@@ -4,6 +4,7 @@ use mopa;
 
 /// Command thingy.
 pub trait Command: mopa::Any + Send + 'static {
+    fn name(&self) -> &'static str;
     fn get_hunks(&self) -> Vec<Box<Hunk>>;
     fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String>;
 }
@@ -25,11 +26,10 @@ pub enum HunkTypes {
     /// Immutable text: `String` (setter always returns error)
     Label
 }
-pub struct HunkState<'a> {
+pub struct HunkState {
     pub val: Option<Box<Any>>,
     pub required: bool,
     pub help: &'static str,
-    pub stored: Option<&'a Box<Any>>,
     pub err: Option<String>
 }
 /// Describes a hunk of a command line that controls a specific parameter.
@@ -43,14 +43,10 @@ pub struct HunkState<'a> {
 /// See the `HunkTypes` enum for which ones.
 pub trait Hunk {
     fn disp(&self) -> HunkTypes;
-    /// Gets this hunk's value - dependent on what type it is.
+    /// Gets this hunk's value and state.
     fn get_val(&self, cmd: &Box<Command>, ctx: &ReadableContext) -> HunkState;
     /// Sets this hunk's value - dependent on what type it is.
-    /// Can't fail - if there is a problem, the hunk should store the user's value (and return it
-    /// when get_val() is called)
-    fn set_val(&mut self, cmd: &mut Box<Command>, ctx: &ReadableContext, val: Option<Box<Any>>);
-    /// Clears this hunk's stored value.
-    fn clear(&mut self);
+    fn set_val(&mut self, cmd: &mut Box<Command>, val: Option<Box<Any>>);
 }
 
 /// Static hunk that displays a bit of text.
@@ -72,14 +68,12 @@ impl Hunk for TextHunk {
             val: Some(Box::new(self.text.clone())),
             required: false,
             help: "just a simple little text thing, doing its job",
-            stored: None,
             err: None
         }
     }
-    fn set_val(&mut self, _: &mut Box<Command>, _: &ReadableContext, _: Option<Box<Any>>) {
+    fn set_val(&mut self, _: &mut Box<Command>, _: Option<Box<Any>>) {
         panic!("Hunk method called on text hunk");
     }
-    fn clear(&mut self) {}
 }
 
 /// An implementation of the hunk API.
@@ -87,10 +81,8 @@ pub struct GenericHunk<T, U> where T: Any, U: Command {
     hlp: &'static str,
     ty: HunkTypes,
     get: Box<Fn(&U) -> Option<T>>,
-    set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>,
+    set: Box<Fn(&mut U, Option<&T>)>,
     err: Box<Fn(&U, &ReadableContext) -> Option<String>>,
-    stored_val: Option<Box<Any>>,
-    stored_err: Option<String>,
     required: bool
 }
 
@@ -98,7 +90,7 @@ pub struct GenericHunk<T, U> where T: Any, U: Command {
 impl<T, U> GenericHunk<T, U> where T: Any, U: Command {
     pub fn new(ty: HunkTypes, hlp: &'static str, reqd: bool,
                get: Box<Fn(&U) -> Option<T>>,
-               set: Box<Fn(&mut U, &ReadableContext, Option<&T>) -> Result<(), String>>,
+               set: Box<Fn(&mut U, Option<&T>)>,
                err: Box<Fn(&U, &ReadableContext) -> Option<String>>) -> Box<Hunk> {
         Box::new(GenericHunk {
             ty: ty,
@@ -106,9 +98,7 @@ impl<T, U> GenericHunk<T, U> where T: Any, U: Command {
             get: get,
             set: set,
             err: err,
-            required: reqd,
-            stored_val: None,
-            stored_err: None
+            required: reqd
         })
     }
 }
@@ -124,32 +114,18 @@ impl<T, U> Hunk for GenericHunk<T, U> where T: Any, U: Command {
             val: getter(cmd).map(|x| Box::new(x) as Box<Any>),
             required: self.required,
             help: self.hlp,
-            stored: self.stored_val.as_ref(),
-            err: if self.stored_err.is_some() {
-                Some(self.stored_err.as_ref().unwrap().clone())
-            }
-            else {
-                err_getter(cmd, ctx)
-            }
+            err: err_getter(cmd, ctx)
         }
     }
-    fn set_val(&mut self, cmd: &mut Box<Command>, ctx: &ReadableContext, val: Option<Box<Any>>) {
+    fn set_val(&mut self, cmd: &mut Box<Command>, val: Option<Box<Any>>) {
         let mut cmd = cmd.downcast_mut().unwrap();
         let setter = &mut self.set;
-        let ret = if let Some(ref ty) = val {
+        if let Some(ref ty) = val {
             let new_val = Some(ty.downcast_ref().expect("GenericHunk got wrong type for set()"));
-            setter(cmd, ctx, new_val)
+            setter(cmd, new_val)
         }
         else {
-            setter(cmd, ctx, None)
+            setter(cmd, None)
         };
-        if ret.is_err() {
-            self.stored_val = val;
-            self.stored_err = ret.err();
-        }
-    }
-    fn clear(&mut self) {
-        self.stored_val = None;
-        self.stored_err = None;
     }
 }

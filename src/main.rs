@@ -1,3 +1,4 @@
+#![feature(borrow_state)]
 extern crate rsndfile;
 extern crate portaudio;
 extern crate time;
@@ -33,7 +34,7 @@ use command::{Command, Hunk, HunkTypes};
 use std::rc::Rc;
 use std::cell::RefCell;
 use commands::*;
-use ui::CommandLine;
+use ui::{CommandLine, CommandChooserController};
 
 fn main() {
     let _ = gtk::init().unwrap();
@@ -41,8 +42,22 @@ fn main() {
     let builder = Builder::new_from_string(ui_src);
     let win: Window = builder.get_object("SQA Main Window").unwrap();
     let ctx = Rc::new(RefCell::new(ReadableContext::new()));
-    let mut cmdl = CommandLine::new(ctx.clone(), builder);
-    CommandLine::build(cmdl, Box::new(LoadCommand::new()));
+    let cmdl = CommandLine::new(ctx.clone(), &builder);
+    let cc = CommandChooserController::new(cmdl.clone(), &builder);
+    win.connect_key_press_event(move |_, ek| {
+        if ek.get_state().contains(gdk::CONTROL_MASK) {
+            match ek.get_keyval() {
+                gkey::Return => {
+                    CommandChooserController::toggle(cc.clone());
+                    Inhibit(true)
+                },
+                _ => Inhibit(false)
+            }
+        }
+        else {
+            Inhibit(false)
+        }
+    });
     win.connect_delete_event(|_, _| {
         gtk::main_quit();
         Inhibit(false)

@@ -13,53 +13,45 @@ impl LoadCommand {
     }
 }
 impl Command for LoadCommand {
+    fn name(&self) -> &'static str { "Load file" }
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
         let file_getter = move |selfish: &Self| -> Option<String> {
             selfish.file.as_ref().map(|x| x.clone())
         };
-        let file_setter = move |selfish: &mut Self, _: &ReadableContext, val: Option<&String>| {
+        let file_setter = move |selfish: &mut Self, val: Option<&String>| {
             if let Some(val) = val {
-                let file = SndFile::open(val);
-                if let Err(e) = file {
-                    Err(format!("Failed to open file: {}", e.expl))
-                }
-                else if file.as_ref().unwrap().info.samplerate != 44_100 {
-                    Err(format!("SQA only supports files with a samplerate of 44.1kHz."))
-                }
-                else {
-                    selfish.file = Some(val.clone());
-                    Ok(())
-                }
+                selfish.file = Some(val.clone());
             }
             else {
                 selfish.file = None;
-                Ok(())
             }
         };
         let file_egetter = move |selfish: &Self, _: &ReadableContext| -> Option<String> {
-            if selfish.file.is_none() {
-                Some(format!("A filename to open is required."))
+            if let Some(ref val) = selfish.file {
+                let file = SndFile::open(val);
+                if let Err(e) = file {
+                    Some(format!("Open failed: {}", e.expl))
+                }
+                else if file.as_ref().unwrap().info.samplerate != 44_100 {
+                    Some(format!("SQA only supports files with a samplerate of 44.1kHz."))
+                }
+                else {
+                    None
+                }
             }
             else {
-                None
+                Some(format!("A filename to open is required."))
             }
         };
         let ident_getter = move |selfish: &Self| -> Option<String> {
             selfish.ident.as_ref().map(|x| x.clone())
         };
-        let ident_setter = move |selfish: &mut Self, ctx: &ReadableContext, val: Option<&String>| {
+        let ident_setter = move |selfish: &mut Self, val: Option<&String>| {
             if let Some(val) = val {
-                if ctx.db.resolve_ident(val).is_some() {
-                    Err(format!("Identifier is already in use."))
-                }
-                else {
-                    selfish.ident = Some(val.clone());
-                    Ok(())
-                }
+                selfish.ident = Some(val.clone());
             }
             else {
                 selfish.ident = None;
-                Ok(())
             }
         };
         let ident_egetter = move |selfish: &Self, ctx: &ReadableContext| -> Option<String> {
@@ -74,7 +66,7 @@ impl Command for LoadCommand {
             GenericHunk::new(HunkTypes::FilePath,
                              "Provide the file path to an audio file.", true,
                              Box::new(file_getter), Box::new(file_setter), Box::new(file_egetter)),
-            TextHunk::new(format!("As")),
+            TextHunk::new(format!("as")),
             GenericHunk::new(HunkTypes::String,
                              "Provide an optional named identifier for the new stream.", false,
                              Box::new(ident_getter), Box::new(ident_setter), Box::new(ident_egetter))
