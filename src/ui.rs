@@ -4,11 +4,12 @@ use commands::{get_chooser_grid, GridNode, CommandSpawner};
 use state::ReadableContext;
 use std::cell::RefCell;
 use std::rc::Rc;
-
+use gdk::enums::key as gkey;
 use gtk::prelude::*;
 use gtk::{Label, Image, Grid, Entry, Button, Builder, Popover};
 use gtk::Box as GtkBox;
 use std::ops::Rem;
+use std::sync::{Arc, Mutex};
 macro_rules! clone {
     ($($n:ident),+; || $body:block) => (
         {
@@ -23,7 +24,6 @@ macro_rules! clone {
         }
     );
 }
-
 pub struct CommandChooserController {
     grid: Grid,
     status: Label,
@@ -31,7 +31,7 @@ pub struct CommandChooserController {
     pop: Popover,
     cl: Rc<RefCell<CommandLine>>,
     pos: Vec<usize>,
-    top: Vec<(&'static str, GridNode)>
+    top: Vec<(&'static str, gkey::Key, GridNode)>
 }
 
 impl CommandChooserController {
@@ -53,6 +53,29 @@ impl CommandChooserController {
             }
             Self::update(ret.clone());
         }));
+        ret.borrow().pop.connect_key_press_event(clone!(ret; |_s, ek| {
+            if ek.get_keyval() == gkey::BackSpace {
+                ret.borrow().back_btn.clone().activate();
+                return Inhibit(true)
+            }
+            let mut wdgt: Option<::gtk::Widget> = None;
+            {
+                let selfish = ret.borrow();
+                for (i, &(_, key, _)) in selfish.get_ptr().iter().rev().enumerate() {
+                    if ek.get_keyval() == key {
+                        wdgt = Some(selfish.grid.get_children()[i].clone());
+                        break;
+                    }
+                }
+            }
+            if let Some(w) = wdgt {
+                w.downcast::<Button>().unwrap().clicked();
+                Inhibit(true)
+            }
+            else {
+                Inhibit(false)
+            }
+        }));
         ret
     }
     pub fn toggle(selfish_: Rc<RefCell<Self>>) {
@@ -63,27 +86,31 @@ impl CommandChooserController {
         }
         Self::update(selfish_);
     }
-    pub fn update(selfish_: Rc<RefCell<Self>>) {
-        let selfish = selfish_.borrow();
-        let mut ptr = &selfish.top;
-        if selfish.pos.len() > 0 {
-            for i in &selfish.pos {
-                if let Some(&(_, GridNode::Grid(ref vec))) = ptr.get(*i) {
+    fn get_ptr(&self) -> &Vec<(&'static str, gkey::Key, GridNode)> {
+        let mut ptr = &self.top;
+        if self.pos.len() > 0 {
+            for i in &self.pos {
+                if let Some(&(_, _, GridNode::Grid(ref vec))) = ptr.get(*i) {
                     ptr = vec;
                 }
                 else {
                     panic!("Grid traversal failed");
                 }
             }
-            selfish.back_btn.set_sensitive(true);
+            self.back_btn.set_sensitive(true);
         }
         else {
-            selfish.back_btn.set_sensitive(false);
+            self.back_btn.set_sensitive(false);
         }
+        ptr
+    }
+    pub fn update(selfish_: Rc<RefCell<Self>>) {
+        let selfish = selfish_.borrow();
+        let ptr = selfish.get_ptr();
         for chld in selfish.grid.get_children() {
             chld.destroy();
         }
-        for (i, &(st, ref opt)) in ptr.iter().enumerate() {
+        for (i, &(st, _, ref opt)) in ptr.iter().enumerate() {
             let lbl = Label::new(None);
             let btn = Button::new();
             lbl.set_markup(st);
@@ -91,21 +118,51 @@ impl CommandChooserController {
             match opt {
                 &GridNode::Choice(spawner) => {
                     let ref cl = selfish.cl;
-                    btn.connect_button_press_event(clone!(selfish_, cl; |_s, _e| {
+                    btn.connect_clicked(clone!(selfish_, cl; |_s| {
                         let cmd = spawner.spawn();
                         selfish_.borrow().pop.hide();
                         CommandLine::build(cl.clone(), cmd);
-                        Inhibit(true)
                     }));
+                    lbl.get_style_context().unwrap().add_class("gridnode-choice");
+                    lbl.get_style_context().unwrap().add_class("gridnode");
                 },
                 &GridNode::Grid(_) => {
-                    btn.connect_button_press_event(clone!(selfish_; |_s, _e| {
+                    btn.connect_clicked(clone!(selfish_; |_s| {
                         {
                             selfish_.borrow_mut().pos.push(i);
                         }
                         Self::update(selfish_.clone());
-                        Inhibit(true)
                     }));
+                    lbl.get_style_context().unwrap().add_class("gridnode-grid");
+                    lbl.get_style_context().unwrap().add_class("gridnode");
+                },
+                &GridNode::Clear => {
+                    let ref cl = selfish.cl;
+                    btn.connect_clicked(clone!(selfish_, cl; |_s| {
+                        cl.borrow_mut().cmd = None;
+                        CommandLine::update(cl.clone());
+                        selfish_.borrow().pop.hide();
+                    }));
+                    lbl.get_style_context().unwrap().add_class("gridnode-clear");
+                    lbl.get_style_context().unwrap().add_class("gridnode");
+                },
+                &GridNode::Execute => {
+                    let ref cl = selfish.cl;
+                    btn.connect_clicked(clone!(selfish_, cl; |_s| {
+                        let cmd: Rc<RefCell<Box<Command>>>;
+                        {
+                            let mut cl = cl.borrow_mut();
+                            cmd = cl.cmd.take().unwrap();
+                        }
+                        CommandLine::update(cl.clone());
+                        {
+                            let cl = cl.borrow_mut();
+                            cl.tx.send(Rc::try_unwrap(cmd).ok().unwrap().into_inner()).unwrap();
+                        }
+                        selfish_.borrow().pop.hide();
+                    }));
+                    lbl.get_style_context().unwrap().add_class("gridnode-execute");
+                    lbl.get_style_context().unwrap().add_class("gridnode");
                 }
             }
             selfish.grid.attach(&btn, i.rem(3) as i32, (i/3) as i32, 1, 1);
@@ -147,13 +204,14 @@ pub struct HunkUI {
     state: HunkFSM
 }
 pub struct CommandLine {
-    ctx: Rc<RefCell<ReadableContext>>,
+    ctx: Arc<Mutex<ReadableContext>>,
+    tx: ::std::sync::mpsc::Sender<Box<Command>>,
     cmd: Option<Rc<RefCell<Box<Command>>>>,
     hunks: Vec<HunkUI>,
     ready: bool,
     line: GtkBox,
     h_image: Image,
-    h_label: Label
+    h_label: Label,
 }
 impl PopoverUIController {
     fn new() -> Self {
@@ -338,15 +396,16 @@ impl HunkUI {
     }
 }
 impl CommandLine {
-    pub fn new(ctx: Rc<RefCell<ReadableContext>>, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(ctx: Arc<Mutex<ReadableContext>>, tx: ::std::sync::mpsc::Sender<Box<Command>>, b: &Builder) -> Rc<RefCell<Self>> {
         let line = CommandLine {
             ctx: ctx,
             cmd: None,
+            tx: tx,
             hunks: Vec::new(),
             ready: false,
             line: b.get_object("command-line").unwrap(),
             h_image: b.get_object("line-hint-image").unwrap(),
-            h_label: b.get_object("line-hint-label").unwrap()
+            h_label: b.get_object("line-hint-label").unwrap(),
         };
         let line = Rc::new(RefCell::new(line));
         Self::update(line.clone());
@@ -361,7 +420,7 @@ impl CommandLine {
 
             let name_lbl = Label::new(None);
             name_lbl.set_markup(&format!("<span weight=\"bold\" fgcolor=\"#666666\">{}</span>", name));
-            selfish.line.pack_start(&name_lbl, false, false, 5);
+            selfish.line.pack_start(&name_lbl, false, false, 3);
             let mut hunks = Vec::new();
             for (i, hunk) in selfish.cmd.as_ref().unwrap().borrow().get_hunks().into_iter().enumerate() {
                 let mut hui = HunkUI::from_hunk(hunk);
@@ -398,12 +457,13 @@ impl CommandLine {
             let label = Label::new(None);
             label.set_markup("<span fgcolor=\"#888888\"><i>Select a command with Ctrl+Enter</i></span>");
             selfish.line.pack_start(&label, false, false, 0);
+            selfish.line.show_all();
             return;
         }
         assert!(selfish.hunks.len() > 0);
         let mut erred = 0;
         let ctx = selfish.ctx.clone();
-        let ctx = ctx.borrow();
+        let ctx = ctx.lock().unwrap();
         let cmd = selfish.cmd.as_ref().unwrap().clone();
         let cmd = cmd.borrow();
         for hunk in &mut selfish.hunks {
@@ -416,12 +476,12 @@ impl CommandLine {
         if erred > 0 {
             selfish.ready = false;
             selfish.h_image.set_from_icon_name("dialog-error", 1);
-            selfish.h_label.set_text(&format!("{} error(s)", erred));
+            selfish.h_label.set_markup(&format!("{} error(s) <span fgcolor=\"#888888\">- Ctrl+Enter to change or clear command</span>", erred));
         }
         else {
             selfish.ready = true;
             selfish.h_image.set_from_icon_name("dialog-ok", 1);
-            selfish.h_label.set_text("Ready [press Enter to execute]");
+            selfish.h_label.set_markup("Ready <span fgcolor=\"#888888\">- Ctrl+Enter then E to execute</span>");
         }
     }
     fn clear(&mut self) {

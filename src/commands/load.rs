@@ -1,5 +1,6 @@
 use super::prelude::*;
 use rsndfile::SndFile;
+use streamv2::FileStream;
 pub struct LoadCommand {
     file: Option<String>,
     ident: Option<String>
@@ -73,6 +74,18 @@ impl Command for LoadCommand {
         ]
     }
     fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String> {
-        unimplemented!()
+        let file = self.file.take().unwrap();
+        let mut ident = self.ident.take();
+        let streams = FileStream::new(SndFile::open(&file).unwrap());
+        let uu = ctx.insert_filestream(file, streams);
+        ctx.db.get_mut(&uu).unwrap().ident = ident;
+
+        let uuids = ctx.db.get(&uu).unwrap().others.as_ref().unwrap().clone();
+        for (i, uid) in uuids.into_iter().enumerate() {
+            if let Some(qch) = ctx.db.get_qch(i) {
+                ctx.mstr.wire(ctx.db.get(&uid).unwrap().out.as_ref().unwrap().clone(), qch.inp.as_ref().unwrap().clone()).unwrap();
+            }
+        }
+        Ok(())
     }
 }

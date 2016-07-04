@@ -1,0 +1,15 @@
+.gridnode {
+    text-shadow: none;
+}
+.gridnode-choice {
+    background-color: #adadff;
+}
+.gridnode-grid {
+    background-color: #ffadad;
+}
+.gridnode-clear {
+    background-color: #ffc7ad;
+}
+.gridnode-execute {
+    background-color: #d8ffad;
+}

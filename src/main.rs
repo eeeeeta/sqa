@@ -16,33 +16,37 @@ mod command;
 mod commands;
 mod state;
 mod ui;
-
-use mixer::{Source, Sink};
-use portaudio as pa;
-use std::error::Error;
+mod backend;
 
 use gtk::prelude::*;
-use gtk::{Builder, Entry, Label, Window, ListBox, EventBox, Popover, Arrow, Widget};
-use gdk::EventType;
-use gtk::Box as GBox;
+use gtk::{Builder, Window};
 use gdk::enums::key as gkey;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use state::{ReadableContext, WritableContext, ObjectType};
-use std::sync::mpsc::{Sender, Receiver, channel};
-use command::{Command, Hunk, HunkTypes};
-use std::rc::Rc;
-use std::cell::RefCell;
-use commands::*;
+use state::ReadableContext;
+use std::sync::mpsc::{channel};
 use ui::{CommandLine, CommandChooserController};
 
 fn main() {
     let _ = gtk::init().unwrap();
     let ui_src = include_str!("interface.glade");
     let builder = Builder::new_from_string(ui_src);
+
+    let provider = gtk::CssProvider::new();
+    provider.load_from_data(include_str!("interface.css")).unwrap();
+    let screen = gdk::Screen::get_default().unwrap();
+    gtk::StyleContext::add_provider_for_screen(&screen, &provider, 0);
+
+    let ctx = Arc::new(Mutex::new(ReadableContext::new()));
+    let cc = ctx.clone();
+    let (tx, rx) = channel();
+    thread::spawn(move || {
+        backend::backend_main(cc, rx);
+        panic!("backend died :(");
+    });
+
     let win: Window = builder.get_object("SQA Main Window").unwrap();
-    let ctx = Rc::new(RefCell::new(ReadableContext::new()));
-    let cmdl = CommandLine::new(ctx.clone(), &builder);
+    let cmdl = CommandLine::new(ctx.clone(), tx, &builder);
     let cc = CommandChooserController::new(cmdl.clone(), &builder);
     win.connect_key_press_event(move |_, ek| {
         if ek.get_state().contains(gdk::CONTROL_MASK) {
@@ -63,5 +67,6 @@ fn main() {
         Inhibit(false)
     });
     win.show_all();
+
     gtk::main();
 }

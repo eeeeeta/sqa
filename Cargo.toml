@@ -13,6 +13,9 @@ uuid = { git = "https://github.com/rust-lang-nursery/uuid", rev = "34ff260", fea
 crossbeam = "0.2.5"
 time = "0.1.35"
 rustbox = "0.8.1"
-gtk = { git = "https://github.com/gtk-rs/gtk.git", features = ["v3_12"] }
-gdk = { git = "https://github.com/gtk-rs/gdk.git", features = ["v3_12"] }
+gtk = { version = "0.1.0", features = ["v3_12"] }
+gdk = { version = "0.5.0", features = ["v3_12"] }
+gdk-sys = { version = "0.3.1", features = ["v3_12"] }
+gtk-sys = { version = "0.3.1", features = ["v3_12"] }
+glib = { version = "0.1.0" }
 mopa = "0.2.2"
