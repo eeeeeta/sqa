@@ -209,15 +209,14 @@ impl<'a> WritableContext<'a> {
             mstr: Magister::new()
         };
         for i in 0..16 {
-            let mut qch = QChannel::new(44_100);
+            let (mut qch, mut qchx) = QChannel::new(44_100);
             qch.frames_hint(FRAMES_PER_CALLBACK);
-            let qchx = qch.get_x();
             ctx.db.insert(Uuid::new_v4(), Descriptor {
                 typ: ObjectType::QChannel(i),
                 ident: None,
                 inp: Some(qchx.uuid()),
                 out: Some(qch.uuid()),
-                controller: Some(Box::new(qch.get_x())),
+                controller: None,
                 data: None,
                 others: None
             });
@@ -253,10 +252,9 @@ impl<'a> WritableContext<'a> {
         self.update();
         ids[0]
     }
-    pub fn insert_filestream(&mut self, source: String, fs: Vec<FileStream>) -> Uuid {
+    pub fn insert_filestream(&mut self, source: String, fs: Vec<(FileStream, FileStreamX)>) -> Uuid {
         let mut descs = vec![];
-        for (i, stream) in fs.into_iter().enumerate() {
-            let x = stream.get_x();
+        for (i, (stream, x)) in fs.into_iter().enumerate() {
             self.mstr.add_source(Box::new(stream));
             descs.push((Uuid::new_v4(), Descriptor {
                 typ: ObjectType::FileStream(source.clone(), i),

@@ -1,4 +1,4 @@
-#![feature(borrow_state)]
+#![feature(borrow_state, question_mark)]
 extern crate rsndfile;
 extern crate portaudio;
 extern crate time;
@@ -7,6 +7,7 @@ extern crate crossbeam;
 extern crate rustbox;
 extern crate gtk;
 extern crate gdk;
+extern crate bounded_spsc_queue;
 #[macro_use]
 extern crate mopa;
 mod streamv2;

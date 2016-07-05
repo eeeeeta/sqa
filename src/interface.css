@@ -13,3 +13,18 @@
 .gridnode-execute {
     background-color: #d8ffad;
 }
+@keyframes shake {
+    0% { background-color: inherit }
+    25% { background-color: #ffadad }
+    50% { background-color: inherit }
+    75% { background-color: #ffadad }
+    100% { background-color: inherit }
+}
+
+.shake {
+    animation: shake 0.4s ease-in-out 1;
+}
+
+.entry-error {
+    color: #ee0000;
+}

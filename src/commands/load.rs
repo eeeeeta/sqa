@@ -3,13 +3,15 @@ use rsndfile::SndFile;
 use streamv2::FileStream;
 pub struct LoadCommand {
     file: Option<String>,
-    ident: Option<String>
+    ident: Option<String>,
+    ident_set: bool
 }
 impl LoadCommand {
     pub fn new() -> Self {
         LoadCommand {
             file: None,
-            ident: None
+            ident: None,
+            ident_set: false
         }
     }
 }
@@ -22,6 +24,13 @@ impl Command for LoadCommand {
         let file_setter = move |selfish: &mut Self, val: Option<&String>| {
             if let Some(val) = val {
                 selfish.file = Some(val.clone());
+                if !selfish.ident_set {
+                    if let Some(osstr) = ::std::path::Path::new(val).file_stem() {
+                        if let Some(realstr) = osstr.to_str() {
+                            selfish.ident = Some(realstr.to_owned());
+                        }
+                    }
+                }
             }
             else {
                 selfish.file = None;
@@ -50,18 +59,28 @@ impl Command for LoadCommand {
         let ident_setter = move |selfish: &mut Self, val: Option<&String>| {
             if let Some(val) = val {
                 selfish.ident = Some(val.clone());
+                selfish.ident_set = true;
             }
             else {
                 selfish.ident = None;
+                selfish.ident_set = false;
             }
         };
         let ident_egetter = move |selfish: &Self, ctx: &ReadableContext| -> Option<String> {
             if selfish.ident.is_some() {
                 if ctx.db.resolve_ident(selfish.ident.as_ref().unwrap()).is_some() {
-                    return Some(format!("Identifier ${} is already in use.", selfish.ident.as_ref().unwrap()))
+                    Some(format!("Identifier ${} is already in use.", selfish.ident.as_ref().unwrap()))
+                }
+                else {
+                    None
                 }
             }
-            None
+            else if selfish.file.is_none() {
+                None
+            }
+            else {
+                Some(format!("Please enter an identifier (we can't guess one)"))
+            }
         };
         vec![
             GenericHunk::new(HunkTypes::FilePath,
@@ -74,16 +93,17 @@ impl Command for LoadCommand {
         ]
     }
     fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String> {
-        let file = self.file.take().unwrap();
-        let mut ident = self.ident.take();
-        let streams = FileStream::new(SndFile::open(&file).unwrap());
+        let file = self.file.take().ok_or(format!("No filename set."))?;
+        let ident = self.ident.take();
+        let streams = FileStream::new(SndFile::open(&file)
+                                      .map_err(|e| format!("error opening file: {}", e.expl))?);
         let uu = ctx.insert_filestream(file, streams);
         ctx.db.get_mut(&uu).unwrap().ident = ident;
 
         let uuids = ctx.db.get(&uu).unwrap().others.as_ref().unwrap().clone();
         for (i, uid) in uuids.into_iter().enumerate() {
             if let Some(qch) = ctx.db.get_qch(i) {
-                ctx.mstr.wire(ctx.db.get(&uid).unwrap().out.as_ref().unwrap().clone(), qch.inp.as_ref().unwrap().clone()).unwrap();
+                ctx.mstr.wire(ctx.db.get(&uid).unwrap().out.as_ref().unwrap().clone(), qch.inp.as_ref().unwrap().clone()).map_err(|e| format!("Wiring failed: {:?}", e))?;
             }
         }
         Ok(())

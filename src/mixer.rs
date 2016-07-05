@@ -6,6 +6,8 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::collections::BTreeMap;
+use bounded_spsc_queue;
+use bounded_spsc_queue::{Producer, Consumer};
 pub const FRAMES_PER_CALLBACK: usize = 500;
 
 /// Fills a given buffer with silence.
@@ -33,7 +35,7 @@ pub trait Source {
     ///
     /// As this is often called in a low-latency audio thread, it must try its best
     /// to not block and be efficient.
-    fn callback(&mut self, buffer: &mut [f32], frames: usize);
+    fn callback(&mut self, buffer: &mut [f32], frames: usize, zero: bool);
     /// Get this object's sample rate.
     fn sample_rate(&self) -> u64;
     /// Give this object an idea of the amount of frames it will be expected to provide.
@@ -132,79 +134,51 @@ impl<'a> Magister<'a> {
 
 pub struct DeviceSink<'a> {
     pub stream: Rc<RefCell<pa::stream::Stream<'a, pa::stream::NonBlocking, pa::stream::Output<f32>>>>,
-    chans: Arc<Mutex<Vec<Option<Box<Source>>>>>,
+    txrx: Arc<Mutex<(Producer<(usize, Option<Box<Source>>)>, Consumer<Option<Box<Source>>>)>>,
+    last_uuid_wired: Uuid,
     id: usize,
-    shared_uuid: Uuid,
     uuid: Uuid
 }
 impl<'a> Sink for DeviceSink<'a> {
     fn wire(&mut self, cli: Box<Source>) -> Option<Box<Source>> {
-        let mut ret = None;
-        {
-            let ref mut this = self.chans.lock().unwrap()[self.id];
-            if this.is_some() {
-                ret = Some(this.take().unwrap());
-            }
-            *this = Some(cli);
-        }
-        self.start_stop_ck();
-        ret
+        let mut lck = self.txrx.lock().unwrap();
+        let &mut (ref mut tx, ref mut rx) = lck.deref_mut();
+        self.last_uuid_wired = cli.uuid();
+        tx.push((self.id, Some(cli)));
+        rx.pop()
     }
     fn unwire(&mut self, uuid: Uuid) -> Option<Box<Source>> {
-        let ret: Option<Box<Source>>;
-        {
-            let ref mut this = self.chans.lock().unwrap()[self.id];
-            if this.is_some() && this.as_ref().unwrap().uuid() == uuid {
-                ret = Some(this.take().unwrap());
-            }
-            else {
-                ret = None;
-            }
+        if self.last_uuid_wired == uuid {
+            let mut lck = self.txrx.lock().unwrap();
+            let &mut (ref mut tx, ref mut rx) = lck.deref_mut();
+            self.last_uuid_wired = Uuid::new_v4();
+            tx.push((self.id, None));
+            rx.pop()
         }
-        if ret.is_some() {
-            self.start_stop_ck();
+        else {
+            None
         }
-        ret
     }
     fn uuid(&self) -> Uuid {
         self.uuid.clone()
     }
 }
 impl<'a> DeviceSink<'a> {
-    fn start_stop_ck(&mut self) {
-        /* FIXME FIXME FIXME
-        println!("SS cking");
-        let chans = self.chans.lock().unwrap();
-        let mut stream = self.stream.borrow_mut();
-        let mut start = false;
-        for chan in chans.iter() {
-            if chan.is_some() {
-                start = true;
-                break;
-            }
-        }
-        if start && stream.is_stopped().unwrap() {
-            println!("Starting");
-            stream.start().unwrap();
-        }
-        else if stream.is_active().unwrap() {
-            println!("Stopping");
-            stream.stop().unwrap();
-        }
-        */
-    }
     pub fn from_device_chans(pa: &'a mut pa::PortAudio, dev: pa::DeviceIndex) -> Result<Vec<Self>, pa::error::Error> {
         let dev_info = try!(pa.device_info(dev));
-        let params: pa::StreamParameters<f32> = pa::StreamParameters::new(dev, dev_info.max_output_channels, true, dev_info.default_low_output_latency);
+        let params: pa::StreamParameters<f32> = pa::StreamParameters::new(dev, dev_info.max_output_channels, false, dev_info.default_low_output_latency);
         try!(pa.is_output_format_supported(params, 44_100.0_f64));
         let settings = pa::stream::OutputSettings::new(params, 44_100.0_f64, FRAMES_PER_CALLBACK as u32);
 
-        let mut chans: Arc<Mutex<Vec<Option<Box<Source>>>>> = Arc::new(Mutex::new(Vec::new()));
-        let mut chans_cb = chans.clone();
+        let mut chans = Vec::new();
+        let (dc0, cd0) = bounded_spsc_queue::make(dev_info.max_output_channels as usize + 5);
+        let (cd1, dc1) = bounded_spsc_queue::make(dev_info.max_output_channels as usize + 5);
+        let ds_to_cb: Arc<Mutex<(Producer<(usize, Option<Box<Source>>)>, Consumer<Option<Box<Source>>>)>> = Arc::new(Mutex::new((dc0, dc1)));
+        let cb_to_ds: (Consumer<(usize, Option<Box<Source>>)>, Producer<Option<Box<Source>>>) = (cd0, cd1);
+
         let mut bufs: Vec<Vec<f32>> = Vec::new();
-        let mut chans_lk = chans.lock().unwrap();
         for _ in 0..dev_info.max_output_channels {
-            chans_lk.push(None);
+            chans.push(None);
             let mut buf: Vec<f32> = Vec::new();
             for _ in 0..FRAMES_PER_CALLBACK {
                 buf.push(0.0);
@@ -213,16 +187,20 @@ impl<'a> DeviceSink<'a> {
         }
         let callback = move |pa::stream::OutputCallbackArgs { buffer, frames, .. }| {
             assert!(frames <= FRAMES_PER_CALLBACK as usize, "PA demanded more frames/cb than we asked for");
-            for (i, ch) in chans_cb.lock().unwrap().iter_mut().enumerate() {
-                if ch.is_some() {
-                    ch.as_mut().unwrap().callback(&mut bufs[i], frames);
-                }
+            if let Some((i,c)) = cb_to_ds.0.try_pop() {
+                cb_to_ds.1.push(chans[i].take());
+                chans[i] = c;
             }
-            let num_chans = bufs.len();
-            for frame in 0..frames {
-                for (chan, cbuf) in bufs.iter_mut().enumerate() {
-                    buffer[(frame * num_chans) + chan] = cbuf[frame];
-                    cbuf[frame] = 0.0;
+
+            /* FIXME: rust-portaudio need to add support for interleaved buffers. Until they do this,
+            this unsafe part has to stay. */
+            unsafe {
+                let buffer: *mut *mut f32 = ::std::mem::transmute(buffer.get_unchecked_mut(0));
+                let buffer: &mut [*mut f32] = ::std::slice::from_raw_parts_mut(buffer, chans.len());
+                for (i, ch) in chans.iter_mut().enumerate() {
+                    if ch.is_some() {
+                        ch.as_mut().unwrap().callback(::std::slice::from_raw_parts_mut(buffer[i], frames), frames, false);
+                    }
                 }
             }
             pa::Continue
@@ -231,101 +209,102 @@ impl<'a> DeviceSink<'a> {
         {
             stream.borrow_mut().start().unwrap();
         }
-        let uuid = Uuid::new_v4();
         let mut rets: Vec<Self> = Vec::new();
-        for id in 0..chans_lk.len() {
+        for i in 0..dev_info.max_output_channels as usize {
             rets.push(DeviceSink {
                 stream: stream.clone(),
-                chans: chans.clone(),
-                id: id,
-                shared_uuid: uuid.clone(),
-                uuid: Uuid::new_v4()
+                txrx: ds_to_cb.clone(),
+                uuid: Uuid::new_v4(),
+                last_uuid_wired: Uuid::new_v4(),
+                id: i
             })
         }
         Ok(rets)
     }
 }
-
-pub struct QChannelX {
-    clients: Arc<Mutex<Vec<Box<Source>>>>,
-    uuid: Uuid,
-    uuid_pair: Uuid
+enum QCXRequest {
+    PushClient(Box<Source>),
+    GetClient(Uuid)
 }
-impl QChannelX {
-    pub fn uuid_pair(&self) -> Uuid {
-        self.uuid_pair.clone()
-    }
+pub struct QChannelX {
+    tx: Producer<QCXRequest>,
+    rx: Consumer<Option<Box<Source>>>,
+    sent_uuids: Vec<Uuid>,
+    uuid: Uuid
 }
 impl Sink for QChannelX {
     fn uuid(&self) -> Uuid {
         self.uuid.clone()
     }
     fn wire(&mut self, cli: Box<Source>) -> Option<Box<Source>> {
-        self.clients.lock().unwrap().push(cli);
+        self.sent_uuids.push(cli.uuid());
+        self.tx.push(QCXRequest::PushClient(cli));
         None
     }
     fn unwire(&mut self, uuid: Uuid) -> Option<Box<Source>> {
-        let mut clients = self.clients.lock().unwrap();
-        let mut client_idx: Option<usize> = None;
-        for (i, cli) in clients.iter().enumerate() {
-            if cli.uuid() == uuid {
-                client_idx = Some(i);
-                break;
-            }
-        }
-        if client_idx.is_none() {
-            None
+        if let Some(pos) = self.sent_uuids.iter().position(|&uu| uu == uuid) {
+            self.sent_uuids.remove(pos);
+            self.tx.push(QCXRequest::GetClient(uuid));
+            self.rx.pop()
         }
         else {
-            Some(clients.remove(client_idx.unwrap()))
+            None
         }
     }
 }
 pub struct QChannel {
-    clients: Arc<Mutex<Vec<Box<Source>>>>,
+    clients: Vec<Box<Source>>,
+    rx: Consumer<QCXRequest>,
+    tx: Producer<Option<Box<Source>>>,
     c_buf: Vec<f32>,
     sample_rate: u64,
     uuid: Uuid
 }
 impl QChannel {
-    pub fn new(sample_rate: u64) -> Self {
-        QChannel {
-            clients: Arc::new(Mutex::new(Vec::new())),
+    pub fn new(sample_rate: u64) -> (Self, QChannelX) {
+        let (qch_tx, x_rx) = bounded_spsc_queue::make(10);
+        let (x_tx, qch_rx) = bounded_spsc_queue::make(10);
+        (QChannel {
+            clients: Vec::new(),
+            rx: qch_rx,
+            tx: qch_tx,
             c_buf: Vec::new(),
             sample_rate: sample_rate,
             uuid: Uuid::new_v4()
-        }
-    }
-    pub fn get_x(&self) -> QChannelX {
-        QChannelX {
-            clients: self.clients.clone(),
+        }, QChannelX {
             uuid: Uuid::new_v4(),
-            uuid_pair: self.uuid.clone()
-        }
+            tx: x_tx,
+            rx: x_rx,
+            sent_uuids: Vec::new()
+        })
     }
 }
 
 impl Source for QChannel {
-    fn callback(&mut self, buffer: &mut [f32], frames: usize) {
-        let mut clients = self.clients.lock().unwrap();
-        for (i, client) in clients.iter_mut().enumerate() {
-            assert!(self.c_buf.len() == frames, "QChannel buf not big enough - did you remember to call frames_hint()?");
-            client.callback(&mut self.c_buf, frames);
-            for (out, inp) in buffer.iter_mut().zip(self.c_buf.iter()) {
-                if i == 0 {
-                    /* Zero the output buffer if it hasn't been
-                    written to yet.
-                    https://twitter.com/eeeeeta9/status/714118361203023873 */
-                    *out = 0.0;
-                }
-                *out = *inp + *out;
-                if *out > 1.0 {
-                    *out = 1.0;
-                }
-                if *out < -1.0 {
-                    *out = -1.0;
+    fn callback(&mut self, buffer: &mut [f32], frames: usize, _: bool) {
+        assert!(self.c_buf.len() == frames, "QChannel buf not big enough - did you remember to call frames_hint()?");
+        if let Some(qcxr) = self.rx.try_pop() {
+            match qcxr {
+                QCXRequest::PushClient(cli) => self.clients.push(cli),
+                QCXRequest::GetClient(uu) => {
+                    let mut client_idx = None;
+                    for (i, cli) in self.clients.iter().enumerate() {
+                        if cli.uuid() == uu {
+                            client_idx = Some(i);
+                            break;
+                        }
+                    }
+                    self.tx.push(if client_idx.is_none() {
+                        None
+                    }
+                    else {
+                        Some(self.clients.remove(client_idx.unwrap()))
+                    })
                 }
             }
+        }
+        for (i, client) in self.clients.iter_mut().enumerate() {
+            client.callback(buffer, frames, i==0);
         }
     }
     fn sample_rate(&self) -> u64 {

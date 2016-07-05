@@ -19,3 +19,4 @@ gdk-sys = { version = "0.3.1", features = ["v3_12"] }
 gtk-sys = { version = "0.3.1", features = ["v3_12"] }
 glib = { version = "0.1.0" }
 mopa = "0.2.2"
+bounded-spsc-queue = "0.1.2"

@@ -69,7 +69,19 @@ impl CommandChooserController {
                 }
             }
             if let Some(w) = wdgt {
-                w.downcast::<Button>().unwrap().clicked();
+                let w = w.downcast::<Button>().unwrap();
+                if w.is_sensitive() {
+                    w.clicked();
+                }
+                else {
+                    let sctx = _s.get_style_context().unwrap();
+                    sctx.add_class("shake");
+                    ::gdk::beep();
+                    timeout_add(450, move || {
+                        sctx.remove_class("shake");
+                        Continue(false)
+                    });
+                }
                 Inhibit(true)
             }
             else {
@@ -149,6 +161,10 @@ impl CommandChooserController {
                 &GridNode::Execute => {
                     let ref cl = selfish.cl;
                     btn.connect_clicked(clone!(selfish_, cl; |_s| {
+                        {
+                            let cl = cl.borrow();
+                            if !cl.ready { return; }
+                        }
                         let cmd: Rc<RefCell<Box<Command>>>;
                         {
                             let mut cl = cl.borrow_mut();
@@ -163,6 +179,12 @@ impl CommandChooserController {
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode-execute");
                     lbl.get_style_context().unwrap().add_class("gridnode");
+                    if cl.borrow().ready {
+                        btn.set_sensitive(true);
+                    }
+                    else {
+                        btn.set_sensitive(false);
+                    }
                 }
             }
             selfish.grid.attach(&btn, i.rem(3) as i32, (i/3) as i32, 1, 1);
@@ -350,9 +372,11 @@ impl HunkUIController for EntryUIController {
     }
     fn error(&mut self, err: Option<String>) {
         if err.is_some() {
+            self.ent.get_style_context().unwrap().add_class("entry-error");
             self.ent.set_icon_from_icon_name(::gtk::EntryIconPosition::Secondary, Some("dialog-error"));
         }
         else {
+            self.ent.get_style_context().unwrap().remove_class("entry-error");
             self.ent.set_icon_from_icon_name(::gtk::EntryIconPosition::Secondary, None);
         }
         self.pop.borrow().set_err(err);
