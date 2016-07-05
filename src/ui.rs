@@ -99,6 +99,28 @@ impl CommandChooserController {
         }
         Self::update(selfish_);
     }
+    pub fn execute(cl: Rc<RefCell<CommandLine>>, clone: bool) {
+        CommandLine::update(cl.clone());
+        {
+            let cl = cl.borrow();
+            if !cl.ready { return; }
+        }
+        let cmd: Rc<RefCell<Box<Command>>>;
+        {
+            let mut cl = cl.borrow_mut();
+            if clone {
+                cmd = Rc::new(RefCell::new(cl.cmd.as_ref().unwrap().borrow().box_clone()));
+            }
+            else {
+                cmd = cl.cmd.take().unwrap();
+            }
+        }
+        CommandLine::update(cl.clone());
+        {
+            let cl = cl.borrow_mut();
+            cl.tx.send(Rc::try_unwrap(cmd).ok().unwrap().into_inner()).unwrap();
+        }
+    }
     fn get_ptr(&self) -> &Vec<(&'static str, gkey::Key, GridNode)> {
         let mut ptr = &self.top;
         if self.pos.len() > 0 {
@@ -168,26 +190,7 @@ impl CommandChooserController {
                 &GridNode::Execute(clone) => {
                     let ref cl = selfish.cl;
                     btn.connect_clicked(clone!(selfish_, cl; |_s| {
-                        CommandLine::update(cl.clone());
-                        {
-                            let cl = cl.borrow();
-                            if !cl.ready { return; }
-                        }
-                        let cmd: Rc<RefCell<Box<Command>>>;
-                        {
-                            let mut cl = cl.borrow_mut();
-                            if clone {
-                                cmd = Rc::new(RefCell::new(cl.cmd.as_ref().unwrap().borrow().box_clone()));
-                            }
-                            else {
-                                cmd = cl.cmd.take().unwrap();
-                            }
-                        }
-                        CommandLine::update(cl.clone());
-                        {
-                            let cl = cl.borrow_mut();
-                            cl.tx.send(Rc::try_unwrap(cmd).ok().unwrap().into_inner()).unwrap();
-                        }
+                        Self::execute(cl.clone(), clone);
                         selfish_.borrow().pop.hide();
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode");
@@ -607,7 +610,7 @@ impl CommandLine {
         else {
             selfish.ready = true;
             selfish.h_image.set_from_icon_name("dialog-ok", 1);
-            selfish.h_label.set_markup("Ready <span fgcolor=\"#888888\">- Ctrl+Enter then E to execute</span>");
+            selfish.h_label.set_markup("Ready <span fgcolor=\"#888888\">- Ctrl+Enter twice to execute</span>");
         }
     }
     fn clear(&mut self) {
