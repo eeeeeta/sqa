@@ -2,8 +2,16 @@ use state::{ReadableContext, WritableContext};
 use std::any::Any;
 use mopa;
 
+pub trait BoxClone {
+    fn box_clone(&self) -> Box<Command>;
+}
+impl<T> BoxClone for T where T: Clone + Command + 'static {
+    fn box_clone(&self) -> Box<Command> {
+        Box::new(self.clone())
+    }
+}
 /// Command thingy.
-pub trait Command: mopa::Any + Send + 'static {
+pub trait Command: mopa::Any + Send + BoxClone + 'static {
     fn name(&self) -> &'static str;
     fn get_hunks(&self) -> Vec<Box<Hunk>>;
     fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String>;

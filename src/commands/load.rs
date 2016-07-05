@@ -1,6 +1,7 @@
 use super::prelude::*;
 use rsndfile::SndFile;
 use streamv2::FileStream;
+#[derive(Clone)]
 pub struct LoadCommand {
     file: Option<String>,
     ident: Option<String>,
@@ -67,8 +68,8 @@ impl Command for LoadCommand {
             }
         };
         let ident_egetter = move |selfish: &Self, ctx: &ReadableContext| -> Option<String> {
-            if selfish.ident.is_some() {
-                if ctx.db.resolve_ident(selfish.ident.as_ref().unwrap()).is_some() {
+            if let Some(ref ident) = selfish.ident {
+                if ctx.db.resolve_ident(ident).is_some() {
                     Some(format!("Identifier ${} is already in use.", selfish.ident.as_ref().unwrap()))
                 }
                 else {

@@ -49,7 +49,9 @@ impl LiveParameters {
 }
 
 enum SpoolerCtl {
-    Seek(u64)
+    Seek(u64),
+    SetVol(f32),
+    SetActive(bool)
 }
 /// Controller struct for a `FileStream`.
 ///
@@ -95,12 +97,11 @@ impl FileStreamX {
     /// Get this FileStream's current LiveParameters.
     pub fn lp(&self) -> LiveParameters {
         self.lp.lock().unwrap().clone()
-    }
+    }*/
     /// Sets the volume of the FileStream.
     pub fn set_vol(&mut self, vol: f32) {
-        let mut lp = self.lp.lock().unwrap();
-        lp.vol = vol;
-    }*/
+        self.tx.send(SpoolerCtl::SetVol(vol));
+    }
     pub fn uuid(&self) -> Uuid {
         self.uuid
     }
@@ -145,6 +146,16 @@ impl FileStreamSpooler {
                 assert!(self.file.seek(SeekFrom::Start(to)).unwrap() == to);
                 self.reset_self();
                 self.pos = to as usize;
+            },
+            SpoolerCtl::SetActive(act) => {
+                for &mut (_, ref mut tx) in self.chans.iter_mut() {
+                    tx.push(FileStreamRequest::SetActive(act));
+                }
+            },
+            SpoolerCtl::SetVol(vol) => {
+                for &mut (_, ref mut tx) in self.chans.iter_mut() {
+                    tx.push(FileStreamRequest::SetVol(vol));
+                }
             }
         }
     }
@@ -153,14 +164,21 @@ impl FileStreamSpooler {
             if let Ok(msg) = self.rx.try_recv() {
                 self.handle(msg);
             }
+            for &mut (ref mut rx, ref mut lck) in self.statuses.iter_mut() {
+                let mut lp = None;
+                while let Some(stat) = rx.try_pop() {
+                    lp = Some(stat);
+                }
+                if let Some(lp) = lp {
+                    *lck.write().unwrap() = lp;
+                }
+            }
             let mut to_read: usize = mixer::FRAMES_PER_CALLBACK;
             if (to_read + self.pos) > self.file.info.frames as usize {
                 to_read = self.file.info.frames as usize - self.pos;
             }
             if to_read == 0 {
-                let msg = self.rx.recv().unwrap();
-                self.handle(msg);
-                continue;
+                continue 'spooler;
             }
             for n in 0..to_read {
                 assert!(self.file.read_into_fslice(&mut self.splitting_buf) == 1);

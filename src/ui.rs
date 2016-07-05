@@ -1,12 +1,13 @@
 //! Functions for managing the frontend UI
 use command::{Command, Hunk, HunkTypes};
-use commands::{get_chooser_grid, GridNode, CommandSpawner};
+use commands::{get_chooser_grid, GridNode};
 use state::ReadableContext;
+use streamv2::{lin_db, db_lin};
 use std::cell::RefCell;
 use std::rc::Rc;
 use gdk::enums::key as gkey;
 use gtk::prelude::*;
-use gtk::{Label, Image, Grid, Entry, Button, Builder, Popover};
+use gtk::{Label, Image, Grid, Entry, Button, Builder, Popover, Scale};
 use gtk::Box as GtkBox;
 use std::ops::Rem;
 use std::sync::{Arc, Mutex};
@@ -155,12 +156,19 @@ impl CommandChooserController {
                         CommandLine::update(cl.clone());
                         selfish_.borrow().pop.hide();
                     }));
-                    lbl.get_style_context().unwrap().add_class("gridnode-clear");
                     lbl.get_style_context().unwrap().add_class("gridnode");
+                    if cl.borrow().cmd.is_some() {
+                        lbl.get_style_context().unwrap().add_class("gridnode-clear");
+                        btn.set_sensitive(true);
+                    }
+                    else {
+                        btn.set_sensitive(false);
+                    }
                 },
-                &GridNode::Execute => {
+                &GridNode::Execute(clone) => {
                     let ref cl = selfish.cl;
                     btn.connect_clicked(clone!(selfish_, cl; |_s| {
+                        CommandLine::update(cl.clone());
                         {
                             let cl = cl.borrow();
                             if !cl.ready { return; }
@@ -168,7 +176,12 @@ impl CommandChooserController {
                         let cmd: Rc<RefCell<Box<Command>>>;
                         {
                             let mut cl = cl.borrow_mut();
-                            cmd = cl.cmd.take().unwrap();
+                            if clone {
+                                cmd = Rc::new(RefCell::new(cl.cmd.as_ref().unwrap().borrow().box_clone()));
+                            }
+                            else {
+                                cmd = cl.cmd.take().unwrap();
+                            }
                         }
                         CommandLine::update(cl.clone());
                         {
@@ -177,10 +190,10 @@ impl CommandChooserController {
                         }
                         selfish_.borrow().pop.hide();
                     }));
-                    lbl.get_style_context().unwrap().add_class("gridnode-execute");
                     lbl.get_style_context().unwrap().add_class("gridnode");
                     if cl.borrow().ready {
                         btn.set_sensitive(true);
+                        lbl.get_style_context().unwrap().add_class("gridnode-execute");
                     }
                     else {
                         btn.set_sensitive(false);
@@ -203,11 +216,16 @@ struct PopoverUIController {
     state_actions: GtkBox,
     err_box: GtkBox,
     err_lbl: Label,
+    err_vis: bool,
     unset_btn: Button
 }
 struct EntryUIController {
     pop: Rc<RefCell<PopoverUIController>>,
     ent: Entry
+}
+struct VolumeUIController {
+    entuic: EntryUIController,
+    sc: Scale
 }
 struct TextUIController {
     lbl: Label
@@ -246,6 +264,7 @@ impl PopoverUIController {
             err_box: bldr.get_object("hunk-error-box").unwrap(),
             err_lbl: bldr.get_object("hunk-error-label").unwrap(),
             unset_btn: Self::build_btn("Unset", "dialog-cancel"),
+            err_vis: false
         };
         uic.err_box.hide();
         uic
@@ -257,6 +276,7 @@ impl PopoverUIController {
         else {
             self.popover.hide();
         }
+        self.err_box.set_visible(self.err_vis);
     }
     fn set_help(&self, hlp: &'static str) {
         self.state_lbl.set_text(hlp);
@@ -264,12 +284,14 @@ impl PopoverUIController {
     fn val_exists(&self, exists: bool) {
         self.unset_btn.set_sensitive(exists);
     }
-    fn set_err(&self, err: Option<String>) {
+    fn set_err(&mut self, err: Option<String>) {
         if let Some(e) = err {
+            self.err_vis = true;
             self.err_box.show_all();
             self.err_lbl.set_text(&e);
         }
         else {
+            self.err_vis = false;
             self.err_box.hide();
         }
     }
@@ -305,7 +327,7 @@ impl HunkUIController for TextUIController {
     fn set_val(&mut self, val: Option<&Box<::std::any::Any>>) {
         match val {
             Some(txt) => {
-                self.lbl.set_markup(&format!("<span fgcolor=\"#888888\"><i>{}</i></span>",txt.downcast_ref::<String>().unwrap()));
+                self.lbl.set_markup(&format!("<span fgcolor=\"#888888\">{}</span>",txt.downcast_ref::<String>().unwrap()));
             },
             None => {
                 self.lbl.set_markup("");
@@ -323,6 +345,85 @@ impl EntryUIController {
         uic.pop.borrow().popover.set_relative_to(Some(&uic.ent));
         uic.ent.set_icon_from_icon_name(::gtk::EntryIconPosition::Primary, Some(icon));
         uic
+    }
+}
+impl VolumeUIController {
+    fn new() -> Self {
+        let ret = VolumeUIController {
+            entuic: EntryUIController::new("volume-knob"),
+            sc: Scale::new_with_range(::gtk::Orientation::Horizontal, 0.0, db_lin(3.0) as f64, 0.01)
+        };
+        ret.sc.set_draw_value(false);
+        ret.sc.set_can_focus(false);
+        ret.sc.set_size_request(450, -1);
+        ret.sc.set_digits(3);
+        ret.sc.add_mark(0.0, ::gtk::PositionType::Bottom, Some("-∞"));
+
+        ret.sc.add_mark(db_lin(-20.0) as f64, ::gtk::PositionType::Bottom, Some("-20"));
+        ret.sc.add_mark(db_lin(-10.0) as f64, ::gtk::PositionType::Bottom, Some("-10"));
+        ret.sc.add_mark(db_lin(-6.0) as f64, ::gtk::PositionType::Bottom, Some("-6"));
+        ret.sc.add_mark(db_lin(-3.0) as f64, ::gtk::PositionType::Bottom, Some("-3"));
+        ret.sc.add_mark(db_lin(-1.0) as f64, ::gtk::PositionType::Bottom, Some("-1"));
+        ret.sc.add_mark(db_lin(0.0) as f64, ::gtk::PositionType::Bottom, Some("<b>0dB</b>"));
+        ret.sc.add_mark(db_lin(1.0) as f64, ::gtk::PositionType::Bottom, Some("1"));
+        ret.sc.add_mark(db_lin(2.0) as f64, ::gtk::PositionType::Bottom, Some("2"));
+        ret.sc.add_mark(db_lin(3.0) as f64, ::gtk::PositionType::Bottom, Some("3"));
+        ret
+    }
+}
+impl HunkUIController for VolumeUIController {
+    fn focus(&self) {
+        self.entuic.focus();
+    }
+    fn pack(&self, onto: &GtkBox) {
+        self.entuic.pack(onto);
+        let ref sa = self.entuic.pop.borrow().state_actions;
+        sa.pack_start(&self.sc, false, false, 3);
+    }
+    fn set_help(&mut self, help: &'static str) {
+        self.entuic.set_help(help);
+    }
+    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize) {
+        let ref pop = self.entuic.pop;
+        let ref sc = self.sc;
+        let ref ent = self.entuic.ent;
+
+        self.entuic.ent.connect_focus_in_event(clone!(pop; |_x, _y| {
+            pop.borrow().visible(true);
+            Inhibit(false)
+        }));
+        self.entuic.ent.connect_focus_out_event(clone!(pop; |_x, _y| {
+            pop.borrow().visible(false);
+            Inhibit(false)
+        }));
+        self.entuic.ent.connect_key_release_event(clone!(sc, line; |ent, _e| {
+            if let Some(strn) = ent.get_text() {
+                if let Ok(mut flt) = str::parse::<f64>(&strn) {
+                    CommandLine::set_val(line.clone(), idx, Some(Box::new(flt as f32)));
+                    flt = db_lin(flt as f32) as f64;
+                    sc.set_value(flt);
+                }
+            }
+            Inhibit(false)
+        }));
+        self.sc.connect_change_value(clone!(line, ent; |_sc, _st, val| {
+            let mut val = val as f32; /* stupid macro */
+            if val < 0.0002 {
+                val = ::std::f32::NEG_INFINITY;
+            }
+            else {
+                val = lin_db(val);
+            }
+            ent.set_text(&format!("{:.2}", val));
+            CommandLine::set_val(line.clone(), idx, Some(Box::new(val)));
+            Inhibit(false)
+        }));
+    }
+    fn set_val(&mut self, val: Option<&Box<::std::any::Any>>) {
+        self.sc.set_value(((*val.unwrap().downcast_ref::<f32>().unwrap()) as f64) - 3.0);
+    }
+    fn error(&mut self, err: Option<String>) {
+        self.entuic.error(err);
     }
 }
 impl HunkUIController for EntryUIController {
@@ -379,7 +480,7 @@ impl HunkUIController for EntryUIController {
             self.ent.get_style_context().unwrap().remove_class("entry-error");
             self.ent.set_icon_from_icon_name(::gtk::EntryIconPosition::Secondary, None);
         }
-        self.pop.borrow().set_err(err);
+        self.pop.borrow_mut().set_err(err);
     }
 }
 impl HunkUI {
@@ -389,6 +490,7 @@ impl HunkUI {
             HunkTypes::Identifier => Box::new(EntryUIController::new("edit-find")),
             HunkTypes::String => Box::new(EntryUIController::new("text-x-generic")),
             HunkTypes::Label => Box::new(TextUIController::new()),
+            HunkTypes::Volume => Box::new(VolumeUIController::new()),
             _ => unimplemented!()
         };
         HunkUI {
