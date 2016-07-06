@@ -1,6 +1,7 @@
 use state::{ReadableContext, WritableContext};
 use std::any::Any;
 use mopa;
+use mio::EventLoop;
 
 pub trait BoxClone {
     fn box_clone(&self) -> Box<Command>;
@@ -14,7 +15,7 @@ impl<T> BoxClone for T where T: Clone + Command + 'static {
 pub trait Command: mopa::Any + Send + BoxClone + 'static {
     fn name(&self) -> &'static str;
     fn get_hunks(&self) -> Vec<Box<Hunk>>;
-    fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String>;
+    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>) -> Result<(), String>;
 }
 
 mopafy!(Command);
@@ -27,8 +28,8 @@ pub enum HunkTypes {
     Identifier,
     /// Volume: `f32`
     Volume,
+    /// Time: `u64`
     Time,
-    Num,
     /// Generic string: `String`
     String,
     /// Immutable text: `String` (setter always returns error)

@@ -13,7 +13,7 @@
 .gridnode-execute {
     background-color: #d8ffad;
 }
-@keyframes shake {
+@keyframes err-pulse {
     0% { background-color: inherit }
     25% { background-color: #ffadad }
     50% { background-color: inherit }
@@ -21,10 +21,21 @@
     100% { background-color: inherit }
 }
 
+.err-pulse {
+    animation: err-pulse 0.4s ease-in-out 1;
+}
+
+@keyframes shake {
+    0% { padding-left: 0 }
+    25% { padding-left: 64px }
+    50% { padding-left: 0 }
+    75% { padding-left: 32px }
+    100% { padding-left: 0}
+}
+
 .shake {
     animation: shake 0.4s ease-in-out 1;
 }
-
 .entry-error {
     color: #ee0000;
 }

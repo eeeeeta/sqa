@@ -6,8 +6,6 @@ use std::io::{Seek, SeekFrom};
 use mixer;
 use uuid::Uuid;
 use std::thread;
-use std::sync::mpsc;
-use crossbeam::sync::MsQueue;
 use std::ops::Rem;
 use mixer::FRAMES_PER_CALLBACK;
 use bounded_spsc_queue;
@@ -269,6 +267,7 @@ impl mixer::Source for FileStream {
                 FileStreamRequest::SetVol(vol) => self.lp.vol = vol,
                 FileStreamRequest::SetActive(act) => self.lp.active = act
             }
+            self.status_tx.try_push(self.lp.clone());
         }
         if self.lp.active == false {
             mixer::fill_with_silence(buffer);
@@ -286,7 +285,7 @@ impl mixer::Source for FileStream {
                 self.lp.active = false;
                 self.status_tx.push(self.lp.clone());
             }
-            else if pos.rem(441) == 0 {
+            else if pos.rem(FRAMES_PER_CALLBACK * 50) == 0 {
                 self.status_tx.push(self.lp.clone());
             }
         }

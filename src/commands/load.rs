@@ -93,7 +93,7 @@ impl Command for LoadCommand {
                              Box::new(ident_getter), Box::new(ident_setter), Box::new(ident_egetter))
         ]
     }
-    fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String> {
+    fn execute(&mut self, ctx: &mut WritableContext, _: &mut EventLoop<WritableContext>) -> Result<(), String> {
         let file = self.file.take().ok_or(format!("No filename set."))?;
         let ident = self.ident.take();
         let streams = FileStream::new(SndFile::open(&file)

@@ -61,7 +61,7 @@ impl Command for StopStartCommand {
                              Box::new(ident_getter), Box::new(ident_setter), Box::new(ident_egetter))
         ]
     }
-    fn execute(&mut self, ctx: &mut WritableContext) -> Result<(), String> {
+    fn execute(&mut self, ctx: &mut WritableContext, _: &mut EventLoop<WritableContext>) -> Result<(), String> {
         let ident = if let Some(ref id) = self.ident {
             Some(ctx.db.resolve_ident(id).unwrap().0)
         }

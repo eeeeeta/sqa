@@ -76,10 +76,10 @@ impl CommandChooserController {
                 }
                 else {
                     let sctx = _s.get_style_context().unwrap();
-                    sctx.add_class("shake");
+                    sctx.add_class("err-pulse");
                     ::gdk::beep();
                     timeout_add(450, move || {
-                        sctx.remove_class("shake");
+                        sctx.remove_class("err-pulse");
                         Continue(false)
                     });
                 }
@@ -211,6 +211,7 @@ impl CommandChooserController {
 
 pub enum HunkFSM {
     Err,
+    UIErr,
     Ok
 }
 struct PopoverUIController {
@@ -228,7 +229,12 @@ struct EntryUIController {
 }
 struct VolumeUIController {
     entuic: EntryUIController,
-    sc: Scale
+    sc: Scale,
+    err: Rc<RefCell<bool>>
+}
+struct TimeUIController {
+    entuic: EntryUIController,
+    err: Rc<RefCell<Option<String>>>
 }
 struct TextUIController {
     lbl: Label
@@ -239,7 +245,8 @@ pub trait HunkUIController {
     fn pack(&self, onto: &GtkBox);
     fn set_help(&mut self, _help: &'static str) {}
     fn set_val(&mut self, _val: Option<&Box<::std::any::Any>>) {}
-    fn error(&mut self, _err: Option<String>) {}
+    fn set_error(&mut self, _err: Option<String>) {}
+    fn get_error(&self) -> Option<String> { None }
 }
 pub struct HunkUI {
     hnk: Box<Hunk>,
@@ -248,7 +255,7 @@ pub struct HunkUI {
 }
 pub struct CommandLine {
     ctx: Arc<Mutex<ReadableContext>>,
-    tx: ::std::sync::mpsc::Sender<Box<Command>>,
+    tx: ::mio::Sender<Box<Command>>,
     cmd: Option<Rc<RefCell<Box<Command>>>>,
     hunks: Vec<HunkUI>,
     ready: bool,
@@ -337,7 +344,7 @@ impl HunkUIController for TextUIController {
             }
         }
     }
-    fn error(&mut self, _: Option<String>) {}
+    fn set_error(&mut self, _: Option<String>) {}
 }
 impl EntryUIController {
     fn new(icon: &'static str) -> Self {
@@ -350,12 +357,22 @@ impl EntryUIController {
         uic
     }
 }
+impl TimeUIController {
+    fn new() -> Self {
+        TimeUIController {
+            entuic: EntryUIController::new("appointment-soon"),
+            err: Rc::new(RefCell::new(None))
+        }
+    }
+}
 impl VolumeUIController {
     fn new() -> Self {
         let ret = VolumeUIController {
             entuic: EntryUIController::new("volume-knob"),
-            sc: Scale::new_with_range(::gtk::Orientation::Horizontal, 0.0, db_lin(3.0) as f64, 0.01)
+            sc: Scale::new_with_range(::gtk::Orientation::Horizontal, 0.0, db_lin(3.0) as f64, 0.01),
+            err: Rc::new(RefCell::new(false))
         };
+        ret.sc.set_value(1.0);
         ret.sc.set_draw_value(false);
         ret.sc.set_can_focus(false);
         ret.sc.set_size_request(450, -1);
@@ -374,6 +391,94 @@ impl VolumeUIController {
         ret
     }
 }
+impl HunkUIController for TimeUIController {
+    fn focus(&self) {
+        self.entuic.focus();
+    }
+    fn pack(&self, onto: &GtkBox) {
+        self.entuic.pack(onto);
+    }
+    fn set_help(&mut self, help: &'static str) {
+        self.entuic.set_help(help);
+    }
+    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize) {
+        let ref pop = self.entuic.pop;
+        let ref ent = self.entuic.ent;
+        let ref uierr = self.err;
+
+        pop.borrow().bind_defaults(line.clone(), idx);
+        self.entuic.ent.connect_focus_in_event(clone!(pop; |_s, _y| {
+            pop.borrow().visible(true);
+            Inhibit(false)
+        }));
+        self.entuic.ent.connect_focus_out_event(clone!(pop, uierr, line, ent; |_s, _y| {
+            pop.borrow().visible(false);
+            if let Some(strn) = ent.get_text() {
+                if let Ok(_) = str::parse::<u64>(&strn) {
+                    ent.activate();
+                    return Inhibit(false);
+                }
+                else if strn == "" {
+                    CommandLine::set_val(line.clone(), idx, None);
+                    *uierr.borrow_mut() = None;
+                    return Inhibit(false);
+                }
+            }
+            else {
+                CommandLine::set_val(line.clone(), idx, None);
+                *uierr.borrow_mut() = None;
+                return Inhibit(false);
+            }
+            *uierr.borrow_mut() = Some(ent.get_text().unwrap().to_owned());
+            CommandLine::update(line.clone());
+            Inhibit(false)
+        }));
+        self.entuic.ent.connect_activate(clone!(line, uierr; |ent| {
+            *uierr.borrow_mut() = None;
+            if let Some(strn) = ent.get_text() {
+                if let Ok(ref val) = str::parse::<u64>(&strn) {
+                    CommandLine::set_val(line.clone(), idx, Some(Box::new(*val)));
+                }
+                else if strn == "" {
+                    *uierr.borrow_mut() = None;
+                    CommandLine::set_val(line.clone(), idx, None);
+                }
+                else {
+                    *uierr.borrow_mut() = Some(strn.to_owned());
+                    CommandLine::update(line.clone());
+                }
+            }
+            else {
+                CommandLine::set_val(line.clone(), idx, None);
+            }
+        }));
+    }
+    fn set_val(&mut self, val: Option<&Box<::std::any::Any>>) {
+        if self.err.borrow().is_some() {
+            return;
+        }
+        self.entuic.pop.borrow().val_exists(val.is_some());
+        match val {
+            Some(txt) => {
+                self.entuic.ent.set_text(&format!("{}", txt.downcast_ref::<u64>().unwrap()));
+            },
+            None => {
+                self.entuic.ent.set_text("");
+            }
+        }
+    }
+    fn set_error(&mut self, err: Option<String>) {
+        self.entuic.set_error(err);
+    }
+    fn get_error(&self) -> Option<String> {
+        if self.err.borrow().is_some() {
+            Some(format!("Please enter a valid whole number of milliseconds (or unset this value)."))
+        }
+        else {
+            None
+        }
+    }
+}
 impl HunkUIController for VolumeUIController {
     fn focus(&self) {
         self.entuic.focus();
@@ -390,18 +495,27 @@ impl HunkUIController for VolumeUIController {
         let ref pop = self.entuic.pop;
         let ref sc = self.sc;
         let ref ent = self.entuic.ent;
-
-        self.entuic.ent.connect_focus_in_event(clone!(pop; |_x, _y| {
+        let ref uierr = self.err;
+        ent.set_text(&format!("{:.2}", lin_db(sc.get_value() as f32)));
+        self.entuic.ent.connect_focus_in_event(clone!(pop; |_s, _y| {
             pop.borrow().visible(true);
             Inhibit(false)
         }));
-        self.entuic.ent.connect_focus_out_event(clone!(pop; |_x, _y| {
+        self.entuic.ent.connect_focus_out_event(clone!(pop, uierr, line, ent; |_s, _y| {
             pop.borrow().visible(false);
+            if let Some(strn) = ent.get_text() {
+                if let Ok(_) = str::parse::<f64>(&strn) {
+                    return Inhibit(false);
+                }
+            }
+            *uierr.borrow_mut() = true;
+            CommandLine::update(line.clone());
             Inhibit(false)
         }));
-        self.entuic.ent.connect_key_release_event(clone!(sc, line; |ent, _e| {
+        self.entuic.ent.connect_key_release_event(clone!(sc, line, uierr; |ent, _e| {
             if let Some(strn) = ent.get_text() {
                 if let Ok(mut flt) = str::parse::<f64>(&strn) {
+                    *uierr.borrow_mut() = false;
                     CommandLine::set_val(line.clone(), idx, Some(Box::new(flt as f32)));
                     flt = db_lin(flt as f32) as f64;
                     sc.set_value(flt);
@@ -409,7 +523,7 @@ impl HunkUIController for VolumeUIController {
             }
             Inhibit(false)
         }));
-        self.sc.connect_change_value(clone!(line, ent; |_sc, _st, val| {
+        self.sc.connect_change_value(clone!(uierr, line, ent; |_sc, _st, val| {
             let mut val = val as f32; /* stupid macro */
             if val < 0.0002 {
                 val = ::std::f32::NEG_INFINITY;
@@ -417,16 +531,25 @@ impl HunkUIController for VolumeUIController {
             else {
                 val = lin_db(val);
             }
+            *uierr.borrow_mut() = false;
             ent.set_text(&format!("{:.2}", val));
             CommandLine::set_val(line.clone(), idx, Some(Box::new(val)));
             Inhibit(false)
         }));
     }
     fn set_val(&mut self, val: Option<&Box<::std::any::Any>>) {
-        self.sc.set_value(((*val.unwrap().downcast_ref::<f32>().unwrap()) as f64) - 3.0);
+        self.sc.set_value((*val.unwrap().downcast_ref::<f32>().unwrap()) as f64);
     }
-    fn error(&mut self, err: Option<String>) {
-        self.entuic.error(err);
+    fn set_error(&mut self, err: Option<String>) {
+        self.entuic.set_error(err);
+    }
+    fn get_error(&self) -> Option<String> {
+        if *self.err.borrow() {
+            Some(format!("Please enter or select a valid decibel value."))
+        }
+        else {
+            None
+        }
     }
 }
 impl HunkUIController for EntryUIController {
@@ -455,9 +578,6 @@ impl HunkUIController for EntryUIController {
             Inhibit(false)
         }));
         self.ent.connect_activate(move |selfish| {
-            if selfish.in_destruction() {
-                return;
-            }
             let txt = selfish.get_text().unwrap();
             let val: Option<Box<::std::any::Any>> = if txt == "" { None } else { Some(Box::new(txt)) };
             CommandLine::set_val(line.clone(), idx, val);
@@ -474,7 +594,7 @@ impl HunkUIController for EntryUIController {
             }
         }
     }
-    fn error(&mut self, err: Option<String>) {
+    fn set_error(&mut self, err: Option<String>) {
         if err.is_some() {
             self.ent.get_style_context().unwrap().add_class("entry-error");
             self.ent.set_icon_from_icon_name(::gtk::EntryIconPosition::Secondary, Some("dialog-error"));
@@ -494,7 +614,7 @@ impl HunkUI {
             HunkTypes::String => Box::new(EntryUIController::new("text-x-generic")),
             HunkTypes::Label => Box::new(TextUIController::new()),
             HunkTypes::Volume => Box::new(VolumeUIController::new()),
-            _ => unimplemented!()
+            HunkTypes::Time => Box::new(TimeUIController::new())
         };
         HunkUI {
             hnk: hnk,
@@ -504,17 +624,22 @@ impl HunkUI {
     }
     fn update(&mut self, cmd: &Box<Command>, ctx: &ReadableContext) {
         let state = self.hnk.get_val(cmd, ctx);
+        let uierr = self.ctl.get_error();
         if state.err.is_some() {
             self.state = HunkFSM::Err;
-            self.ctl.error(state.err);
+            self.ctl.set_error(state.err);
+        }
+        else if uierr.is_some() {
+            self.state = HunkFSM::UIErr;
+            self.ctl.set_error(uierr);
         }
         else if state.val.is_none() && state.required {
             self.state = HunkFSM::Err;
-            self.ctl.error(Some(format!("This field is required, but contains nothing.")));
+            self.ctl.set_error(Some(format!("This field is required, but contains nothing.")));
         }
         else {
             self.state = HunkFSM::Ok;
-            self.ctl.error(None);
+            self.ctl.set_error(None);
         }
         self.ctl.set_val(state.val.as_ref());
         self.ctl.set_help(state.help);
@@ -525,7 +650,7 @@ impl HunkUI {
     }
 }
 impl CommandLine {
-    pub fn new(ctx: Arc<Mutex<ReadableContext>>, tx: ::std::sync::mpsc::Sender<Box<Command>>, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(ctx: Arc<Mutex<ReadableContext>>, tx: ::mio::Sender<Box<Command>>, b: &Builder) -> Rc<RefCell<Self>> {
         let line = CommandLine {
             ctx: ctx,
             cmd: None,
@@ -599,6 +724,7 @@ impl CommandLine {
             hunk.update(&cmd, &ctx);
             match hunk.state {
                 HunkFSM::Err => erred += 1,
+                HunkFSM::UIErr => erred += 1,
                 _ => {}
             }
         }

@@ -8,6 +8,7 @@ extern crate rustbox;
 extern crate gtk;
 extern crate gdk;
 extern crate bounded_spsc_queue;
+extern crate mio;
 #[macro_use]
 extern crate mopa;
 mod streamv2;
@@ -20,7 +21,7 @@ mod ui;
 mod backend;
 
 use gtk::prelude::*;
-use gtk::{Builder, Window};
+use gtk::{Builder, Window, Adjustment};
 use gdk::enums::key as gkey;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -40,14 +41,15 @@ fn main() {
 
     let ctx = Arc::new(Mutex::new(ReadableContext::new()));
     let cc = ctx.clone();
-    let (tx, rx) = channel();
+    let (stx, srx) = channel();
     thread::spawn(move || {
-        backend::backend_main(cc, rx);
+        backend::backend_main(cc, stx);
         panic!("backend died :(");
     });
+    let sender = srx.recv().unwrap();
 
     let win: Window = builder.get_object("SQA Main Window").unwrap();
-    let cmdl = CommandLine::new(ctx.clone(), tx, &builder);
+    let cmdl = CommandLine::new(ctx.clone(), sender, &builder);
     let cc = CommandChooserController::new(cmdl.clone(), &builder);
     win.connect_key_press_event(move |_, ek| {
         if ek.get_state().contains(gdk::CONTROL_MASK) {
