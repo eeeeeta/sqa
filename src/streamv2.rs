@@ -12,6 +12,7 @@ use bounded_spsc_queue;
 use bounded_spsc_queue::{Producer, Consumer};
 use backend::{BackendSender, BackendMessage};
 
+/* FIXME(for this entire file): give some notification on try_push failures */
 /// Converts a linear amplitude to decibels.
 pub fn lin_db(lin: f32) -> f32 {
     lin.log10() * 20.0
@@ -280,11 +281,11 @@ impl mixer::Source for FileStream {
             self.lp.pos = pos;
             if pos >= self.lp.end as usize {
                 self.lp.active = false;
-                self.status_tx.push(self.lp.clone());
+                self.status_tx.try_push(self.lp.clone());
             }
             /* deliver new statuses every second */
             else if pos.rem(FRAMES_PER_CALLBACK * (44100 / FRAMES_PER_CALLBACK)) == 0 {
-                self.status_tx.push(self.lp.clone());
+                self.status_tx.try_push(self.lp.clone());
             }
         }
         else {
