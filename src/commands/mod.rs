@@ -14,7 +14,8 @@ enum Commands {
     Load,
     Vol,
     Stop,
-    Start
+    Start,
+    ReStart
 }
 #[derive(Copy, Clone)]
 pub struct CommandSpawner {
@@ -27,6 +28,7 @@ impl CommandSpawner {
             Commands::Vol => Box::new(VolCommand::new()),
             Commands::Stop => Box::new(StopStartCommand::new(stopstart::StopStartChoice::Stop)),
             Commands::Start => Box::new(StopStartCommand::new(stopstart::StopStartChoice::Start)),
+            Commands::ReStart => Box::new(StopStartCommand::new(stopstart::StopStartChoice::ReStart)),
         }
     }
 }
@@ -41,6 +43,7 @@ pub fn get_chooser_grid() -> Vec<(&'static str, gkey, GridNode)> {
         ("<b>Stream</b> <i>S</i>", gkeys::s, GridNode::Grid(vec![
             ("Stop <i>O</i>", gkeys::o, GridNode::Choice(CommandSpawner { cmd: Commands::Stop })),
             ("Start <i>S</i>", gkeys::s, GridNode::Choice(CommandSpawner { cmd: Commands::Start })),
+            ("Restart <i>R</i>", gkeys::r, GridNode::Choice(CommandSpawner { cmd: Commands::ReStart })),
             ("Volume <i>V</i>", gkeys::v, GridNode::Choice(CommandSpawner { cmd: Commands::Vol }))
         ])),
         ("<b>I/O</b> <i>I</i>", gkeys::i, GridNode::Grid(vec![

@@ -11,6 +11,8 @@ use gtk::{Label, Image, Grid, Entry, Button, Builder, Popover, Scale};
 use gtk::Box as GtkBox;
 use std::ops::Rem;
 use std::sync::{Arc, Mutex};
+use backend::{BackendSender, BackendMessage};
+
 macro_rules! clone {
     ($($n:ident),+; || $body:block) => (
         {
@@ -27,7 +29,6 @@ macro_rules! clone {
 }
 pub struct CommandChooserController {
     grid: Grid,
-    status: Label,
     back_btn: Button,
     pop: Popover,
     cl: Rc<RefCell<CommandLine>>,
@@ -39,7 +40,6 @@ impl CommandChooserController {
     pub fn new(cl: Rc<RefCell<CommandLine>>, b: &Builder) -> Rc<RefCell<Self>> {
         let ret = Rc::new(RefCell::new(CommandChooserController {
             grid: b.get_object("cc-grid").unwrap(),
-            status: b.get_object("cc-status-label").unwrap(),
             back_btn: b.get_object("cc-end-button").unwrap(),
             pop: b.get_object("command-chooser-popover").unwrap(),
             pos: vec![],
@@ -118,7 +118,7 @@ impl CommandChooserController {
         CommandLine::update(cl.clone());
         {
             let cl = cl.borrow_mut();
-            cl.tx.send(Rc::try_unwrap(cmd).ok().unwrap().into_inner()).unwrap();
+            cl.tx.send(BackendMessage::Execute(Rc::try_unwrap(cmd).ok().unwrap().into_inner())).unwrap();
         }
     }
     fn get_ptr(&self) -> &Vec<(&'static str, gkey::Key, GridNode)> {
@@ -255,7 +255,7 @@ pub struct HunkUI {
 }
 pub struct CommandLine {
     ctx: Arc<Mutex<ReadableContext>>,
-    tx: ::mio::Sender<Box<Command>>,
+    tx: BackendSender,
     cmd: Option<Rc<RefCell<Box<Command>>>>,
     hunks: Vec<HunkUI>,
     ready: bool,
@@ -650,7 +650,7 @@ impl HunkUI {
     }
 }
 impl CommandLine {
-    pub fn new(ctx: Arc<Mutex<ReadableContext>>, tx: ::mio::Sender<Box<Command>>, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(ctx: Arc<Mutex<ReadableContext>>, tx: BackendSender, b: &Builder) -> Rc<RefCell<Self>> {
         let line = CommandLine {
             ctx: ctx,
             cmd: None,

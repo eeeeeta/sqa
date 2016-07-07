@@ -7,6 +7,38 @@ use uuid::Uuid;
 use std::any::Any;
 use std::fmt;
 use std::sync::{Arc, Mutex};
+use gtk::Adjustment;
+
+#[derive(Clone)]
+/// An object for cross-thread notification.
+pub struct ThreadNotifier {
+    adj: Adjustment
+}
+impl ThreadNotifier {
+    pub fn new() -> Self {
+        ThreadNotifier {
+            adj: Adjustment::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        }
+    }
+    pub fn notify(&self) {
+        let selfish = self.clone();
+        ::glib::timeout_add(0, move || {
+            selfish.adj.changed();
+            ::glib::Continue(false)
+        });
+    }
+    pub fn register_handler<F: Fn() + 'static>(&self, func: F) {
+        self.adj.connect_changed(move |_| {
+            func()
+        });
+    }
+}
+/// I'm pretty sure this is safe. Maybe.
+///
+/// Seriously: glib::timeout_add() runs its handler _in the main thread_,
+/// so we should be fine.
+unsafe impl Send for ThreadNotifier {}
+
 #[derive(Clone)]
 /// The type of an object stored in the database.
 pub enum ObjectType {
@@ -199,17 +231,19 @@ impl ReadableContext {
 pub struct WritableContext<'a> {
     pub db: BTreeMap<Uuid, Descriptor>,
     pub readable: Arc<Mutex<ReadableContext>>,
-    pub mstr: Magister<'a>
+    pub mstr: Magister<'a>,
+    pub tn: ThreadNotifier
 }
 impl<'a> WritableContext<'a> {
-    pub fn new(readable: Arc<Mutex<ReadableContext>>) -> Self {
+    pub fn new(readable: Arc<Mutex<ReadableContext>>, tn: ThreadNotifier) -> Self {
         let mut ctx = WritableContext {
             readable: readable,
             db: BTreeMap::new(),
-            mstr: Magister::new()
+            mstr: Magister::new(),
+            tn: tn
         };
         for i in 0..16 {
-            let (mut qch, mut qchx) = QChannel::new(44_100);
+            let (mut qch, qchx) = QChannel::new(44_100);
             qch.frames_hint(FRAMES_PER_CALLBACK);
             ctx.db.insert(Uuid::new_v4(), Descriptor {
                 typ: ObjectType::QChannel(i),
@@ -281,5 +315,6 @@ impl<'a> WritableContext<'a> {
         for (k, v) in self.db.iter() {
             rd.db.insert(k.clone(), v.into_readable());
         }
+        self.tn.notify();
     }
 }

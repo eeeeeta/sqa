@@ -1,6 +1,6 @@
 //! Extraction of audio from files, and control of the resulting stream.
 
-use rsndfile::{SndFile, SndFileInfo};
+use rsndfile::SndFile;
 use std::sync::{Arc, RwLock, Mutex};
 use std::io::{Seek, SeekFrom};
 use mixer;
@@ -10,6 +10,7 @@ use std::ops::Rem;
 use mixer::FRAMES_PER_CALLBACK;
 use bounded_spsc_queue;
 use bounded_spsc_queue::{Producer, Consumer};
+use backend::{BackendSender, BackendMessage};
 
 /// Converts a linear amplitude to decibels.
 pub fn lin_db(lin: f32) -> f32 {
@@ -61,12 +62,6 @@ pub struct FileStreamX {
     uuid: Uuid
 }
 impl FileStreamX {
-/*    pub fn set_fader(&mut self, fader: Box<Fn(usize, &mut f32, &mut bool) -> bool>) {
-        *self.fader.write().unwrap() = Some(fader);
-    }
-    pub fn is_fading(&self) -> bool {
-        self.fader.read().unwrap().is_some()
-    }*/
     /// Resets the FileStream to a given position.
     pub fn reset_pos(&mut self, pos: u64) {
         self.tx.lock().unwrap().push(SpoolerCtl::Seek(pos));
@@ -77,7 +72,7 @@ impl FileStreamX {
     }
     /// Starts playing the FileStream from the beginning.
     pub fn start(&mut self) {
-        self.reset_pos(0);
+        self.reset();
         self.tx.lock().unwrap().push(SpoolerCtl::SetActive(true));
     }
     /// Pauses the FileStream.
@@ -107,6 +102,7 @@ impl FileStreamX {
 struct FileStreamSpooler {
     file: SndFile,
     pos: usize,
+    notifier: BackendSender,
     rx: Consumer<SpoolerCtl>,
     splitting_buf: Vec<f32>,
     chan_bufs: Vec<Vec<f32>>,
@@ -114,7 +110,7 @@ struct FileStreamSpooler {
     statuses: Vec<(Consumer<LiveParameters>, Arc<RwLock<LiveParameters>>)>
 }
 impl FileStreamSpooler {
-    fn new(file: SndFile, chans: Vec<(Producer<(usize, Vec<f32>)>, Producer<FileStreamRequest>)>, statuses: Vec<(Consumer<LiveParameters>, Arc<RwLock<LiveParameters>>)>, rx: Consumer<SpoolerCtl>) -> Self {
+    fn new(file: SndFile, chans: Vec<(Producer<(usize, Vec<f32>)>, Producer<FileStreamRequest>)>, statuses: Vec<(Consumer<LiveParameters>, Arc<RwLock<LiveParameters>>)>, rx: Consumer<SpoolerCtl>, not: BackendSender) -> Self {
         let mut cbs = Vec::with_capacity(file.info.channels as usize);
         let mut sb = Vec::with_capacity(file.info.channels as usize);
         for _ in 0..(file.info.channels as usize) {
@@ -128,7 +124,8 @@ impl FileStreamSpooler {
             chans: chans,
             statuses: statuses,
             splitting_buf: sb,
-            chan_bufs: cbs
+            chan_bufs: cbs,
+            notifier: not
         }
     }
     fn reset_self(&mut self) {
@@ -168,6 +165,9 @@ impl FileStreamSpooler {
                     lp = Some(stat);
                 }
                 if let Some(lp) = lp {
+                    println!("new status: {:?}", lp);
+                    // FIXME: don't just discard this
+                    let _ = self.notifier.send(BackendMessage::UpdateNotification);
                     *lck.write().unwrap() = lp;
                 }
             }
@@ -209,19 +209,17 @@ pub struct FileStream {
     control_rx: Consumer<FileStreamRequest>,
     buf: Consumer<(usize, Vec<f32>)>,
     lp: LiveParameters,
-    info: SndFileInfo,
     sample_rate: u64,
     uuid: Uuid
 }
 impl FileStream {
     /// Makes a new set of FileStreams, one for each channel, from a given file.
-    pub fn new(file: SndFile) -> Vec<(Self, FileStreamX)> {
+    pub fn new(file: SndFile, channel: BackendSender) -> Vec<(Self, FileStreamX)> {
         let n_chans = file.info.channels as usize;
         let n_frames = file.info.frames as u64;
         let sample_rate = file.info.samplerate as u64;
 
         let lp = LiveParameters::new(0, n_frames);
-        let sfi = file.info.clone();
         let (spooler_ctl_tx, spooler_ctl_rx) = bounded_spsc_queue::make(25);
         let spooler_ctl_tx = Arc::new(Mutex::new(spooler_ctl_tx));
         let mut streams = Vec::new();
@@ -242,7 +240,6 @@ impl FileStream {
                 control_rx: control_rx,
                 buf: buf_rx,
                 lp: LiveParameters::new(0, n_frames),
-                info: sfi.clone(),
                 sample_rate: sample_rate,
                 uuid: uu
             }, FileStreamX {
@@ -251,7 +248,7 @@ impl FileStream {
                 uuid: uu.clone()
             }));
         }
-        let mut spooler = FileStreamSpooler::new(file, spooler_chans, spooler_statuses, spooler_ctl_rx);
+        let mut spooler = FileStreamSpooler::new(file, spooler_chans, spooler_statuses, spooler_ctl_rx, channel);
         thread::spawn(move || {
             spooler.spool();
         });
@@ -270,7 +267,7 @@ impl mixer::Source for FileStream {
             self.status_tx.try_push(self.lp.clone());
         }
         if self.lp.active == false {
-            mixer::fill_with_silence(buffer);
+            mixer::fill_with_silence(buffer, zero);
             return;
         }
         if let Some((pos, buf)) = self.buf.try_pop() {
@@ -285,12 +282,13 @@ impl mixer::Source for FileStream {
                 self.lp.active = false;
                 self.status_tx.push(self.lp.clone());
             }
-            else if pos.rem(FRAMES_PER_CALLBACK * 50) == 0 {
+            /* deliver new statuses every second */
+            else if pos.rem(FRAMES_PER_CALLBACK * (44100 / FRAMES_PER_CALLBACK)) == 0 {
                 self.status_tx.push(self.lp.clone());
             }
         }
         else {
-            mixer::fill_with_silence(buffer);
+            mixer::fill_with_silence(buffer, zero);
         }
     }
     fn sample_rate(&self) -> u64 {

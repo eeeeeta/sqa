@@ -9,6 +9,7 @@ extern crate gtk;
 extern crate gdk;
 extern crate bounded_spsc_queue;
 extern crate mio;
+extern crate glib;
 #[macro_use]
 extern crate mopa;
 mod streamv2;
@@ -21,11 +22,11 @@ mod ui;
 mod backend;
 
 use gtk::prelude::*;
-use gtk::{Builder, Window, Adjustment};
+use gtk::{Builder, Window};
 use gdk::enums::key as gkey;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use state::ReadableContext;
+use state::{ReadableContext, ThreadNotifier};
 use std::sync::mpsc::{channel};
 use ui::{CommandLine, CommandChooserController};
 
@@ -42,12 +43,16 @@ fn main() {
     let ctx = Arc::new(Mutex::new(ReadableContext::new()));
     let cc = ctx.clone();
     let (stx, srx) = channel();
+    let tn = ThreadNotifier::new();
+    let ttn = tn.clone();
     thread::spawn(move || {
-        backend::backend_main(cc, stx);
+        backend::backend_main(cc, stx, ttn);
         panic!("backend died :(");
     });
+    tn.register_handler(move || {
+        println!("yay, it worked");
+    });
     let sender = srx.recv().unwrap();
-
     let win: Window = builder.get_object("SQA Main Window").unwrap();
     let cmdl = CommandLine::new(ctx.clone(), sender, &builder);
     let cc = CommandChooserController::new(cmdl.clone(), &builder);

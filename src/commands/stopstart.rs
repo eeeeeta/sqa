@@ -4,7 +4,8 @@ use state::ObjectType;
 #[derive(Clone)]
 pub enum StopStartChoice {
     Stop,
-    Start
+    Start,
+    ReStart
 }
 #[derive(Clone)]
 pub struct StopStartCommand {
@@ -23,7 +24,8 @@ impl Command for StopStartCommand {
     fn name(&self) -> &'static str {
         match self.which {
             StopStartChoice::Stop => "Stop",
-            StopStartChoice::Start => "Start"
+            StopStartChoice::Start => "Start",
+            StopStartChoice::ReStart => "Restart"
         }
     }
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
@@ -53,7 +55,8 @@ impl Command for StopStartCommand {
         };
         let verbiage = match self.which {
             StopStartChoice::Stop => "Provide an identifier to stop, or leave blank to stop all streams.",
-            StopStartChoice::Start => "Provide an identifier to start, or leave blank to start all streams."
+            StopStartChoice::Start => "Provide an identifier to start, or leave blank to start all streams.",
+            StopStartChoice::ReStart => "Provide an identifier to restart, or leave blank to restart all streams."
         };
         vec![
             GenericHunk::new(HunkTypes::Identifier,
@@ -72,7 +75,8 @@ impl Command for StopStartCommand {
             let ctl = ch.controller.as_mut().unwrap().downcast_mut::<FileStreamX>().unwrap();
             match self.which {
                 StopStartChoice::Stop => ctl.pause(),
-                StopStartChoice::Start => ctl.unpause()
+                StopStartChoice::Start => ctl.unpause(),
+                StopStartChoice::ReStart => ctl.start()
             }
         }
         Ok(())

@@ -11,9 +11,11 @@ use bounded_spsc_queue::{Producer, Consumer};
 pub const FRAMES_PER_CALLBACK: usize = 500;
 
 /// Fills a given buffer with silence.
-pub fn fill_with_silence(buf: &mut [f32]) {
+pub fn fill_with_silence(buf: &mut [f32], zero: bool) {
     for smpl in buf.iter_mut() {
-        *smpl = 0.0;
+        if zero {
+            *smpl = 0.0;
+        }
     }
 }
 /// Describes objects that can accept audio data from `Source`s.
