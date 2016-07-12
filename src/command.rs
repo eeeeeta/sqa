@@ -15,7 +15,7 @@ impl<T> BoxClone for T where T: Clone + Command + 'static {
 pub trait Command: mopa::Any + Send + BoxClone + 'static {
     fn name(&self) -> &'static str;
     fn get_hunks(&self) -> Vec<Box<Hunk>>;
-    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>) -> Result<(), String>;
+    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>, uu: ::uuid::Uuid) -> Result<bool, String>;
 }
 
 mopafy!(Command);

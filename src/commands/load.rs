@@ -93,11 +93,12 @@ impl Command for LoadCommand {
                              Box::new(ident_getter), Box::new(ident_setter), Box::new(ident_egetter))
         ]
     }
-    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>) -> Result<(), String> {
+    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>, uu: Uuid) -> Result<bool, String> {
         let file = self.file.take().ok_or(format!("No filename set."))?;
         let ident = self.ident.take();
         let streams = FileStream::new(SndFile::open(&file)
-                                      .map_err(|e| format!("error opening file: {}", e.expl))?, evl.channel());
+                                      .map_err(|e| format!("error opening file: {}", e.expl))?,
+                                      evl.channel(), uu);
         let uu = ctx.insert_filestream(file, streams);
         ctx.db.get_mut(&uu).unwrap().ident = ident;
 
@@ -107,6 +108,6 @@ impl Command for LoadCommand {
                 ctx.mstr.wire(ctx.db.get(&uid).unwrap().out.as_ref().unwrap().clone(), qch.inp.as_ref().unwrap().clone()).map_err(|e| format!("Wiring failed: {:?}", e))?;
             }
         }
-        Ok(())
+        Ok(false)
     }
 }

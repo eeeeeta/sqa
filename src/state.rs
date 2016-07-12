@@ -8,6 +8,7 @@ use std::any::Any;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use gtk::Adjustment;
+use chrono::{UTC, Duration, DateTime};
 
 #[derive(Clone)]
 /// An object for cross-thread notification.
@@ -79,6 +80,49 @@ impl ObjectType {
         }
     }
 }
+#[derive(Clone, Debug)]
+pub enum ActionState {
+    Stopped,
+    Errored(String),
+    Paused,
+    Running,
+    Completed
+}
+#[derive(Clone, Debug)]
+pub struct ActionDescriptor {
+    pub desc: String,
+    pub state: ActionState,
+    pub started: DateTime<UTC>,
+    pub runtime: Duration,
+    pub uuid: Uuid
+}
+impl ActionDescriptor {
+    pub fn new(desc: String) -> Self {
+        ActionDescriptor {
+            desc: desc,
+            state: ActionState::Stopped,
+            started: UTC::now(),
+            runtime: Duration::zero(),
+            uuid: Uuid::new_v4()
+        }
+    }
+}
+impl ::std::cmp::PartialEq for ActionDescriptor {
+    fn eq(&self, other: &Self) -> bool {
+        self.started.eq(&other.started)
+    }
+}
+impl ::std::cmp::Eq for ActionDescriptor {}
+impl ::std::cmp::PartialOrd for ActionDescriptor {
+    fn partial_cmp(&self, other: &Self) -> Option<::std::cmp::Ordering> {
+        self.started.partial_cmp(&other.started)
+    }
+}
+impl ::std::cmp::Ord for ActionDescriptor {
+    fn cmp(&self, other: &Self) -> ::std::cmp::Ordering {
+        self.started.cmp(&other.started)
+    }
+}
 /// A descriptor for a single-channel object stored in the database.
 pub struct Descriptor {
     /// The object's type.
@@ -91,10 +135,6 @@ pub struct Descriptor {
     pub out: Option<Uuid>,
     /// The controller type of this object. (absent in ReadableContext)
     pub controller: Option<Box<Any>>,
-    /// Optional relevant information about this object (like LiveParameters).
-    /// Note that this must be updated on both contexts, as update() cannot do this
-    /// for you.
-    pub data: Option<Box<Any+Send>>,
     /// Optional objects related to this object (like other channels).
     /// May include this object itself.
     pub others: Option<Vec<Uuid>>
@@ -111,7 +151,6 @@ impl Descriptor {
             inp: self.inp.clone(),
             out: self.out.clone(),
             controller: None,
-            data: None,
             others: self.others.clone()
         }
     }
@@ -218,18 +257,21 @@ impl Database for BTreeMap<Uuid, Descriptor> {
     }
 }
 pub struct ReadableContext {
-    pub db: BTreeMap<Uuid, Descriptor>
+    pub db: BTreeMap<Uuid, Descriptor>,
+    pub acts: Vec<ActionDescriptor>,
 }
 impl ReadableContext {
     pub fn new() -> Self {
         ReadableContext {
-            db: BTreeMap::new()
+            db: BTreeMap::new(),
+            acts: Vec::new()
         }
     }
 }
 /// Global context
 pub struct WritableContext<'a> {
     pub db: BTreeMap<Uuid, Descriptor>,
+    pub acts: Vec<ActionDescriptor>,
     pub readable: Arc<Mutex<ReadableContext>>,
     pub mstr: Magister<'a>,
     pub tn: ThreadNotifier
@@ -240,18 +282,17 @@ impl<'a> WritableContext<'a> {
             readable: readable,
             db: BTreeMap::new(),
             mstr: Magister::new(),
+            acts: Vec::new(),
             tn: tn
         };
         for i in 0..16 {
-            let (mut qch, qchx) = QChannel::new(44_100);
-            qch.frames_hint(FRAMES_PER_CALLBACK);
+            let (qch, qchx) = QChannel::new(44_100);
             ctx.db.insert(Uuid::new_v4(), Descriptor {
                 typ: ObjectType::QChannel(i),
                 ident: None,
                 inp: Some(qchx.uuid()),
                 out: Some(qch.uuid()),
                 controller: None,
-                data: None,
                 others: None
             });
             ctx.mstr.add_source(Box::new(qch));
@@ -259,6 +300,14 @@ impl<'a> WritableContext<'a> {
         };
         ctx.update();
         ctx
+    }
+    pub fn get_action_desc_mut(&mut self, uu: Uuid) -> Option<&mut ActionDescriptor> {
+        for ad in self.acts.iter_mut() {
+            if ad.uuid == uu {
+                return Some(ad);
+            }
+        }
+        None
     }
     pub fn insert_device(&mut self, dev: Vec<DeviceSink<'a>>) -> Uuid {
         let mut descs = vec![];
@@ -274,7 +323,6 @@ impl<'a> WritableContext<'a> {
                 inp: Some(uu),
                 out: None,
                 controller: None,
-                data: None,
                 others: None
             }));
         }
@@ -296,7 +344,6 @@ impl<'a> WritableContext<'a> {
                 inp: None,
                 out: Some(x.uuid()),
                 controller: Some(Box::new(x)),
-                data: None,
                 others: None
             }));
         }
@@ -314,6 +361,10 @@ impl<'a> WritableContext<'a> {
         *rd = ReadableContext::new();
         for (k, v) in self.db.iter() {
             rd.db.insert(k.clone(), v.into_readable());
+        }
+        self.acts.sort();
+        for o in self.acts.iter() {
+            rd.acts.push(o.clone());
         }
         self.tn.notify();
     }

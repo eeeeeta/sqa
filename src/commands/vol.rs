@@ -1,7 +1,8 @@
 use super::prelude::*;
 use streamv2::db_lin;
-use backend::BackendTimeout;
-use uuid::Uuid;
+use backend::{BackendTimeout, BackendMessage, BackendSender};
+use chrono::Duration;
+use state::ActionState;
 
 const FADER_INTERVAL: u64 = 100;
 
@@ -98,30 +99,33 @@ impl Command for VolCommand {
             TextHunk::new(format!("ms)"))
         ]
     }
-    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>) -> Result<(), String> {
+    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>, auuid: Uuid) -> Result<bool, String> {
         let (ident, target) = (self.ident.take().unwrap(), db_lin(self.vol));
         let uu = ctx.db.resolve_ident(&ident).unwrap().0;
         let mut fsx = ctx.db.control_filestream(&uu).unwrap();
         if let Some(fade_secs) = self.fade {
-            LinearFader::register(evl, uu, fade_secs, target);
+            LinearFader::register(evl, uu, fade_secs, target, auuid);
+            Ok(false)
         }
         else {
             for ch in fsx.iter_mut() {
                 ch.set_vol(target);
             }
+            Ok(true)
         }
-        Ok(())
     }
 }
 struct LinearFader {
     fsu: Uuid,
     dur: u64,
     ptn: f64,
-    target: f32
+    target: f32,
+    sender: BackendSender,
+    auuid: Uuid
 }
 impl LinearFader {
-    fn register(evl: &mut EventLoop<WritableContext>, fsu: Uuid, dur: u64, tgt: f32) {
-        let lf = LinearFader { fsu: fsu, dur: dur, target: tgt, ptn: ::time::precise_time_s() };
+    fn register(evl: &mut EventLoop<WritableContext>, fsu: Uuid, dur: u64, tgt: f32, auuid: Uuid) {
+        let lf = LinearFader { fsu: fsu, dur: dur, target: tgt, ptn: ::time::precise_time_s(), sender: evl.channel(), auuid: auuid };
         evl.timeout_ms(Box::new(lf), FADER_INTERVAL).unwrap();
     }
 }
@@ -137,12 +141,16 @@ impl BackendTimeout for LinearFader {
                 for ch in fsx.iter_mut() {
                     ch.set_vol(self.target);
                 }
-                Some(FADER_INTERVAL)
+                self.sender.send(BackendMessage::RuntimeChange(self.auuid, Duration::milliseconds(self.dur as i64))).unwrap();
+                self.sender.send(BackendMessage::StateChange(self.auuid, ActionState::Completed)).unwrap();
+                None
+
             }
             else {
                 for ch in fsx.iter_mut() {
                     ch.set_vol(lp.vol - (fade_left / units_left as f32));
                 }
+                self.sender.send(BackendMessage::RuntimeChange(self.auuid, Duration::milliseconds(pos as i64))).unwrap();
                 Some(FADER_INTERVAL)
             }
         }

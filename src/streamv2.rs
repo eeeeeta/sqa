@@ -11,6 +11,7 @@ use mixer::FRAMES_PER_CALLBACK;
 use bounded_spsc_queue;
 use bounded_spsc_queue::{Producer, Consumer};
 use backend::{BackendSender, BackendMessage};
+use state::ActionState;
 
 /* FIXME(for this entire file): give some notification on try_push failures */
 /// Converts a linear amplitude to decibels.
@@ -104,6 +105,7 @@ struct FileStreamSpooler {
     file: SndFile,
     pos: usize,
     notifier: BackendSender,
+    auuid: Uuid,
     rx: Consumer<SpoolerCtl>,
     splitting_buf: Vec<f32>,
     chan_bufs: Vec<Vec<f32>>,
@@ -111,7 +113,7 @@ struct FileStreamSpooler {
     statuses: Vec<(Consumer<LiveParameters>, Arc<RwLock<LiveParameters>>)>
 }
 impl FileStreamSpooler {
-    fn new(file: SndFile, chans: Vec<(Producer<(usize, Vec<f32>)>, Producer<FileStreamRequest>)>, statuses: Vec<(Consumer<LiveParameters>, Arc<RwLock<LiveParameters>>)>, rx: Consumer<SpoolerCtl>, not: BackendSender) -> Self {
+    fn new(file: SndFile, chans: Vec<(Producer<(usize, Vec<f32>)>, Producer<FileStreamRequest>)>, statuses: Vec<(Consumer<LiveParameters>, Arc<RwLock<LiveParameters>>)>, rx: Consumer<SpoolerCtl>, not: BackendSender, auuid: Uuid) -> Self {
         let mut cbs = Vec::with_capacity(file.info.channels as usize);
         let mut sb = Vec::with_capacity(file.info.channels as usize);
         for _ in 0..(file.info.channels as usize) {
@@ -126,7 +128,8 @@ impl FileStreamSpooler {
             statuses: statuses,
             splitting_buf: sb,
             chan_bufs: cbs,
-            notifier: not
+            notifier: not,
+            auuid: auuid
         }
     }
     fn reset_self(&mut self) {
@@ -166,10 +169,13 @@ impl FileStreamSpooler {
                     lp = Some(stat);
                 }
                 if let Some(lp) = lp {
-                    println!("new status: {:?}", lp);
-                    // FIXME: don't just discard this
-                    let _ = self.notifier.send(BackendMessage::UpdateNotification);
-                    *lck.write().unwrap() = lp;
+                    let mut clp = lck.write().unwrap();
+                    if clp.active != lp.active {
+                        self.notifier.send(BackendMessage::StateChange(self.auuid, if lp.active { ActionState::Running }
+                                                                       else { ActionState::Paused })).unwrap();
+                    }
+                    self.notifier.send(BackendMessage::RuntimeChange(self.auuid, ::time::Duration::milliseconds((lp.pos as f64 / 44.1) as i64))).unwrap();
+                    *clp = lp;
                 }
             }
             let mut to_read: usize = mixer::FRAMES_PER_CALLBACK;
@@ -215,7 +221,7 @@ pub struct FileStream {
 }
 impl FileStream {
     /// Makes a new set of FileStreams, one for each channel, from a given file.
-    pub fn new(file: SndFile, channel: BackendSender) -> Vec<(Self, FileStreamX)> {
+    pub fn new(file: SndFile, channel: BackendSender, auuid: Uuid) -> Vec<(Self, FileStreamX)> {
         let n_chans = file.info.channels as usize;
         let n_frames = file.info.frames as u64;
         let sample_rate = file.info.samplerate as u64;
@@ -249,7 +255,7 @@ impl FileStream {
                 uuid: uu.clone()
             }));
         }
-        let mut spooler = FileStreamSpooler::new(file, spooler_chans, spooler_statuses, spooler_ctl_rx, channel);
+        let mut spooler = FileStreamSpooler::new(file, spooler_chans, spooler_statuses, spooler_ctl_rx, channel, auuid);
         thread::spawn(move || {
             spooler.spool();
         });
@@ -295,7 +301,6 @@ impl mixer::Source for FileStream {
     fn sample_rate(&self) -> u64 {
         self.sample_rate
     }
-    fn frames_hint(&mut self, _: usize) {}
     fn uuid(&self) -> Uuid {
         self.uuid.clone()
     }

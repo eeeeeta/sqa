@@ -40,15 +40,6 @@ pub trait Source {
     fn callback(&mut self, buffer: &mut [f32], frames: usize, zero: bool);
     /// Get this object's sample rate.
     fn sample_rate(&self) -> u64;
-    /// Give this object an idea of the amount of frames it will be expected to provide.
-    ///
-    /// This lets the object have time to allocate buffers it may need to perform mixing
-    /// without blocking/allocating more.
-    ///
-    /// Proper mixer implementations will call this at instantiation, before calling
-    /// any callbacks in a low-latency audio thread.
-    /// It is considered acceptable for an implementation to panic if this invariant is violated.
-    fn frames_hint(&mut self, frames: usize);
     /// Get this object's Universally Unique Identifier (UUID).
     fn uuid(&self) -> Uuid;
 }
@@ -258,7 +249,6 @@ pub struct QChannel {
     clients: Vec<Box<Source>>,
     rx: Consumer<QCXRequest>,
     tx: Producer<Option<Box<Source>>>,
-    c_buf: Vec<f32>,
     sample_rate: u64,
     uuid: Uuid
 }
@@ -270,7 +260,6 @@ impl QChannel {
             clients: Vec::new(),
             rx: qch_rx,
             tx: qch_tx,
-            c_buf: Vec::new(),
             sample_rate: sample_rate,
             uuid: Uuid::new_v4()
         }, QChannelX {
@@ -284,7 +273,6 @@ impl QChannel {
 
 impl Source for QChannel {
     fn callback(&mut self, buffer: &mut [f32], frames: usize, _: bool) {
-        assert!(self.c_buf.len() == frames, "QChannel buf not big enough - did you remember to call frames_hint()?");
         if let Some(qcxr) = self.rx.try_pop() {
             match qcxr {
                 QCXRequest::PushClient(cli) => self.clients.push(cli),
@@ -311,12 +299,6 @@ impl Source for QChannel {
     }
     fn sample_rate(&self) -> u64 {
         self.sample_rate
-    }
-    fn frames_hint(&mut self, frames: usize) {
-        self.c_buf = Vec::with_capacity(frames);
-        for _ in 0..frames {
-            self.c_buf.push(0.0);
-        }
     }
     fn uuid(&self) -> Uuid {
         self.uuid.clone()
