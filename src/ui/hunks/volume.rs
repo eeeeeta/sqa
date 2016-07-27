@@ -54,7 +54,7 @@ impl HunkUIController for VolumeUIController {
     fn set_help(&mut self, help: &'static str) {
         self.entuic.set_help(help);
     }
-    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
+    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, _: HunkTypes) {
         let ref pop = self.entuic.pop;
         let ref sc = self.sc;
         let ref ent = self.entuic.ent;

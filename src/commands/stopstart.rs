@@ -28,6 +28,14 @@ impl Command for StopStartCommand {
             StopStartChoice::ReStart => "Restart"
         }
     }
+    fn desc(&self) -> String {
+        if let Some(ref id) = self.ident {
+            format!("{} <b>{}</b>", self.name(), id)
+        }
+        else {
+            format!("{} <b>ALL streams</b>", self.name())
+        }
+    }
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
         let ident_getter = move |selfish: &Self| -> Option<String> {
             selfish.ident.as_ref().map(|x| x.clone())

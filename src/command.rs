@@ -1,10 +1,10 @@
-use state::Context;
+use state::{Context, CommandState};
 use std::any::Any;
 use mopa;
 use mio::EventLoop;
 
 pub type CommandUpdate = Box<Fn(&mut Command) + Send>;
-fn new_command_update<T, U>(cls: U) -> CommandUpdate where U: Fn(&mut T) + Send + 'static, T: Command {
+pub fn new_update<T, U>(cls: U) -> CommandUpdate where U: Fn(&mut T) + Send + 'static, T: Command {
     Box::new(move |cmd: &mut Command| {
         let cmd = cmd.downcast_mut::<T>().unwrap();
         cls(cmd);
@@ -21,6 +21,10 @@ impl<T> BoxClone for T where T: Clone + Command + 'static {
 /// Command thingy.
 pub trait Command: mopa::Any + Send + BoxClone + 'static {
     fn name(&self) -> &'static str;
+    fn desc(&self) -> String {
+        format!("{}", self.name())
+    }
+    fn run_state(&self) -> Option<CommandState> { None }
     fn get_hunks(&self) -> Vec<Box<Hunk>>;
     fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: ::uuid::Uuid) -> Result<bool, String>;
 }

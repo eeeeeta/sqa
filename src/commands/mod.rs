@@ -1,3 +1,4 @@
+#[macro_use]
 mod prelude;
 mod load;
 mod stopstart;
@@ -36,7 +37,7 @@ pub enum GridNode {
     Choice(CommandSpawner),
     Grid(Vec<(&'static str, gkey, GridNode)>),
     Clear,
-    Execute(bool)
+    Execute
 }
 pub fn get_chooser_grid() -> Vec<(&'static str, gkey, GridNode)> {
     vec![
@@ -50,7 +51,6 @@ pub fn get_chooser_grid() -> Vec<(&'static str, gkey, GridNode)> {
             ("Load <i>L</i>", gkeys::l, GridNode::Choice(CommandSpawner { cmd: Commands::Load }))
         ])),
         ("Clear <i>C</i>", gkeys::c, GridNode::Clear),
-        ("Execute <b>↵</b>", gkeys::Return, GridNode::Execute(false)),
-        ("ExKeep <i>X</i>", gkeys::x, GridNode::Execute(true)),
+        ("Execute <b>↵</b>", gkeys::Return, GridNode::Execute),
     ]
 }

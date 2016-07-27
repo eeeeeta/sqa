@@ -1,23 +1,37 @@
 use super::prelude::*;
 use rsndfile::SndFile;
-use streamv2::FileStream;
+use streamv2::{FileStream, LiveParameters};
+use chrono::Duration;
 #[derive(Clone)]
 pub struct LoadCommand {
     file: Option<String>,
     ident: Option<String>,
-    ident_set: bool
+    ident_set: bool,
+    pub lp: Option<LiveParameters>
 }
 impl LoadCommand {
     pub fn new() -> Self {
         LoadCommand {
             file: None,
             ident: None,
+            lp: None,
             ident_set: false
         }
     }
 }
 impl Command for LoadCommand {
     fn name(&self) -> &'static str { "Load file" }
+    fn desc(&self) -> String {
+        format!("Load file <b>{}</b> as <b>{}</b>", desc!(self.file), desc!(self.ident))
+    }
+    fn run_state(&self) -> Option<CommandState> {
+        if let Some(ref lp) = self.lp {
+            Some(CommandState::Running(Duration::milliseconds((lp.pos / 44) as i64)))
+        }
+        else {
+            None
+        }
+    }
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
         let file_getter = move |selfish: &Self| -> Option<String> {
             selfish.file.as_ref().map(|x| x.clone())
@@ -90,8 +104,8 @@ impl Command for LoadCommand {
         ]
     }
     fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) -> Result<bool, String> {
-        let file = self.file.take().ok_or(format!("No filename set."))?;
-        let ident = self.ident.take();
+        let file = self.file.clone().ok_or(format!("No filename set."))?;
+        let ident = self.ident.clone();
         let streams = FileStream::new(SndFile::open(&file)
                                       .map_err(|e| format!("error opening file: {}", e.expl))?,
                                       evl.channel(), uu);
@@ -104,6 +118,7 @@ impl Command for LoadCommand {
                 ctx.mstr.wire(ctx.db.get(&uid).unwrap().out.as_ref().unwrap().clone(), qch.inp.as_ref().unwrap().clone()).map_err(|e| format!("Wiring failed: {:?}", e))?;
             }
         }
+        self.lp = Some(LiveParameters::new(0, 0));
         Ok(false)
     }
 }

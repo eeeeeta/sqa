@@ -12,6 +12,8 @@ use bounded_spsc_queue;
 use bounded_spsc_queue::{Producer, Consumer};
 use backend::BackendSender;
 use state::Message;
+use command;
+use commands::LoadCommand;
 
 /* FIXME(for this entire file): give some notification on try_push failures */
 /// Converts a linear amplitude to decibels.
@@ -169,14 +171,12 @@ impl FileStreamSpooler {
                     lp = Some(stat);
                 }
                 if let Some(lp) = lp {
-                    let mut clp = lck.write().unwrap();
-                    /*
-                    if clp.active != lp.active {
-                        self.notifier.send(BackendMessage::StateChange(self.auuid, if lp.active { ActionState::Running }
-                                                                       else { ActionState::Paused })).unwrap();
-                    }
-                    self.notifier.send(BackendMessage::RuntimeChange(self.auuid, ::time::Duration::milliseconds((lp.pos as f64 / 44.1) as i64))).unwrap();*/
-                    *clp = lp;
+                    self.notifier.send(Message::Update(
+                        self.auuid,
+                        command::new_update(move |cmd: &mut LoadCommand| {
+                            cmd.lp = Some(lp);
+                        })
+                    )).unwrap();
                 }
             }
             let mut to_read: usize = mixer::FRAMES_PER_CALLBACK;

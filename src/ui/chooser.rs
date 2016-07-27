@@ -1,4 +1,3 @@
-use command::Command;
 use commands::{get_chooser_grid, GridNode};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -82,12 +81,14 @@ impl CommandChooserController {
         }
         Self::update(selfish_);
     }
-    pub fn execute(cl: Rc<RefCell<CommandLine>>, clone: bool) {
+    pub fn execute(cl: Rc<RefCell<CommandLine>>) {
         {
-            let cl = cl.borrow();
+            let mut cl = cl.borrow_mut();
             if !cl.ready { return; }
-            cl.tx.send(Message::Execute(cl.cd.as_ref().unwrap().uuid));
+            let cd = cl.cd.take().unwrap();
+            cl.tx.send(Message::Execute(cd.uuid));
         }
+        CommandLine::update(cl, None);
     }
     fn get_ptr(&self) -> &Vec<(&'static str, gkey::Key, GridNode)> {
         let mut ptr = &self.top;
@@ -123,9 +124,16 @@ impl CommandChooserController {
                     let ref cl = selfish.cl;
                     btn.connect_clicked(clone!(selfish_, cl; |_s| {
                         selfish_.borrow().pop.hide();
-                        let uu = Uuid::new_v4();
-                        cl.borrow().tx.send(Message::NewCmd(uu, spawner));
-                        cl.borrow_mut().uuid = Some(uu);
+                        {
+                            let mut cl = cl.borrow_mut();
+                            if let Some(ref desc) = cl.cd {
+                                cl.tx.send(Message::Delete(desc.uuid)).unwrap();
+                            }
+                            let uu = Uuid::new_v4();
+                            cl.tx.send(Message::NewCmd(uu, spawner)).unwrap();
+                            cl.uuid = Some(uu);
+
+                        }
                         CommandLine::update(cl.clone(), None);
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode-choice");
@@ -147,7 +155,7 @@ impl CommandChooserController {
                         {
                             let mut cl = cl.borrow_mut();
                             if let Some(ref cd) = cl.cd {
-                                cl.tx.send(Message::Delete(cd.uuid));
+                                cl.tx.send(Message::Delete(cd.uuid)).unwrap();
                             }
                             cl.cd = None;
                         }
@@ -163,10 +171,10 @@ impl CommandChooserController {
                         btn.set_sensitive(false);
                     }
                 },
-                &GridNode::Execute(clone) => {
+                &GridNode::Execute => {
                     let ref cl = selfish.cl;
                     btn.connect_clicked(clone!(selfish_, cl; |_s| {
-                        Self::execute(cl.clone(), clone);
+                        Self::execute(cl.clone());
                         selfish_.borrow().pop.hide();
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode");

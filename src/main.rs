@@ -1,4 +1,4 @@
-#![feature(borrow_state, question_mark)]
+#![feature(borrow_state, question_mark, iter_arith)]
 extern crate rsndfile;
 extern crate portaudio;
 extern crate chrono;
@@ -23,13 +23,11 @@ mod ui;
 mod backend;
 
 use gtk::prelude::*;
-use gtk::{Builder, Window, ListBox, Label};
-use gdk::enums::key as gkey;
-use std::sync::{Arc, Mutex};
+use gtk::{Builder, Window};
 use std::thread;
 use state::{ThreadNotifier, Message};
 use std::sync::mpsc::{channel};
-use ui::{CommandLine, CommandChooserController};
+use ui::UIContext;
 
 fn main() {
     println!("SQA alpha 2, an eta thing");
@@ -51,53 +49,11 @@ fn main() {
         backend::backend_main(stx, tx, ttn);
         panic!("backend died :(");
     });
-    let statebox: ListBox = builder.get_object("active-command-list").unwrap();
     println!("[+] Waiting for backend...");
     let sender = srx.recv().unwrap();
     println!("[+] Setting up window & GTK objects...");
     let win: Window = builder.get_object("SQA Main Window").unwrap();
-    let cmdl = CommandLine::new(sender, &builder);
-    let cc = CommandChooserController::new(cmdl.clone(), &builder);
-    let cmdlc = cmdl.clone();
-    let ccc = cc.clone();
-    tn.register_handler(move || {
-        match rx.recv().unwrap() {
-            Message::CmdDesc(uu, desc) => {
-                let which = {
-                    let cl = cmdlc.borrow();
-                    cl.uuid.is_some()
-                };
-                if which {
-                    CommandLine::build(cmdlc.clone(), desc);
-                }
-                else {
-                    CommandLine::update(cmdlc.clone(), Some(desc));
-                }
-                CommandChooserController::update(ccc.clone());
-            },
-            _ => unimplemented!()
-        }
-    });
-
-    win.connect_key_press_event(move |_, ek| {
-        if ek.get_state().contains(gdk::CONTROL_MASK) {
-            match ek.get_keyval() {
-                gkey::Return => {
-                    CommandChooserController::toggle(cc.clone());
-                    Inhibit(true)
-                },
-                _ => Inhibit(false)
-            }
-        }
-        else {
-            Inhibit(false)
-        }
-    });
-    win.connect_delete_event(|_, _| {
-        gtk::main_quit();
-        Inhibit(false)
-    });
-    win.show_all();
+    let uic = UIContext::init(sender, rx, tn, win, &builder);
     println!("[+] Initialisation complete!");
     gtk::main();
 }

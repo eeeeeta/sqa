@@ -1,13 +1,9 @@
-use std::sync::{Arc, Mutex};
 use state::{Context, ThreadNotifier, Message};
 use std::sync::mpsc::{Sender};
 use mixer;
-use command::Command;
 use portaudio as pa;
 use mio;
 use mio::{Handler, EventLoop};
-use uuid::Uuid;
-use chrono::Duration;
 
 pub type BackendSender = mio::Sender<Message>;
 pub trait BackendTimeout {
@@ -37,10 +33,19 @@ impl<'a> Handler for Context<'a> {
                 update = Some(uu);
             },
             Message::Execute(uu) => {
-                // FIXME: cloning & borrowing mess
                 let mut cmd = self.commands.get_mut(&uu).unwrap().box_clone();
                 cmd.execute(self, evl, uu).unwrap();
+                self.commands.insert(uu, cmd);
                 update = Some(uu);
+            },
+            Message::Update(uu, cu) => {
+                let mut cmd = self.commands.get_mut(&uu).unwrap();
+                cu(::std::ops::DerefMut::deref_mut(cmd));
+                update = Some(uu);
+            },
+            Message::Delete(uu) => {
+                self.commands.remove(&uu);
+                self.send(Message::Deleted(uu));
             },
             _ => unimplemented!()
         }

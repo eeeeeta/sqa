@@ -1,13 +1,13 @@
 //! Program state management.
 
 use streamv2::{FileStream, FileStreamX};
-use mixer::{QChannel, Magister, Sink, Source, DeviceSink, FRAMES_PER_CALLBACK};
-use command::{Command, HunkState, HunkTypes};
+use mixer::{QChannel, Magister, Sink, Source, DeviceSink};
+use command::{Command, CommandUpdate, HunkState, HunkTypes};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 use std::any::Any;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::ops::Deref;
 use gtk::Adjustment;
 use chrono::{UTC, Duration, DateTime};
 
@@ -82,18 +82,27 @@ impl ObjectType {
     }
 }
 pub enum Message {
+    /// C -> S: Create a new command with given UUID from spawner.
     NewCmd(Uuid, ::commands::CommandSpawner),
+    /// C -> S: Set hunk index of command with given UUID to value.
     SetHunk(Uuid, usize, HunkTypes),
+    /// C -> S: Execute command.
     Execute(Uuid),
+    /// C -> S: Delete command.
     Delete(Uuid),
+    /// S -> C: Update your descriptor of command with given UUID.
     CmdDesc(Uuid, CommandDescriptor),
+    /// S -> C: Delete command.
+    Deleted(Uuid),
+    /// Other Backend Threads -> S: Apply closure to command with given UUID & propagate changes.
+    Update(Uuid, CommandUpdate)
 }
 #[derive(Clone, Debug)]
 pub enum CommandState {
     Incomplete,
     Ready,
     Running(Duration),
-    Errored(String)
+    Errored(String),
 }
 #[derive(Clone, Debug)]
 pub struct CommandDescriptor {
@@ -267,10 +276,18 @@ impl<'a> Context<'a> {
     pub fn update_cmd(&mut self, cu: Uuid) {
         let cd = {
             let cmd = self.commands.get(&cu).unwrap();
+            let errs: u32 = cmd.get_hunks().into_iter().map(|c| {
+                if let Some(..) = c.get_val(cmd.deref(), &self).err { 1 } else { 0 }
+            }).sum();
+            let state = if let Some(st) = cmd.run_state() {
+                st
+            } else if errs > 0 {
+                CommandState::Incomplete
+            } else { CommandState::Ready };
             CommandDescriptor::new(
-                cmd.name().to_owned(),
-                CommandState::Incomplete,
-                cmd.get_hunks().into_iter().map(|c| c.get_val(::std::ops::Deref::deref(cmd), &self)).collect(),
+                cmd.desc(),
+                state,
+                cmd.get_hunks().into_iter().map(|c| c.get_val(cmd.deref(), &self)).collect(),
                 cu)
         };
         self.send(Message::CmdDesc(cu, cd));

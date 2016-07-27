@@ -10,7 +10,8 @@ const FADER_INTERVAL: u64 = 100;
 pub struct VolCommand {
     ident: Option<String>,
     vol: f32,
-    fade: Option<u64>
+    fade: Option<u64>,
+    runtime: Option<Duration>
 }
 impl VolCommand {
     pub fn new() -> Self {
@@ -19,12 +20,29 @@ impl VolCommand {
             /* note: whatever value is set here does not matter,
                as the VolumeUIController::bind() function overwrites it */
             vol: 1.0,
-            fade: None
+            fade: None,
+            runtime: None
         }
     }
 }
 impl Command for VolCommand {
     fn name(&self) -> &'static str { "Set volume of" }
+    fn desc(&self) -> String {
+        if let Some(amt) = self.fade {
+            format!("Fade volume of <b>{}</b> to <b>{}</b>dB over <b>{}</b>ms", desc!(self.ident), self.vol, amt)
+        }
+        else {
+            format!("Set volume of <b>{}</b> to <b>{}</b>dB", desc!(self.ident), self.vol)
+        }
+    }
+    fn run_state(&self) -> Option<CommandState> {
+        if let Some(ref rt) = self.runtime {
+            Some(CommandState::Running(rt.clone()))
+        }
+        else {
+            None
+        }
+    }
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
         let vol_getter = move |selfish: &Self| -> f32 {
             selfish.vol
@@ -94,6 +112,7 @@ impl Command for VolCommand {
         let mut fsx = ctx.db.control_filestream(&uu).unwrap();
         if let Some(fade_secs) = self.fade {
             LinearFader::register(evl, uu, fade_secs, target, auuid);
+            self.runtime = Some(Duration::seconds(0));
             Ok(false)
         }
         else {
@@ -130,13 +149,18 @@ impl BackendTimeout for LinearFader {
                 for ch in fsx.iter_mut() {
                     ch.set_vol(self.target);
                 }
+                self.sender.send(Message::Update(self.auuid, new_update(move |cmd: &mut VolCommand| {
+                    cmd.runtime = None;
+                }))).unwrap();
                 None
-
             }
             else {
                 for ch in fsx.iter_mut() {
                     ch.set_vol(lp.vol - (fade_left / units_left as f32));
                 }
+                self.sender.send(Message::Update(self.auuid, new_update(move |cmd: &mut VolCommand| {
+                    cmd.runtime = Some(Duration::milliseconds(pos as i64));
+                }))).unwrap();
                 Some(FADER_INTERVAL)
             }
         }
