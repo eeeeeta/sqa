@@ -1,8 +1,8 @@
 use super::prelude::*;
 use streamv2::db_lin;
-use backend::{BackendTimeout, BackendMessage, BackendSender};
+use backend::{BackendTimeout, BackendSender};
 use chrono::Duration;
-use state::ActionState;
+use state::Message;
 
 const FADER_INTERVAL: u64 = 100;
 
@@ -26,18 +26,13 @@ impl VolCommand {
 impl Command for VolCommand {
     fn name(&self) -> &'static str { "Set volume of" }
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
-        let vol_getter = move |selfish: &Self| -> Option<f32> {
-            Some(selfish.vol)
+        let vol_getter = move |selfish: &Self| -> f32 {
+            selfish.vol
         };
-        let vol_setter = move |selfish: &mut Self, val: Option<&f32>| {
-            if let Some(val) = val {
-                selfish.vol = *val;
-            }
-            else {
-                selfish.vol = 0.0;
-            }
+        let vol_setter = move |selfish: &mut Self, val: f32| {
+            selfish.vol = val;
         };
-        let vol_egetter = move |selfish: &Self, _: &ReadableContext| -> Option<String> {
+        let vol_egetter = move |selfish: &Self, _: &Context| -> Option<String> {
             if selfish.vol.is_nan() {
                 Some(format!("Volume has to be a number! (not NaN)"))
             }
@@ -48,7 +43,7 @@ impl Command for VolCommand {
         let ident_getter = move |selfish: &Self| -> Option<String> {
             selfish.ident.as_ref().map(|x| x.clone())
         };
-        let ident_setter = move |selfish: &mut Self, val: Option<&String>| {
+        let ident_setter = move |selfish: &mut Self, val: Option<String>| {
             if let Some(val) = val {
                 selfish.ident = Some(val.clone());
             }
@@ -56,7 +51,7 @@ impl Command for VolCommand {
                 selfish.ident = None;
             }
         };
-        let ident_egetter = move |selfish: &Self, ctx: &ReadableContext| -> Option<String> {
+        let ident_egetter = move |selfish: &Self, ctx: &Context| -> Option<String> {
             if let Some(ref ident) = selfish.ident {
                 if ctx.db.resolve_ident(ident).is_none() {
                     Some(format!("Identifier ${} does not exist.", selfish.ident.as_ref().unwrap()))
@@ -72,34 +67,28 @@ impl Command for VolCommand {
         let fade_getter = move |selfish: &Self| -> Option<u64> {
             selfish.fade
         };
-        let fade_setter = move |selfish: &mut Self, val: Option<&u64>| {
+        let fade_setter = move |selfish: &mut Self, val: Option<u64>| {
             if let Some(val) = val {
-                selfish.fade = Some(*val);
+                selfish.fade = Some(val);
             }
             else {
                 selfish.fade = None;
             }
         };
-        let fade_egetter = move |_: &Self, _: &ReadableContext| -> Option<String> {
+        let fade_egetter = move |_: &Self, _: &Context| -> Option<String> {
             None
         };
         vec![
-            GenericHunk::new(HunkTypes::Identifier,
-                             "Provide the identifier of a stream.", true,
-                             Box::new(ident_getter), Box::new(ident_setter), Box::new(ident_egetter)),
+            hunk!(Identifier, "Provide the identifier of a stream.", true, ident_getter, ident_setter, (ident_egetter)),
             TextHunk::new(format!("<b>@</b>")),
-            GenericHunk::new(HunkTypes::Volume,
-                             "Provide a target volume.", true,
-                             Box::new(vol_getter), Box::new(vol_setter), Box::new(vol_egetter)),
+            hunk!(Volume, "Provide a target volume.", true, (vol_getter), (vol_setter), (vol_egetter)),
             TextHunk::new(format!("dB")),
             TextHunk::new(format!("(<b>fade</b>")),
-            GenericHunk::new(HunkTypes::Time,
-                             "Optionally provide a time (in milliseconds) to fade this change over.", false,
-            Box::new(fade_getter), Box::new(fade_setter), Box::new(fade_egetter)),
+            hunk!(Time, "Optionally provide a time (in milliseconds) to fade this change over.", false, (fade_getter), (fade_setter), (fade_egetter)),
             TextHunk::new(format!("ms)"))
         ]
     }
-    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>, auuid: Uuid) -> Result<bool, String> {
+    fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, auuid: Uuid) -> Result<bool, String> {
         let (ident, target) = (self.ident.take().unwrap(), db_lin(self.vol));
         let uu = ctx.db.resolve_ident(&ident).unwrap().0;
         let mut fsx = ctx.db.control_filestream(&uu).unwrap();
@@ -124,13 +113,13 @@ struct LinearFader {
     auuid: Uuid
 }
 impl LinearFader {
-    fn register(evl: &mut EventLoop<WritableContext>, fsu: Uuid, dur: u64, tgt: f32, auuid: Uuid) {
+    fn register(evl: &mut EventLoop<Context>, fsu: Uuid, dur: u64, tgt: f32, auuid: Uuid) {
         let lf = LinearFader { fsu: fsu, dur: dur, target: tgt, ptn: ::time::precise_time_s(), sender: evl.channel(), auuid: auuid };
         evl.timeout_ms(Box::new(lf), FADER_INTERVAL).unwrap();
     }
 }
 impl BackendTimeout for LinearFader {
-    fn execute(&mut self, ctx: &mut WritableContext, _: &mut EventLoop<WritableContext>) -> Option<u64> {
+    fn execute(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>) -> Option<u64> {
         if let Some(mut fsx) = ctx.db.control_filestream(&self.fsu) {
             let lp = fsx[0].lp();
             let fade_left = lp.vol - self.target;
@@ -141,8 +130,6 @@ impl BackendTimeout for LinearFader {
                 for ch in fsx.iter_mut() {
                     ch.set_vol(self.target);
                 }
-                self.sender.send(BackendMessage::RuntimeChange(self.auuid, Duration::milliseconds(self.dur as i64))).unwrap();
-                self.sender.send(BackendMessage::StateChange(self.auuid, ActionState::Completed)).unwrap();
                 None
 
             }
@@ -150,7 +137,6 @@ impl BackendTimeout for LinearFader {
                 for ch in fsx.iter_mut() {
                     ch.set_vol(lp.vol - (fade_left / units_left as f32));
                 }
-                self.sender.send(BackendMessage::RuntimeChange(self.auuid, Duration::milliseconds(pos as i64))).unwrap();
                 Some(FADER_INTERVAL)
             }
         }

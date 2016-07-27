@@ -4,6 +4,7 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::Scale;
 use gtk::Box as GtkBox;
+use command::HunkTypes;
 use super::CommandLine;
 use super::HunkUIController;
 use super::EntryUIController;
@@ -53,7 +54,7 @@ impl HunkUIController for VolumeUIController {
     fn set_help(&mut self, help: &'static str) {
         self.entuic.set_help(help);
     }
-    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize) {
+    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
         let ref pop = self.entuic.pop;
         let ref sc = self.sc;
         let ref ent = self.entuic.ent;
@@ -71,14 +72,14 @@ impl HunkUIController for VolumeUIController {
                 }
             }
             *uierr.borrow_mut() = true;
-            CommandLine::update(line.clone());
+            CommandLine::update(line.clone(), None);
             Inhibit(false)
         }));
         self.entuic.ent.connect_key_release_event(clone!(sc, line, uierr; |ent, _e| {
             if let Some(strn) = ent.get_text() {
                 if let Ok(mut flt) = str::parse::<f64>(&strn) {
                     *uierr.borrow_mut() = false;
-                    CommandLine::set_val(line.clone(), idx, Some(Box::new(flt as f32)));
+                    CommandLine::set_val(line.clone(), idx, HunkTypes::Volume(flt as f32));
                     flt = db_lin(flt as f32) as f64;
                     sc.set_value(flt);
                 }
@@ -95,12 +96,12 @@ impl HunkUIController for VolumeUIController {
             }
             *uierr.borrow_mut() = false;
             ent.set_text(&format!("{:.2}", val));
-            CommandLine::set_val(line.clone(), idx, Some(Box::new(val)));
+            CommandLine::set_val(line.clone(), idx, HunkTypes::Volume(val));
             Inhibit(false)
         }));
     }
-    fn set_val(&mut self, val: Option<&Box<::std::any::Any>>) {
-        self.sc.set_value((*val.unwrap().downcast_ref::<f32>().unwrap()) as f64);
+    fn set_val(&mut self, val: &::std::any::Any) {
+        self.sc.set_value((*val.downcast_ref::<f32>().unwrap()) as f64);
     }
     fn set_error(&mut self, err: Option<String>) {
         self.entuic.set_error(err);

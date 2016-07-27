@@ -2,6 +2,7 @@
 
 use streamv2::{FileStream, FileStreamX};
 use mixer::{QChannel, Magister, Sink, Source, DeviceSink, FRAMES_PER_CALLBACK};
+use command::{Command, HunkState, HunkTypes};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 use std::any::Any;
@@ -80,47 +81,37 @@ impl ObjectType {
         }
     }
 }
-#[derive(Clone, Debug)]
-pub enum ActionState {
-    Stopped,
-    Errored(String),
-    Paused,
-    Running,
-    Completed
+pub enum Message {
+    NewCmd(Uuid, ::commands::CommandSpawner),
+    SetHunk(Uuid, usize, HunkTypes),
+    Execute(Uuid),
+    Delete(Uuid),
+    CmdDesc(Uuid, CommandDescriptor),
 }
 #[derive(Clone, Debug)]
-pub struct ActionDescriptor {
+pub enum CommandState {
+    Incomplete,
+    Ready,
+    Running(Duration),
+    Errored(String)
+}
+#[derive(Clone, Debug)]
+pub struct CommandDescriptor {
     pub desc: String,
-    pub state: ActionState,
-    pub started: DateTime<UTC>,
-    pub runtime: Duration,
+    pub hunks: Vec<HunkState>,
+    pub state: CommandState,
+    pub ctime: DateTime<UTC>,
     pub uuid: Uuid
 }
-impl ActionDescriptor {
-    pub fn new(desc: String) -> Self {
-        ActionDescriptor {
+impl CommandDescriptor {
+    pub fn new(desc: String, state: CommandState, hunks: Vec<HunkState>, uu: Uuid) -> Self {
+        CommandDescriptor {
             desc: desc,
-            state: ActionState::Stopped,
-            started: UTC::now(),
-            runtime: Duration::zero(),
-            uuid: Uuid::new_v4()
+            state: state,
+            hunks: hunks,
+            ctime: UTC::now(),
+            uuid: uu
         }
-    }
-}
-impl ::std::cmp::PartialEq for ActionDescriptor {
-    fn eq(&self, other: &Self) -> bool {
-        self.started.eq(&other.started)
-    }
-}
-impl ::std::cmp::Eq for ActionDescriptor {}
-impl ::std::cmp::PartialOrd for ActionDescriptor {
-    fn partial_cmp(&self, other: &Self) -> Option<::std::cmp::Ordering> {
-        self.started.partial_cmp(&other.started)
-    }
-}
-impl ::std::cmp::Ord for ActionDescriptor {
-    fn cmp(&self, other: &Self) -> ::std::cmp::Ordering {
-        self.started.cmp(&other.started)
     }
 }
 /// A descriptor for a single-channel object stored in the database.
@@ -138,22 +129,6 @@ pub struct Descriptor {
     /// Optional objects related to this object (like other channels).
     /// May include this object itself.
     pub others: Option<Vec<Uuid>>
-}
-/// This is so we can send ReadableContexts between threads.
-/// This relies on the invariant that we will never send a Descriptor
-/// if its `controller` field is `Some`.
-unsafe impl Send for Descriptor {}
-impl Descriptor {
-    fn into_readable(&self) -> Self {
-        Descriptor {
-            typ: self.typ.clone(),
-            ident: self.ident.clone(),
-            inp: self.inp.clone(),
-            out: self.out.clone(),
-            controller: None,
-            others: self.others.clone()
-        }
-    }
 }
 impl fmt::Display for Descriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -256,33 +231,22 @@ impl Database for BTreeMap<Uuid, Descriptor> {
         Some(ret)
     }
 }
-pub struct ReadableContext {
-    pub db: BTreeMap<Uuid, Descriptor>,
-    pub acts: Vec<ActionDescriptor>,
-}
-impl ReadableContext {
-    pub fn new() -> Self {
-        ReadableContext {
-            db: BTreeMap::new(),
-            acts: Vec::new()
-        }
-    }
-}
+
 /// Global context
-pub struct WritableContext<'a> {
+pub struct Context<'a> {
     pub db: BTreeMap<Uuid, Descriptor>,
-    pub acts: Vec<ActionDescriptor>,
-    pub readable: Arc<Mutex<ReadableContext>>,
+    pub commands: BTreeMap<Uuid, Box<Command>>,
     pub mstr: Magister<'a>,
+    pub tx: ::std::sync::mpsc::Sender<Message>,
     pub tn: ThreadNotifier
 }
-impl<'a> WritableContext<'a> {
-    pub fn new(readable: Arc<Mutex<ReadableContext>>, tn: ThreadNotifier) -> Self {
-        let mut ctx = WritableContext {
-            readable: readable,
+impl<'a> Context<'a> {
+    pub fn new(tx: ::std::sync::mpsc::Sender<Message>, tn: ThreadNotifier) -> Self {
+        let mut ctx = Context {
             db: BTreeMap::new(),
+            commands: BTreeMap::new(),
             mstr: Magister::new(),
-            acts: Vec::new(),
+            tx: tx,
             tn: tn
         };
         for i in 0..16 {
@@ -298,16 +262,22 @@ impl<'a> WritableContext<'a> {
             ctx.mstr.add_source(Box::new(qch));
             ctx.mstr.add_sink(Box::new(qchx));
         };
-        ctx.update();
         ctx
     }
-    pub fn get_action_desc_mut(&mut self, uu: Uuid) -> Option<&mut ActionDescriptor> {
-        for ad in self.acts.iter_mut() {
-            if ad.uuid == uu {
-                return Some(ad);
-            }
-        }
-        None
+    pub fn update_cmd(&mut self, cu: Uuid) {
+        let cd = {
+            let cmd = self.commands.get(&cu).unwrap();
+            CommandDescriptor::new(
+                cmd.name().to_owned(),
+                CommandState::Incomplete,
+                cmd.get_hunks().into_iter().map(|c| c.get_val(::std::ops::Deref::deref(cmd), &self)).collect(),
+                cu)
+        };
+        self.send(Message::CmdDesc(cu, cd));
+    }
+    pub fn send(&mut self, msg: Message) {
+        self.tx.send(msg).unwrap();
+        self.tn.notify();
     }
     pub fn insert_device(&mut self, dev: Vec<DeviceSink<'a>>) -> Uuid {
         let mut descs = vec![];
@@ -331,7 +301,6 @@ impl<'a> WritableContext<'a> {
             d.1.others = Some(ids.clone());
             self.db.insert(d.0, d.1);
         }
-        self.update();
         ids[0]
     }
     pub fn insert_filestream(&mut self, source: String, fs: Vec<(FileStream, FileStreamX)>) -> Uuid {
@@ -352,20 +321,6 @@ impl<'a> WritableContext<'a> {
             d.1.others = Some(ids.clone());
             self.db.insert(d.0, d.1);
         }
-        self.update();
         ids[0]
-    }
-    // FIXME: not very efficient
-    pub fn update(&mut self) {
-        let mut rd = self.readable.lock().unwrap();
-        *rd = ReadableContext::new();
-        for (k, v) in self.db.iter() {
-            rd.db.insert(k.clone(), v.into_readable());
-        }
-        self.acts.sort();
-        for o in self.acts.iter() {
-            rd.acts.push(o.clone());
-        }
-        self.tn.notify();
     }
 }

@@ -3,6 +3,7 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::Entry;
 use gtk::Box as GtkBox;
+use command::HunkTypes;
 use super::CommandLine;
 use super::PopoverUIController;
 use super::HunkUIController;
@@ -35,11 +36,11 @@ impl HunkUIController for EntryUIController {
         self.pop.borrow().set_help(help);
     }
     /* FIXME: more clone()s for seemingly ø reason */
-    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize) {
+    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
         let ref pop = self.pop;
         let entc = self.ent.clone();
 
-        pop.borrow().bind_defaults(line.clone(), idx);
+        pop.borrow().bind_defaults(line.clone(), idx, ht.clone());
         self.ent.connect_focus_in_event(clone!(pop; |_x, _y| {
             pop.borrow().visible(true);
             Inhibit(false)
@@ -51,17 +52,18 @@ impl HunkUIController for EntryUIController {
         }));
         self.ent.connect_activate(move |selfish| {
             let txt = selfish.get_text().unwrap();
-            let val: Option<Box<::std::any::Any>> = if txt == "" { None } else { Some(Box::new(txt)) };
-            CommandLine::set_val(line.clone(), idx, val);
+            let val = if txt == "" { None } else { Some(txt) };
+            CommandLine::set_val(line.clone(), idx, ht.string_of(val));
         });
     }
-    fn set_val(&mut self, val: Option<&Box<::std::any::Any>>) {
+    fn set_val(&mut self, val: &::std::any::Any) {
+        let val = val.downcast_ref::<Option<String>>().unwrap();
         self.pop.borrow().val_exists(val.is_some());
         match val {
-            Some(txt) => {
-                self.ent.set_text(&txt.downcast_ref::<String>().unwrap());
+            &Some(ref txt) => {
+                self.ent.set_text(txt);
             },
-            None => {
+            &None => {
                 self.ent.set_text("");
             }
         }

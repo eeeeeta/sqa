@@ -22,11 +22,11 @@ impl Command for LoadCommand {
         let file_getter = move |selfish: &Self| -> Option<String> {
             selfish.file.as_ref().map(|x| x.clone())
         };
-        let file_setter = move |selfish: &mut Self, val: Option<&String>| {
+        let file_setter = move |selfish: &mut Self, val: Option<String>| {
             if let Some(val) = val {
                 selfish.file = Some(val.clone());
                 if !selfish.ident_set {
-                    if let Some(osstr) = ::std::path::Path::new(val).file_stem() {
+                    if let Some(osstr) = ::std::path::Path::new(&val).file_stem() {
                         if let Some(realstr) = osstr.to_str() {
                             selfish.ident = Some(realstr.to_owned());
                         }
@@ -37,7 +37,7 @@ impl Command for LoadCommand {
                 selfish.file = None;
             }
         };
-        let file_egetter = move |selfish: &Self, _: &ReadableContext| -> Option<String> {
+        let file_egetter = move |selfish: &Self, _: &Context| -> Option<String> {
             if let Some(ref val) = selfish.file {
                 let file = SndFile::open(val);
                 if let Err(e) = file {
@@ -57,7 +57,7 @@ impl Command for LoadCommand {
         let ident_getter = move |selfish: &Self| -> Option<String> {
             selfish.ident.as_ref().map(|x| x.clone())
         };
-        let ident_setter = move |selfish: &mut Self, val: Option<&String>| {
+        let ident_setter = move |selfish: &mut Self, val: Option<String>| {
             if let Some(val) = val {
                 selfish.ident = Some(val.clone());
                 selfish.ident_set = true;
@@ -67,7 +67,7 @@ impl Command for LoadCommand {
                 selfish.ident_set = false;
             }
         };
-        let ident_egetter = move |selfish: &Self, ctx: &ReadableContext| -> Option<String> {
+        let ident_egetter = move |selfish: &Self, ctx: &Context| -> Option<String> {
             if let Some(ref ident) = selfish.ident {
                 if ctx.db.resolve_ident(ident).is_some() {
                     Some(format!("Identifier ${} is already in use.", selfish.ident.as_ref().unwrap()))
@@ -84,16 +84,12 @@ impl Command for LoadCommand {
             }
         };
         vec![
-            GenericHunk::new(HunkTypes::FilePath,
-                             "Provide the file path to an audio file.", true,
-                             Box::new(file_getter), Box::new(file_setter), Box::new(file_egetter)),
+            hunk!(FilePath, "Provide the file path to an audio file.", true, file_getter, file_setter, file_egetter),
             TextHunk::new(format!("as")),
-            GenericHunk::new(HunkTypes::String,
-                             "Provide an optional named identifier for the new stream.", false,
-                             Box::new(ident_getter), Box::new(ident_setter), Box::new(ident_egetter))
+            hunk!(String, "Provide an optional named identifier for the new stream.", false, ident_getter, ident_setter, ident_egetter)
         ]
     }
-    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>, uu: Uuid) -> Result<bool, String> {
+    fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) -> Result<bool, String> {
         let file = self.file.take().ok_or(format!("No filename set."))?;
         let ident = self.ident.take();
         let streams = FileStream::new(SndFile::open(&file)

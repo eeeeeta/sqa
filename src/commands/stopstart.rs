@@ -32,7 +32,7 @@ impl Command for StopStartCommand {
         let ident_getter = move |selfish: &Self| -> Option<String> {
             selfish.ident.as_ref().map(|x| x.clone())
         };
-        let ident_setter = move |selfish: &mut Self, val: Option<&String>| {
+        let ident_setter = move |selfish: &mut Self, val: Option<String>| {
             if let Some(val) = val {
                 selfish.ident = Some(val.clone());
             }
@@ -40,7 +40,7 @@ impl Command for StopStartCommand {
                 selfish.ident = None;
             }
         };
-        let ident_egetter = move |selfish: &Self, ctx: &ReadableContext| -> Option<String> {
+        let ident_egetter = move |selfish: &Self, ctx: &Context| -> Option<String> {
             if let Some(ref ident) = selfish.ident {
                 if ctx.db.resolve_ident(ident).is_none() {
                     Some(format!("Identifier ${} does not exist.", selfish.ident.as_ref().unwrap()))
@@ -59,12 +59,10 @@ impl Command for StopStartCommand {
             StopStartChoice::ReStart => "Provide an identifier to restart, or leave blank to restart all streams."
         };
         vec![
-            GenericHunk::new(HunkTypes::Identifier,
-                             verbiage, false,
-                             Box::new(ident_getter), Box::new(ident_setter), Box::new(ident_egetter))
+            hunk!(Identifier, verbiage, false, ident_getter, ident_setter, ident_egetter)
         ]
     }
-    fn execute(&mut self, ctx: &mut WritableContext, _: &mut EventLoop<WritableContext>, _: Uuid) -> Result<bool, String> {
+    fn execute(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>, _: Uuid) -> Result<bool, String> {
         let ident = if let Some(ref id) = self.ident {
             Some(ctx.db.resolve_ident(id).unwrap().0)
         }

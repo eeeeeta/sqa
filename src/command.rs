@@ -1,8 +1,15 @@
-use state::{ReadableContext, WritableContext};
+use state::Context;
 use std::any::Any;
 use mopa;
 use mio::EventLoop;
 
+pub type CommandUpdate = Box<Fn(&mut Command) + Send>;
+fn new_command_update<T, U>(cls: U) -> CommandUpdate where U: Fn(&mut T) + Send + 'static, T: Command {
+    Box::new(move |cmd: &mut Command| {
+        let cmd = cmd.downcast_mut::<T>().unwrap();
+        cls(cmd);
+    })
+}
 pub trait BoxClone {
     fn box_clone(&self) -> Box<Command>;
 }
@@ -15,28 +22,69 @@ impl<T> BoxClone for T where T: Clone + Command + 'static {
 pub trait Command: mopa::Any + Send + BoxClone + 'static {
     fn name(&self) -> &'static str;
     fn get_hunks(&self) -> Vec<Box<Hunk>>;
-    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>, uu: ::uuid::Uuid) -> Result<bool, String>;
+    fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: ::uuid::Uuid) -> Result<bool, String>;
 }
 
 mopafy!(Command);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum HunkTypes {
     /// File path: `String`
-    FilePath,
+    FilePath(Option<String>),
     /// Identifier: `String`
-    Identifier,
+    Identifier(Option<String>),
     /// Volume: `f32`
-    Volume,
+    Volume(f32),
     /// Time: `u64`
-    Time,
+    Time(Option<u64>),
     /// Generic string: `String`
-    String,
+    String(Option<String>),
     /// Immutable text: `String` (setter always returns error)
-    Label
+    Label(String)
 }
+impl HunkTypes {
+    pub fn is_none(&self) -> bool {
+        match self {
+            &HunkTypes::FilePath(ref opt) => opt.is_none(),
+            &HunkTypes::Identifier(ref opt) => opt.is_none(),
+            &HunkTypes::String(ref opt) => opt.is_none(),
+            &HunkTypes::Label(..) => false,
+            &HunkTypes::Volume(..) => false,
+            &HunkTypes::Time(ref opt) => opt.is_none()
+        }
+    }
+    pub fn unwrap_ref(&self) -> &Any {
+        match self {
+            &HunkTypes::FilePath(ref opt) => opt,
+            &HunkTypes::Identifier(ref opt) => opt,
+            &HunkTypes::String(ref opt) => opt,
+            &HunkTypes::Label(ref opt) => opt,
+            &HunkTypes::Volume(ref opt) => opt,
+            &HunkTypes::Time(ref opt) => opt,
+        }
+    }
+    pub fn none_of(&self) -> HunkTypes {
+        match self {
+            &HunkTypes::FilePath(..) => HunkTypes::FilePath(None),
+            &HunkTypes::Identifier(..) => HunkTypes::Identifier(None),
+            &HunkTypes::String(..) => HunkTypes::String(None),
+            &HunkTypes::Label(..) => panic!("eta dun goofed"),
+            &HunkTypes::Volume(..) => HunkTypes::Volume(0.0),
+            &HunkTypes::Time(..) => HunkTypes::Time(None)
+        }
+    }
+    pub fn string_of(&self, st: Option<String>) -> HunkTypes {
+        match self {
+            &HunkTypes::FilePath(..) => HunkTypes::FilePath(st),
+            &HunkTypes::Identifier(..) => HunkTypes::Identifier(st),
+            &HunkTypes::String(..) => HunkTypes::String(st),
+            _ => panic!("eta dun goofed"),
+        }
+    }
+}
+#[derive(Clone, Debug)]
 pub struct HunkState {
-    pub val: Option<Box<Any>>,
+    pub val: HunkTypes,
     pub required: bool,
     pub help: &'static str,
     pub err: Option<String>
@@ -51,12 +99,12 @@ pub struct HunkState {
 /// Hunks are expected to use given types for `get_val` and `set_val`, depending on their type.
 /// See the `HunkTypes` enum for which ones.
 pub trait Hunk {
-    fn disp(&self) -> HunkTypes;
     /// Gets this hunk's value and state.
-    fn get_val(&self, cmd: &Box<Command>, ctx: &ReadableContext) -> HunkState;
+    fn get_val(&self, cmd: &Command, ctx: &Context) -> HunkState;
     /// Sets this hunk's value - dependent on what type it is.
-    fn set_val(&mut self, cmd: &mut Box<Command>, val: Option<Box<Any>>);
+    fn set_val(&mut self, cmd: &mut Command, val: HunkTypes);
 }
+
 
 /// Static hunk that displays a bit of text.
 /// Intended to add wording to a command line, like `As`.
@@ -69,72 +117,58 @@ impl TextHunk {
     }
 }
 impl Hunk for TextHunk {
-    fn disp(&self) -> HunkTypes {
-        HunkTypes::Label
-    }
-    fn get_val(&self, _: &Box<Command>, _: &ReadableContext) -> HunkState {
+    fn get_val(&self, _: &Command, _: &Context) -> HunkState {
         HunkState {
-            val: Some(Box::new(self.text.clone())),
+            val: HunkTypes::Label(self.text.clone()),
             required: false,
-            help: "just a simple little text thing, doing its job",
+            help: "eta is a lousy coder",
             err: None
         }
     }
-    fn set_val(&mut self, _: &mut Box<Command>, _: Option<Box<Any>>) {
+    fn set_val(&mut self, _: &mut Command, _: HunkTypes) {
         panic!("Hunk method called on text hunk");
     }
 }
 
 /// An implementation of the hunk API.
-pub struct GenericHunk<T, U> where T: Any, U: Command {
-    hlp: &'static str,
-    ty: HunkTypes,
-    get: Box<Fn(&U) -> Option<T>>,
-    set: Box<Fn(&mut U, Option<&T>)>,
-    err: Box<Fn(&U, &ReadableContext) -> Option<String>>,
-    required: bool
+pub struct GenericHunk {
+    pub get: Box<Fn(&Command, &Context) -> HunkState>,
+    pub set: Box<Fn(&mut Command, HunkTypes)>,
 }
-
-
-impl<T, U> GenericHunk<T, U> where T: Any, U: Command {
-    pub fn new(ty: HunkTypes, hlp: &'static str, reqd: bool,
-               get: Box<Fn(&U) -> Option<T>>,
-               set: Box<Fn(&mut U, Option<&T>)>,
-               err: Box<Fn(&U, &ReadableContext) -> Option<String>>) -> Box<Hunk> {
-        Box::new(GenericHunk {
-            ty: ty,
-            hlp: hlp,
-            get: get,
-            set: set,
-            err: err,
-            required: reqd
-        })
+impl Hunk for GenericHunk {
+    fn get_val(&self, cmd: &Command, ctx: &Context) -> HunkState {
+        let ref getter = self.get;
+        getter(cmd, ctx)
+    }
+    fn set_val(&mut self, cmd: &mut Command, val: HunkTypes) {
+        let ref setter = self.set;
+        setter(cmd, val)
     }
 }
-impl<T, U> Hunk for GenericHunk<T, U> where T: Any, U: Command {
-    fn disp(&self) -> HunkTypes {
-        self.ty
-    }
-    fn get_val(&self, cmd: &Box<Command>, ctx: &ReadableContext) -> HunkState {
-        let cmd = cmd.downcast_ref().unwrap();
-        let getter = &self.get;
-        let err_getter = &self.err;
-        HunkState {
-            val: getter(cmd).map(|x| Box::new(x) as Box<Any>),
-            required: self.required,
-            help: self.hlp,
-            err: err_getter(cmd, ctx)
-        }
-    }
-    fn set_val(&mut self, cmd: &mut Box<Command>, val: Option<Box<Any>>) {
-        let mut cmd = cmd.downcast_mut().unwrap();
-        let setter = &mut self.set;
-        if let Some(ref ty) = val {
-            let new_val = Some(ty.downcast_ref().expect("GenericHunk got wrong type for set()"));
-            setter(cmd, new_val)
-        }
-        else {
-            setter(cmd, None)
+macro_rules! hunk {
+    ($typ:ident, $hlp:expr, $reqd:expr, $getter:expr, $setter:expr, $egetter:expr) => {{
+        use state::Context;
+        use command::{Command, HunkTypes, HunkState};
+        let get_val = move |cmd: &Command, ctx: &Context| -> HunkState {
+            let cmd = cmd.downcast_ref().unwrap();
+            HunkState {
+                val: HunkTypes::$typ($getter(cmd)),
+                required: $reqd,
+                help: $hlp,
+                err: $egetter(cmd, ctx)
+            }
         };
-    }
+        let set_val = move |cmd: &mut Command, val: HunkTypes| {
+            if let HunkTypes::$typ(v) = val {
+                $setter(cmd.downcast_mut().unwrap(), v);
+            }
+            else {
+                panic!("wrong type");
+            }
+        };
+        Box::new(GenericHunk {
+            get: Box::new(get_val),
+            set: Box::new(set_val),
+        })
+    }}
 }

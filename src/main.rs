@@ -27,7 +27,7 @@ use gtk::{Builder, Window, ListBox, Label};
 use gdk::enums::key as gkey;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use state::{ReadableContext, ThreadNotifier};
+use state::{ThreadNotifier, Message};
 use std::sync::mpsc::{channel};
 use ui::{CommandLine, CommandChooserController};
 
@@ -43,37 +43,42 @@ fn main() {
     let screen = gdk::Screen::get_default().unwrap();
     gtk::StyleContext::add_provider_for_screen(&screen, &provider, 0);
     println!("[+] Initialising backend...");
-    let ctx = Arc::new(Mutex::new(ReadableContext::new()));
-    let cc = ctx.clone();
     let (stx, srx) = channel();
+    let (tx, rx) = channel();
     let tn = ThreadNotifier::new();
     let ttn = tn.clone();
     thread::spawn(move || {
-        backend::backend_main(cc, stx, ttn);
+        backend::backend_main(stx, tx, ttn);
         panic!("backend died :(");
     });
-    let tncc = ctx.clone();
     let statebox: ListBox = builder.get_object("active-command-list").unwrap();
-    tn.register_handler(move || {
-        for chld in statebox.get_children() {
-            chld.destroy();
-        }
-        for act in tncc.lock().unwrap().acts.iter() {
-            let lbl = Label::new(None);
-            let hours = act.runtime.num_hours();
-            let minutes = act.runtime.num_minutes() - (60 * act.runtime.num_hours());
-            let seconds = act.runtime.num_seconds() - (60 * act.runtime.num_minutes());
-            lbl.set_markup(&format!("<b>{:02}:{:02}:{:02}</b> {:?}: {}", hours, minutes, seconds, act.state, act.desc));
-            lbl.show_all();
-            statebox.add(&lbl);
-        }
-    });
     println!("[+] Waiting for backend...");
     let sender = srx.recv().unwrap();
     println!("[+] Setting up window & GTK objects...");
     let win: Window = builder.get_object("SQA Main Window").unwrap();
-    let cmdl = CommandLine::new(ctx.clone(), sender, &builder);
+    let cmdl = CommandLine::new(sender, &builder);
     let cc = CommandChooserController::new(cmdl.clone(), &builder);
+    let cmdlc = cmdl.clone();
+    let ccc = cc.clone();
+    tn.register_handler(move || {
+        match rx.recv().unwrap() {
+            Message::CmdDesc(uu, desc) => {
+                let which = {
+                    let cl = cmdlc.borrow();
+                    cl.uuid.is_some()
+                };
+                if which {
+                    CommandLine::build(cmdlc.clone(), desc);
+                }
+                else {
+                    CommandLine::update(cmdlc.clone(), Some(desc));
+                }
+                CommandChooserController::update(ccc.clone());
+            },
+            _ => unimplemented!()
+        }
+    });
+
     win.connect_key_press_event(move |_, ek| {
         if ek.get_state().contains(gdk::CONTROL_MASK) {
             match ek.get_keyval() {
@@ -96,3 +101,4 @@ fn main() {
     println!("[+] Initialisation complete!");
     gtk::main();
 }
+

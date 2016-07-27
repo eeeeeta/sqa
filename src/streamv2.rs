@@ -10,8 +10,8 @@ use std::ops::Rem;
 use mixer::FRAMES_PER_CALLBACK;
 use bounded_spsc_queue;
 use bounded_spsc_queue::{Producer, Consumer};
-use backend::{BackendSender, BackendMessage};
-use state::ActionState;
+use backend::BackendSender;
+use state::Message;
 
 /* FIXME(for this entire file): give some notification on try_push failures */
 /// Converts a linear amplitude to decibels.
@@ -170,11 +170,12 @@ impl FileStreamSpooler {
                 }
                 if let Some(lp) = lp {
                     let mut clp = lck.write().unwrap();
+                    /*
                     if clp.active != lp.active {
                         self.notifier.send(BackendMessage::StateChange(self.auuid, if lp.active { ActionState::Running }
                                                                        else { ActionState::Paused })).unwrap();
                     }
-                    self.notifier.send(BackendMessage::RuntimeChange(self.auuid, ::time::Duration::milliseconds((lp.pos as f64 / 44.1) as i64))).unwrap();
+                    self.notifier.send(BackendMessage::RuntimeChange(self.auuid, ::time::Duration::milliseconds((lp.pos as f64 / 44.1) as i64))).unwrap();*/
                     *clp = lp;
                 }
             }

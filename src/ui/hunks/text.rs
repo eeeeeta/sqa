@@ -3,6 +3,7 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::Label;
 use gtk::Box as GtkBox;
+use command::HunkTypes;
 use super::CommandLine;
 use super::HunkUIController;
 
@@ -19,19 +20,12 @@ impl TextUIController {
 }
 
 impl HunkUIController for TextUIController {
-    fn bind(&mut self, _: Rc<RefCell<CommandLine>>, _: usize) {}
+    fn bind(&mut self, _: Rc<RefCell<CommandLine>>, _: usize, ht: HunkTypes) {}
     fn pack(&self, onto: &GtkBox) {
         onto.pack_start(&self.lbl, false, false, 3);
     }
-    fn set_val(&mut self, val: Option<&Box<::std::any::Any>>) {
-        match val {
-            Some(txt) => {
-                self.lbl.set_markup(&format!("<span fgcolor=\"#888888\">{}</span>",txt.downcast_ref::<String>().unwrap()));
-            },
-            None => {
-                self.lbl.set_markup("");
-            }
-        }
+    fn set_val(&mut self, val: &::std::any::Any) {
+        self.lbl.set_markup(&format!("<span fgcolor=\"#888888\">{}</span>", val.downcast_ref::<String>().unwrap()));
     }
     fn set_error(&mut self, _: Option<String>) {}
 }

@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use state::{ReadableContext, WritableContext, ThreadNotifier, ActionDescriptor, ActionState};
+use state::{Context, ThreadNotifier, Message};
 use std::sync::mpsc::{Sender};
 use mixer;
 use command::Command;
@@ -9,20 +9,14 @@ use mio::{Handler, EventLoop};
 use uuid::Uuid;
 use chrono::Duration;
 
-pub type BackendSender = mio::Sender<BackendMessage>;
+pub type BackendSender = mio::Sender<Message>;
 pub trait BackendTimeout {
-    fn execute(&mut self, ctx: &mut WritableContext, evl: &mut EventLoop<WritableContext>) -> Option<u64>;
+    fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>) -> Option<u64>;
 }
 
-pub enum BackendMessage {
-    Execute(Box<Command>),
-    DescChange(Uuid, String),
-    StateChange(Uuid, ActionState),
-    RuntimeChange(Uuid, Duration)
-}
-impl<'a> Handler for WritableContext<'a> {
+impl<'a> Handler for Context<'a> {
     type Timeout = Box<BackendTimeout>;
-    type Message = BackendMessage;
+    type Message = Message;
 
     fn timeout(&mut self, evl: &mut EventLoop<Self>, mut timeout: Box<BackendTimeout>) {
         if let Some(next_int) = timeout.execute(self, evl) {
@@ -30,53 +24,39 @@ impl<'a> Handler for WritableContext<'a> {
         }
     }
     fn notify(&mut self, evl: &mut EventLoop<Self>, msg: Self::Message) {
+        let mut update = None;
         match msg {
-            BackendMessage::Execute(mut cmd) => {
-                let mut ad = ActionDescriptor::new(cmd.name().to_owned());
-                let mut complete: bool = false;
-                ad.state = ActionState::Running;
-                let dur = Duration::span(|| {
-                    complete = cmd.execute(self, evl, ad.uuid).unwrap();
-                });
-                if complete {
-                    ad.state = ActionState::Completed;
-                    ad.runtime = dur;
-                }
-                println!("new cmd: {:?}", ad);
-                self.acts.push(ad);
+            Message::NewCmd(uu, spawner) => {
+                assert!(self.commands.insert(uu, spawner.spawn()).is_none());
+                update = Some(uu);
             },
-            BackendMessage::DescChange(uu, newdesc) => {
-                if let Some(ad) = self.get_action_desc_mut(uu) {
-                    ad.desc = newdesc;
-                }
-                else { panic!("notify() called with invalid UUID for change request") }
+            Message::SetHunk(uu, idx, val) => {
+                let mut cmd = self.commands.get_mut(&uu).unwrap();
+                let ref mut hunk = cmd.get_hunks()[idx];
+                hunk.set_val(::std::ops::DerefMut::deref_mut(cmd), val);
+                update = Some(uu);
             },
-            BackendMessage::StateChange(uu, newstate) => {
-                if let Some(ad) = self.get_action_desc_mut(uu) {
-                    ad.state = newstate;
-                    println!("state change for cmd: {:?}", ad);
-                }
-                else { panic!("notify() called with invalid UUID for change request") }
+            Message::Execute(uu) => {
+                // FIXME: cloning & borrowing mess
+                let mut cmd = self.commands.get_mut(&uu).unwrap().box_clone();
+                cmd.execute(self, evl, uu).unwrap();
+                update = Some(uu);
             },
-            BackendMessage::RuntimeChange(uu, rnt) => {
-                if let Some(ad) = self.get_action_desc_mut(uu) {
-                    ad.runtime = rnt;
-                    println!("rt change for cmd: {:?}", ad);
-                }
-                else { panic!("notify() called with invalid UUID for change request") }
-            }
+            _ => unimplemented!()
         }
-        self.update();
+        if let Some(uu) = update {
+            self.update_cmd(uu);
+        }
     }
 }
-pub fn backend_main(rc: Arc<Mutex<ReadableContext>>, stx: Sender<BackendSender>, tn: ThreadNotifier) {
+pub fn backend_main(stx: Sender<BackendSender>, tx: Sender<Message>, tn: ThreadNotifier) {
     /* THE PORTAUDIO CONTEXT MUST BE THE FIRST BOUND VARIABLE
      * HEED THIS WARNING, OR THE BORROW CHECKER WILL SMITE THEE */
     let mut p = pa::PortAudio::new().unwrap();
-    let mut ctx = WritableContext::new(rc, tn);
+    let mut ctx = Context::new(tx, tn);
     let idx = p.default_output_device().unwrap();
     ctx.insert_device(mixer::DeviceSink::from_device_chans(&mut p, idx).unwrap());
-    let mut evl: EventLoop<WritableContext> = EventLoop::new().unwrap();
+    let mut evl: EventLoop<Context> = EventLoop::new().unwrap();
     println!("sending..");
     stx.send(evl.channel()).unwrap();
     println!("done");

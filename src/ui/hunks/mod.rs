@@ -9,6 +9,7 @@ pub use self::time::TimeUIController;
 pub use self::volume::VolumeUIController;
 pub use super::line::CommandLine;
 
+use command::HunkTypes;
 use std::cell::RefCell;
 use std::rc::Rc;
 use gtk::prelude::*;
@@ -16,11 +17,11 @@ use gtk::{Label, Image, Button, Builder, Popover};
 use gtk::Box as GtkBox;
 
 pub trait HunkUIController {
-    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize);
+    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes);
     fn focus(&self) {}
     fn pack(&self, onto: &GtkBox);
     fn set_help(&mut self, _help: &'static str) {}
-    fn set_val(&mut self, _val: Option<&Box<::std::any::Any>>) {}
+    fn set_val(&mut self, _val: &::std::any::Any) {}
     fn set_error(&mut self, _err: Option<String>) {}
     fn get_error(&self) -> Option<String> { None }
 }
@@ -87,9 +88,9 @@ impl PopoverUIController {
         btn
     }
     /* FIXME: why does the rust compiler make us clone() here? */
-    pub fn bind_defaults(&self, line: Rc<RefCell<CommandLine>>, idx: usize) {
+    pub fn bind_defaults(&self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
         self.unset_btn.connect_clicked(clone!(line; |_s| {
-            CommandLine::set_val(line.clone(), idx, None);
+            CommandLine::set_val(line.clone(), idx, ht.none_of());
         }));
         self.state_actions.pack_start(&self.unset_btn, false, false, 0);
     }

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::Box as GtkBox;
+use command::HunkTypes;
 use super::CommandLine;
 use super::HunkUIController;
 use super::EntryUIController;
@@ -28,12 +29,12 @@ impl HunkUIController for TimeUIController {
     fn set_help(&mut self, help: &'static str) {
         self.entuic.set_help(help);
     }
-    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize) {
+    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
         let ref pop = self.entuic.pop;
         let ref ent = self.entuic.ent;
         let ref uierr = self.err;
 
-        pop.borrow().bind_defaults(line.clone(), idx);
+        pop.borrow().bind_defaults(line.clone(), idx, ht);
         self.entuic.ent.connect_focus_in_event(clone!(pop; |_s, _y| {
             pop.borrow().visible(true);
             Inhibit(false)
@@ -46,50 +47,51 @@ impl HunkUIController for TimeUIController {
                     return Inhibit(false);
                 }
                 else if strn == "" {
-                    CommandLine::set_val(line.clone(), idx, None);
+                    CommandLine::set_val(line.clone(), idx, HunkTypes::Time(None));
                     *uierr.borrow_mut() = None;
                     return Inhibit(false);
                 }
             }
             else {
-                CommandLine::set_val(line.clone(), idx, None);
+                CommandLine::set_val(line.clone(), idx, HunkTypes::Time(None));
                 *uierr.borrow_mut() = None;
                 return Inhibit(false);
             }
             *uierr.borrow_mut() = Some(ent.get_text().unwrap().to_owned());
-            CommandLine::update(line.clone());
+            CommandLine::update(line.clone(), None);
             Inhibit(false)
         }));
         self.entuic.ent.connect_activate(clone!(line, uierr; |ent| {
             *uierr.borrow_mut() = None;
             if let Some(strn) = ent.get_text() {
                 if let Ok(ref val) = str::parse::<u64>(&strn) {
-                    CommandLine::set_val(line.clone(), idx, Some(Box::new(*val)));
+                    CommandLine::set_val(line.clone(), idx, HunkTypes::Time(Some(*val)));
                 }
                 else if strn == "" {
                     *uierr.borrow_mut() = None;
-                    CommandLine::set_val(line.clone(), idx, None);
+                    CommandLine::set_val(line.clone(), idx, HunkTypes::Time(None));
                 }
                 else {
                     *uierr.borrow_mut() = Some(strn.to_owned());
-                    CommandLine::update(line.clone());
+                    CommandLine::update(line.clone(), None);
                 }
             }
             else {
-                CommandLine::set_val(line.clone(), idx, None);
+                CommandLine::set_val(line.clone(), idx, HunkTypes::Time(None));
             }
         }));
     }
-    fn set_val(&mut self, val: Option<&Box<::std::any::Any>>) {
+    fn set_val(&mut self, val: &::std::any::Any) {
         if self.err.borrow().is_some() {
             return;
         }
+        let val = val.downcast_ref::<Option<u64>>().unwrap();
         self.entuic.pop.borrow().val_exists(val.is_some());
         match val {
-            Some(txt) => {
-                self.entuic.ent.set_text(&format!("{}", txt.downcast_ref::<u64>().unwrap()));
+            &Some(ref txt) => {
+                self.entuic.ent.set_text(&format!("{}", txt));
             },
-            None => {
+            &None => {
                 self.entuic.ent.set_text("");
             }
         }
