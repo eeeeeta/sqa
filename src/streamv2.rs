@@ -44,7 +44,7 @@ impl LiveParameters {
         LiveParameters {
             vol: 1.0,
             pos: 0,
-            active: true,
+            active: false,
             start: start,
             end: end
         }
@@ -60,6 +60,7 @@ enum SpoolerCtl {
 ///
 /// See the FileStream documentation for info about what these
 /// fields are.
+#[derive(Clone)]
 pub struct FileStreamX {
     lp: Arc<RwLock<LiveParameters>>,
     tx: Arc<Mutex<Producer<SpoolerCtl>>>,
@@ -165,16 +166,17 @@ impl FileStreamSpooler {
             if let Some(msg) = self.rx.try_pop() {
                 self.handle(msg);
             }
-            for &mut (ref mut rx, ref mut lck) in self.statuses.iter_mut() {
+            for (i, &mut (ref mut rx, ref mut lck)) in self.statuses.iter_mut().enumerate() {
                 let mut lp = None;
                 while let Some(stat) = rx.try_pop() {
                     lp = Some(stat);
                 }
                 if let Some(lp) = lp {
+                    *lck.write().unwrap() = lp.clone();
                     self.notifier.send(Message::Update(
                         self.auuid,
                         command::new_update(move |cmd: &mut LoadCommand| {
-                            cmd.lp = Some(lp);
+                            cmd.streams[i].lp = lp;
                         })
                     )).unwrap();
                 }

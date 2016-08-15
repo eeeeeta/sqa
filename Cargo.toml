@@ -7,7 +7,7 @@ authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 libc = "0.2.8"
 enum_primitive = "0.1.0"
 num = "0.1.31"
-portaudio = "0.6.3"
+portaudio = { git = "https://github.com/RustAudio/rust-portaudio" }
 rsndfile = { path = "../rsndfile/" }
 uuid = { git = "https://github.com/rust-lang-nursery/uuid", rev = "34ff260", features = ["use_std", "v4"] }
 crossbeam = "0.2.5"

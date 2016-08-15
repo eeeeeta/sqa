@@ -2,42 +2,92 @@
 <!-- Generated with glade 3.20.0 -->
 <interface>
   <requires lib="gtk+" version="3.20"/>
+  <object class="GtkTreeStore" id="command-tree">
+    <columns>
+      <!-- column-name icon-state -->
+      <column type="gchararray"/>
+      <!-- column-name icon-type -->
+      <column type="GdkPixbuf"/>
+      <!-- column-name cue -->
+      <column type="gchararray"/>
+      <!-- column-name desc -->
+      <column type="gchararray"/>
+      <!-- column-name duration -->
+      <column type="gchararray"/>
+      <!-- column-name backgroundc -->
+      <column type="gchararray"/>
+    </columns>
+  </object>
   <object class="GtkApplicationWindow" id="SQA Main Window">
     <property name="can_focus">False</property>
+    <property name="title" translatable="yes">SQA</property>
+    <property name="hide_titlebar_when_maximized">True</property>
     <child>
-      <object class="GtkPaned">
+      <object class="GtkBox">
         <property name="visible">True</property>
-        <property name="can_focus">True</property>
+        <property name="can_focus">False</property>
         <property name="orientation">vertical</property>
-        <property name="position">120</property>
-        <property name="position_set">True</property>
         <child>
-          <placeholder/>
+          <object class="GtkBox">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="halign">center</property>
+            <property name="margin_top">5</property>
+            <property name="margin_bottom">5</property>
+            <child>
+              <object class="GtkImage" id="line-hint-image">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="margin_right">5</property>
+                <property name="icon_name">dialog-error</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel" id="line-hint-label">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="label" translatable="yes">Your command is bad, and you should feel bad.</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="pack_type">end</property>
+            <property name="position">0</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkSeparator">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="pack_type">end</property>
+            <property name="position">1</property>
+          </packing>
         </child>
         <child>
           <object class="GtkBox">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
-            <property name="orientation">vertical</property>
             <child>
-              <object class="GtkSeparator">
+              <object class="GtkArrow">
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
-              </object>
-              <packing>
-                <property name="expand">False</property>
-                <property name="fill">True</property>
-                <property name="pack_type">end</property>
-                <property name="position">-1</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkLabel">
-                <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <property name="halign">start</property>
-                <property name="label" translatable="yes">&lt;span variant="smallcaps"&gt;Command line&lt;/span&gt;&lt;span fgcolor="#888888"&gt; - 0 commands running&lt;/span&gt;</property>
-                <property name="use_markup">True</property>
+                <property name="margin_right">3</property>
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -46,18 +96,16 @@
               </packing>
             </child>
             <child>
-              <object class="GtkBox">
+              <object class="GtkBox" id="command-line">
+                <property name="height_request">30</property>
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
-                <property name="halign">center</property>
-                <property name="margin_top">5</property>
-                <property name="margin_bottom">5</property>
                 <child>
-                  <object class="GtkImage" id="line-hint-image">
+                  <object class="GtkLabel" id="command-line-placeholder">
                     <property name="visible">True</property>
                     <property name="can_focus">False</property>
-                    <property name="margin_right">5</property>
-                    <property name="icon_name">dialog-error</property>
+                    <property name="label" translatable="yes">&lt;span fgcolor="#888888"&gt;&lt;i&gt;Select a command with Ctrl+Enter&lt;/i&gt;&lt;/span&gt;</property>
+                    <property name="use_markup">True</property>
                   </object>
                   <packing>
                     <property name="expand">False</property>
@@ -65,106 +113,116 @@
                     <property name="position">0</property>
                   </packing>
                 </child>
-                <child>
-                  <object class="GtkLabel" id="line-hint-label">
-                    <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <property name="label" translatable="yes">Your command is bad, and you should feel bad.</property>
-                  </object>
-                  <packing>
-                    <property name="expand">False</property>
-                    <property name="fill">True</property>
-                    <property name="position">1</property>
-                  </packing>
-                </child>
               </object>
               <packing>
                 <property name="expand">False</property>
                 <property name="fill">True</property>
-                <property name="pack_type">end</property>
-                <property name="position">0</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkSeparator">
-                <property name="visible">True</property>
-                <property name="can_focus">False</property>
-              </object>
-              <packing>
-                <property name="expand">False</property>
-                <property name="fill">True</property>
-                <property name="pack_type">end</property>
                 <property name="position">1</property>
               </packing>
             </child>
             <child>
-              <object class="GtkBox">
+              <placeholder/>
+            </child>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="pack_type">end</property>
+            <property name="position">2</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkStack">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <property name="transition_type">over-up-down</property>
+            <child>
+              <object class="GtkTreeView" id="command-tree-view">
                 <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <child>
-                  <object class="GtkArrow">
-                    <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <property name="margin_right">3</property>
-                  </object>
-                  <packing>
-                    <property name="expand">False</property>
-                    <property name="fill">True</property>
-                    <property name="position">0</property>
-                  </packing>
+                <property name="can_focus">True</property>
+                <property name="model">command-tree</property>
+                <property name="enable_grid_lines">horizontal</property>
+                <child internal-child="selection">
+                  <object class="GtkTreeSelection"/>
                 </child>
                 <child>
-                  <object class="GtkBox" id="command-line">
-                    <property name="height_request">30</property>
-                    <property name="visible">True</property>
-                    <property name="can_focus">False</property>
+                  <object class="GtkTreeViewColumn" id="column-state">
                     <child>
-                      <object class="GtkLabel" id="command-line-placeholder">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">&lt;span fgcolor="#888888"&gt;&lt;i&gt;Select a command with Ctrl+Enter&lt;/i&gt;&lt;/span&gt;</property>
-                        <property name="use_markup">True</property>
+                      <object class="GtkCellRendererPixbuf" id="renderer-state">
+                        <property name="stock_size">1</property>
                       </object>
-                      <packing>
-                        <property name="expand">False</property>
-                        <property name="fill">True</property>
-                        <property name="position">0</property>
-                      </packing>
+                      <attributes>
+                        <attribute name="cell-background">5</attribute>
+                        <attribute name="icon-name">0</attribute>
+                      </attributes>
                     </child>
                   </object>
-                  <packing>
-                    <property name="expand">False</property>
-                    <property name="fill">True</property>
-                    <property name="position">1</property>
-                  </packing>
                 </child>
                 <child>
-                  <placeholder/>
+                  <object class="GtkTreeViewColumn" id="column-cue">
+                    <property name="title" translatable="yes">Q</property>
+                    <child>
+                      <object class="GtkCellRendererText" id="renderer-cue"/>
+                      <attributes>
+                        <attribute name="cell-background">5</attribute>
+                        <attribute name="markup">2</attribute>
+                      </attributes>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkTreeViewColumn" id="column-desc">
+                    <property name="title" translatable="yes">Description</property>
+                    <child>
+                      <object class="GtkCellRendererText" id="renderer-desc"/>
+                      <attributes>
+                        <attribute name="cell-background">5</attribute>
+                        <attribute name="markup">3</attribute>
+                      </attributes>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkTreeViewColumn" id="column-duration">
+                    <property name="title" translatable="yes">Dur</property>
+                    <property name="alignment">1</property>
+                    <child>
+                      <object class="GtkCellRendererText" id="renderer-duration">
+                        <property name="xalign">1</property>
+                        <property name="alignment">right</property>
+                      </object>
+                      <attributes>
+                        <attribute name="cell-background">5</attribute>
+                        <attribute name="markup">4</attribute>
+                      </attributes>
+                    </child>
+                  </object>
                 </child>
               </object>
               <packing>
-                <property name="expand">False</property>
-                <property name="fill">True</property>
-                <property name="pack_type">end</property>
-                <property name="position">1</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkListBox" id="active-command-list">
-                <property name="visible">True</property>
-                <property name="can_focus">False</property>
-              </object>
-              <packing>
-                <property name="expand">False</property>
-                <property name="fill">True</property>
-                <property name="pack_type">end</property>
-                <property name="position">5</property>
+                <property name="name">page0</property>
+                <property name="title" translatable="yes">page0</property>
               </packing>
             </child>
           </object>
           <packing>
-            <property name="resize">True</property>
-            <property name="shrink">True</property>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="position">3</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkSeparator">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="pack_type">end</property>
+            <property name="position">5</property>
           </packing>
         </child>
       </object>
@@ -173,7 +231,7 @@
   <object class="GtkImage" id="image1">
     <property name="visible">True</property>
     <property name="can_focus">False</property>
-    <property name="stock">gtk-go-back</property>
+    <property name="icon_name">go-previous</property>
   </object>
   <object class="GtkPopover" id="command-chooser-popover">
     <property name="can_focus">False</property>

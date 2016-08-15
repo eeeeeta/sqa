@@ -96,6 +96,9 @@ impl CommandLine {
             selfish.clear();
             selfish.uuid = None;
             selfish.cd = Some(cd);
+            let name_lbl = Label::new(None);
+            name_lbl.set_markup(&format!("<span weight=\"bold\" fgcolor=\"#666666\">{}</span>", selfish.cd.as_ref().unwrap().name));
+            selfish.line.pack_start(&name_lbl, false, false, 3);
             let mut hunks = Vec::new();
             for (i, hunk) in selfish.cd.as_ref().unwrap().hunks.iter().enumerate() {
                 let mut hui = HunkUI::from_state(hunk.clone());

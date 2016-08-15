@@ -1,21 +1,27 @@
 use super::prelude::*;
 use rsndfile::SndFile;
-use streamv2::{FileStream, LiveParameters};
+use streamv2::{FileStream, FileStreamX, LiveParameters};
 use chrono::Duration;
+
+#[derive(Clone)]
+pub struct StreamInfo {
+    pub lp: LiveParameters,
+    ctl: FileStreamX
+}
 #[derive(Clone)]
 pub struct LoadCommand {
     file: Option<String>,
     ident: Option<String>,
     ident_set: bool,
-    pub lp: Option<LiveParameters>
+    pub streams: Vec<StreamInfo>
 }
 impl LoadCommand {
     pub fn new() -> Self {
         LoadCommand {
             file: None,
             ident: None,
-            lp: None,
-            ident_set: false
+            ident_set: false,
+            streams: vec![]
         }
     }
 }
@@ -25,8 +31,12 @@ impl Command for LoadCommand {
         format!("Load file <b>{}</b> as <b>{}</b>", desc!(self.file), desc!(self.ident))
     }
     fn run_state(&self) -> Option<CommandState> {
-        if let Some(ref lp) = self.lp {
-            Some(CommandState::Running(Duration::milliseconds((lp.pos / 44) as i64)))
+        if let Some(ref info) = self.streams.get(0) {
+            Some(if info.lp.pos == 0 && info.lp.active == false {
+                CommandState::Loaded
+            } else {
+                CommandState::Running(Duration::milliseconds((info.lp.pos / 44) as i64))
+            })
         }
         else {
             None
@@ -103,22 +113,40 @@ impl Command for LoadCommand {
             hunk!(String, "Provide an optional named identifier for the new stream.", false, ident_getter, ident_setter, ident_egetter)
         ]
     }
-    fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) -> Result<bool, String> {
-        let file = self.file.clone().ok_or(format!("No filename set."))?;
+    fn load(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) {
+        let file = self.file.clone().unwrap();
         let ident = self.ident.clone();
-        let streams = FileStream::new(SndFile::open(&file)
-                                      .map_err(|e| format!("error opening file: {}", e.expl))?,
-                                      evl.channel(), uu);
-        let uu = ctx.insert_filestream(file, streams);
-        ctx.db.get_mut(&uu).unwrap().ident = ident;
 
-        let uuids = ctx.db.get(&uu).unwrap().others.as_ref().unwrap().clone();
-        for (i, uid) in uuids.into_iter().enumerate() {
-            if let Some(qch) = ctx.db.get_qch(i) {
-                ctx.mstr.wire(ctx.db.get(&uid).unwrap().out.as_ref().unwrap().clone(), qch.inp.as_ref().unwrap().clone()).map_err(|e| format!("Wiring failed: {:?}", e))?;
-            }
+        let streams = FileStream::new(SndFile::open(&file).unwrap(),
+                                      evl.channel(),
+                                      uu);
+        for StreamInfo { ctl, .. } in ::std::mem::replace(&mut self.streams, Vec::new()) {
+            ctx.mstr.locate_source(ctl.uuid()).unwrap();
         }
-        self.lp = Some(LiveParameters::new(0, 0));
+        if let Some(i) = ident {
+            ctx.identifiers.insert(i, uu);
+        }
+        for (i, (fs, fsx)) in streams.into_iter().enumerate() {
+            let uu = fsx.uuid();
+            ctx.mstr.add_source(Box::new(fs));
+            self.streams.push(StreamInfo {
+                lp: LiveParameters::new(0, 0),
+                ctl: fsx
+            });
+            let dest = ctx.mstr.ichans[i].1;
+            ctx.mstr.wire(uu, dest).unwrap();
+        }
+    }
+    fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) -> Result<bool, String> {
+        if self.streams.get(0).is_none() {
+            self.load(ctx, evl, uu);
+        }
+        if let Some(ref mut info) = self.streams.get_mut(0) {
+            info.ctl.start();
+        }
+        else {
+            panic!("woops");
+        }
         Ok(false)
     }
 }

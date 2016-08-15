@@ -3,10 +3,12 @@ mod prelude;
 mod load;
 mod stopstart;
 mod vol;
+mod output;
 
 pub use self::load::LoadCommand;
 pub use self::vol::VolCommand;
 pub use self::stopstart::StopStartCommand;
+pub use self::output::OutputCommand;
 use self::prelude::Command;
 use gdk::enums::key::Key as gkey;
 use gdk::enums::key as gkeys;
@@ -16,7 +18,8 @@ enum Commands {
     Vol,
     Stop,
     Start,
-    ReStart
+    ReStart,
+    Output
 }
 #[derive(Copy, Clone)]
 pub struct CommandSpawner {
@@ -30,6 +33,7 @@ impl CommandSpawner {
             Commands::Stop => Box::new(StopStartCommand::new(stopstart::StopStartChoice::Stop)),
             Commands::Start => Box::new(StopStartCommand::new(stopstart::StopStartChoice::Start)),
             Commands::ReStart => Box::new(StopStartCommand::new(stopstart::StopStartChoice::ReStart)),
+            Commands::Output => Box::new(OutputCommand::new()),
         }
     }
 }
@@ -49,6 +53,9 @@ pub fn get_chooser_grid() -> Vec<(&'static str, gkey, GridNode)> {
         ])),
         ("<b>I/O</b> <i>I</i>", gkeys::i, GridNode::Grid(vec![
             ("Load <i>L</i>", gkeys::l, GridNode::Choice(CommandSpawner { cmd: Commands::Load }))
+        ])),
+        ("<b>Mixer</b> <i>M</i>", gkeys::m, GridNode::Grid(vec![
+            ("Output <i>O</i>", gkeys::o, GridNode::Choice(CommandSpawner { cmd: Commands::Output }))
         ])),
         ("Clear <i>C</i>", gkeys::c, GridNode::Clear),
         ("Execute <b>↵</b>", gkeys::Return, GridNode::Execute),

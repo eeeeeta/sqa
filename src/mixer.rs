@@ -63,27 +63,39 @@ pub enum WireResult {
 /// Contains various `BTreeMap`s of everything related to mixing.
 ///
 /// *magister, magistri (2nd declension masculine): master, teacher*
-pub struct Magister<'a> {
+pub struct Magister {
     /// Map of sink UUIDs to sinks.
-    sinks: BTreeMap<Uuid, Box<Sink + 'a>>,
+    sinks: BTreeMap<Uuid, Box<Sink>>,
     /// Map of source UUIDs to sources.
-    sources: BTreeMap<Uuid, Box<Source>>
+    sources: BTreeMap<Uuid, Box<Source>>,
+    /// Vector of intermediate channel UUIDs in (source, sink) format.
+    pub ichans: Vec<(Uuid, Uuid)>
 }
 
-impl<'a> Magister<'a> {
+impl Magister {
     pub fn new() -> Self {
-        let ms = Magister {
+        let mut ms = Magister {
             sinks: BTreeMap::new(),
-            sources: BTreeMap::new()
+            sources: BTreeMap::new(),
+            ichans: Vec::new()
         };
+        for _ in 0..16 {
+            ms.add_ich()
+        }
         ms
+    }
+    pub fn add_ich(&mut self) {
+        let (qch, qchx) = QChannel::new(44_100);
+        self.ichans.push((qch.uuid(), qchx.uuid()));
+        self.add_source(Box::new(qch));
+        self.add_sink(Box::new(qchx));
     }
     pub fn add_source(&mut self, source: Box<Source>) {
         if let Some(_) = self.sources.insert(source.uuid(), source) {
             panic!("UUID collision")
         }
     }
-    pub fn add_sink(&mut self, sink: Box<Sink + 'a>) {
+    pub fn add_sink(&mut self, sink: Box<Sink>) {
         if let Some(_) = self.sinks.insert(sink.uuid(), sink) {
             panic!("UUID collision")
         }
@@ -125,14 +137,14 @@ impl<'a> Magister<'a> {
 
 }
 
-pub struct DeviceSink<'a> {
-    pub stream: Rc<RefCell<pa::stream::Stream<'a, pa::stream::NonBlocking, pa::stream::Output<f32>>>>,
+pub struct DeviceSink {
+    pub stream: Rc<RefCell<pa::stream::Stream<pa::stream::NonBlocking, pa::stream::Output<f32>>>>,
     txrx: Arc<Mutex<(Producer<(usize, Option<Box<Source>>)>, Consumer<Option<Box<Source>>>)>>,
     last_uuid_wired: Uuid,
     id: usize,
     uuid: Uuid
 }
-impl<'a> Sink for DeviceSink<'a> {
+impl Sink for DeviceSink {
     fn wire(&mut self, cli: Box<Source>) -> Option<Box<Source>> {
         let mut lck = self.txrx.lock().unwrap();
         let &mut (ref mut tx, ref mut rx) = lck.deref_mut();
@@ -156,8 +168,8 @@ impl<'a> Sink for DeviceSink<'a> {
         self.uuid.clone()
     }
 }
-impl<'a> DeviceSink<'a> {
-    pub fn from_device_chans(pa: &'a mut pa::PortAudio, dev: pa::DeviceIndex) -> Result<Vec<Self>, pa::error::Error> {
+impl DeviceSink {
+    pub fn from_device_chans(pa: &mut pa::PortAudio, dev: pa::DeviceIndex) -> Result<Vec<Self>, pa::error::Error> {
         let dev_info = try!(pa.device_info(dev));
         let params: pa::StreamParameters<f32> = pa::StreamParameters::new(dev, dev_info.max_output_channels, false, dev_info.default_low_output_latency);
         try!(pa.is_output_format_supported(params, 44_100.0_f64));

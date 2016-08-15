@@ -1,9 +1,10 @@
 use state::{Context, ThreadNotifier, Message};
 use std::sync::mpsc::{Sender};
-use mixer;
 use portaudio as pa;
 use mio;
 use mio::{Handler, EventLoop};
+use std::rc::Rc;
+use std::cell::RefCell;
 
 pub type BackendSender = mio::Sender<Message>;
 pub trait BackendTimeout {
@@ -58,9 +59,7 @@ pub fn backend_main(stx: Sender<BackendSender>, tx: Sender<Message>, tn: ThreadN
     /* THE PORTAUDIO CONTEXT MUST BE THE FIRST BOUND VARIABLE
      * HEED THIS WARNING, OR THE BORROW CHECKER WILL SMITE THEE */
     let mut p = pa::PortAudio::new().unwrap();
-    let mut ctx = Context::new(tx, tn);
-    let idx = p.default_output_device().unwrap();
-    ctx.insert_device(mixer::DeviceSink::from_device_chans(&mut p, idx).unwrap());
+    let mut ctx = Context::new(&mut p, tx, tn);
     let mut evl: EventLoop<Context> = EventLoop::new().unwrap();
     println!("sending..");
     stx.send(evl.channel()).unwrap();

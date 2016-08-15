@@ -107,7 +107,7 @@ impl Command for VolCommand {
         ]
     }
     fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, auuid: Uuid) -> Result<bool, String> {
-        let (ident, target) = (self.ident.take().unwrap(), db_lin(self.vol));
+        let (ident, target) = (self.ident.clone().unwrap(), db_lin(self.vol));
         let uu = ctx.db.resolve_ident(&ident).unwrap().0;
         let mut fsx = ctx.db.control_filestream(&uu).unwrap();
         if let Some(fade_secs) = self.fade {

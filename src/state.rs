@@ -10,6 +10,8 @@ use std::fmt;
 use std::ops::Deref;
 use gtk::Adjustment;
 use chrono::{UTC, Duration, DateTime};
+use std::rc::Rc;
+use std::cell::RefCell;
 
 #[derive(Clone)]
 /// An object for cross-thread notification.
@@ -99,23 +101,35 @@ pub enum Message {
 }
 #[derive(Clone, Debug)]
 pub enum CommandState {
+    /// The command contains errors, and can not run.
+    ///
+    /// A command may not be in this state if it is currently running - if errors are introduced
+    /// while the command is running, the command should transition to this state after completion.
     Incomplete,
+    /// The command is ready to execute.
     Ready,
+    /// The command is ready to execute (and has loaded some parts of itself into memory, for speedier
+    /// execution)
+    Loaded,
+    /// The command is running.
     Running(Duration),
+    /// The command has encountered a fatal error, from which it cannot recover.
     Errored(String),
 }
 #[derive(Clone, Debug)]
 pub struct CommandDescriptor {
     pub desc: String,
+    pub name: &'static str,
     pub hunks: Vec<HunkState>,
     pub state: CommandState,
     pub ctime: DateTime<UTC>,
     pub uuid: Uuid
 }
 impl CommandDescriptor {
-    pub fn new(desc: String, state: CommandState, hunks: Vec<HunkState>, uu: Uuid) -> Self {
+    pub fn new(desc: String, name: &'static str, state: CommandState, hunks: Vec<HunkState>, uu: Uuid) -> Self {
         CommandDescriptor {
             desc: desc,
+            name: name,
             state: state,
             hunks: hunks,
             ctime: UTC::now(),
@@ -243,33 +257,24 @@ impl Database for BTreeMap<Uuid, Descriptor> {
 
 /// Global context
 pub struct Context<'a> {
+    pub pa: &'a mut ::portaudio::PortAudio,
     pub db: BTreeMap<Uuid, Descriptor>,
     pub commands: BTreeMap<Uuid, Box<Command>>,
-    pub mstr: Magister<'a>,
+    pub identifiers: BTreeMap<String, Uuid>,
+    pub mstr: Magister,
     pub tx: ::std::sync::mpsc::Sender<Message>,
     pub tn: ThreadNotifier
 }
 impl<'a> Context<'a> {
-    pub fn new(tx: ::std::sync::mpsc::Sender<Message>, tn: ThreadNotifier) -> Self {
+    pub fn new(pa: &'a mut ::portaudio::PortAudio, tx: ::std::sync::mpsc::Sender<Message>, tn: ThreadNotifier) -> Self {
         let mut ctx = Context {
+            pa: pa,
             db: BTreeMap::new(),
             commands: BTreeMap::new(),
+            identifiers: BTreeMap::new(),
             mstr: Magister::new(),
             tx: tx,
             tn: tn
-        };
-        for i in 0..16 {
-            let (qch, qchx) = QChannel::new(44_100);
-            ctx.db.insert(Uuid::new_v4(), Descriptor {
-                typ: ObjectType::QChannel(i),
-                ident: None,
-                inp: Some(qchx.uuid()),
-                out: Some(qch.uuid()),
-                controller: None,
-                others: None
-            });
-            ctx.mstr.add_source(Box::new(qch));
-            ctx.mstr.add_sink(Box::new(qchx));
         };
         ctx
     }
@@ -281,11 +286,16 @@ impl<'a> Context<'a> {
             }).sum();
             let state = if let Some(st) = cmd.run_state() {
                 st
-            } else if errs > 0 {
+            }
+            else if errs > 0 {
                 CommandState::Incomplete
-            } else { CommandState::Ready };
+            }
+            else {
+                CommandState::Ready
+            };
             CommandDescriptor::new(
                 cmd.desc(),
+                cmd.name(),
                 state,
                 cmd.get_hunks().into_iter().map(|c| c.get_val(cmd.deref(), &self)).collect(),
                 cu)
@@ -296,7 +306,7 @@ impl<'a> Context<'a> {
         self.tx.send(msg).unwrap();
         self.tn.notify();
     }
-    pub fn insert_device(&mut self, dev: Vec<DeviceSink<'a>>) -> Uuid {
+    pub fn insert_device(&mut self, dev: Vec<DeviceSink>) -> Uuid {
         let mut descs = vec![];
         for (i, stream) in dev.into_iter().enumerate() {
             let uu = stream.uuid();

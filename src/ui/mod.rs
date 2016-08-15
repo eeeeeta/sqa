@@ -21,21 +21,22 @@ pub use self::chooser::CommandChooserController;
 pub use self::line::CommandLine;
 
 use std::collections::BTreeMap;
-use state::{CommandDescriptor, Message, ThreadNotifier};
+use state::{CommandDescriptor, CommandState, Message, ThreadNotifier};
 use uuid::Uuid;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::sync::mpsc::Receiver;
 use backend::BackendSender;
-use gtk::{Builder, Label, ListBox, Window};
+use gtk::{Builder, Label, TreeStore, Window, Image};
 use gtk::prelude::*;
 use gdk::enums::key as gkey;
+use std::ops::Deref;
 
 pub struct UIContext {
     pub commands: BTreeMap<Uuid, CommandDescriptor>,
     pub chooser: Rc<RefCell<CommandChooserController>>,
     pub line: Rc<RefCell<CommandLine>>,
-    pub clist: ListBox,
+    pub store: TreeStore,
     pub rx: Receiver<Message>
 }
 impl UIContext {
@@ -47,7 +48,7 @@ impl UIContext {
             chooser: ccc,
             line: line,
             rx: recvr,
-            clist: builder.get_object("active-command-list").unwrap()
+            store: builder.get_object("command-tree").unwrap()
         }));
         tn.register_handler(clone!(uic; || {
             UIContext::handler(uic.clone());
@@ -87,14 +88,37 @@ impl UIContext {
         } else { 0 }
     }
     pub fn update(&mut self) {
-        for chld in self.clist.get_children() {
-            chld.destroy();
-        }
+        self.store.clear();
         for (ref k, ref v) in &self.commands {
-            let label = Label::new(None);
-            label.set_markup(&format!("{:?}: {} ({})", v.state, v.desc, k));
-            self.clist.add(&label);
-            self.clist.show_all();
+            let ref ti = self.store.insert(None, -1);
+            self.store.set(ti, &vec![0], vec![&"dialog-question".to_string() as &ToValue].deref());
+            self.store.set(ti, &vec![2], vec![&format!("") as &ToValue].deref());
+            self.store.set(ti, &vec![3], vec![&v.desc as &ToValue].deref());
+            self.store.set(ti, &vec![4], vec![&format!("") as &ToValue].deref());
+            self.store.set(ti, &vec![5], vec![&format!("white") as &ToValue].deref());
+            match v.state {
+                CommandState::Incomplete => {
+                    self.store.set(ti, &vec![0], vec![&"dialog-error".to_string() as &ToValue].deref());
+                    self.store.set(ti, &vec![5], vec![&format!("lightpink") as &ToValue].deref());
+                },
+                CommandState::Ready => {
+                    self.store.set(ti, &vec![0], vec![&"".to_string() as &ToValue].deref());
+                },
+                CommandState::Loaded => {
+                    self.store.set(ti, &vec![0], vec![&"go-home".to_string() as &ToValue].deref());
+                    self.store.set(ti, &vec![5], vec![&format!("lemonchiffon") as &ToValue].deref());
+                },
+                CommandState::Running(dur) => {
+                    self.store.set(ti, &vec![0], vec![&"media-seek-forward".to_string() as &ToValue].deref());
+                    self.store.set(ti, &vec![5], vec![&format!("powderblue") as &ToValue].deref());
+                    self.store.set(ti, &vec![4], vec![
+                        &format!("{:02}:{:02}:{:02}",
+                                 dur.num_hours(),
+                                 dur.num_minutes() - (60 * dur.num_hours()),
+                                 dur.num_seconds() - (60 * dur.num_minutes())) as &ToValue].deref());
+                },
+                _ => {}
+            }
         }
     }
     pub fn handler(selfish: Rc<RefCell<Self>>) {
