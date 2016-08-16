@@ -47,4 +47,7 @@ impl Command for OutputCommand {
         }
         Ok(false)
     }
+    fn sinks(&self) -> Vec<Uuid> {
+        self.chans.clone()
+    }
 }

@@ -29,11 +29,12 @@ use state::{ThreadNotifier, Message};
 use std::sync::mpsc::{channel};
 use ui::UIContext;
 
+
 fn main() {
     println!("SQA alpha 2, an eta thing");
     println!("[+] Initialising GTK & CSS contexts...");
     let _ = gtk::init().unwrap();
-    let ui_src = include_str!("interface.glade");
+    let ui_src = ui::INTERFACE_SRC;
     let builder = Builder::new_from_string(ui_src);
 
     let provider = gtk::CssProvider::new();

@@ -3,7 +3,7 @@ use state::{CommandDescriptor, Message};
 use std::cell::RefCell;
 use std::rc::Rc;
 use gtk::prelude::*;
-use gtk::{Label, Image, Builder};
+use gtk::{Label, Image, Builder, TreeStore};
 use gtk::Box as GtkBox;
 use std::sync::{Arc, Mutex};
 use backend::BackendSender;
@@ -13,6 +13,7 @@ use super::hunks::EntryUIController;
 use super::hunks::TextUIController;
 use super::hunks::VolumeUIController;
 use super::hunks::TimeUIController;
+use super::hunks::IdentUIController;
 
 pub enum HunkFSM {
     Err,
@@ -35,12 +36,13 @@ pub struct CommandLine {
     pub line: GtkBox,
     pub h_image: Image,
     pub h_label: Label,
+    pub completion: TreeStore
 }
 impl HunkUI {
     pub fn from_state(hs: HunkState) -> Self {
         let ctl: Box<HunkUIController> = match &hs.val {
             &HunkTypes::FilePath(..) => Box::new(EntryUIController::new("document-open")),
-            &HunkTypes::Identifier(..) => Box::new(EntryUIController::new("edit-find")),
+            &HunkTypes::Identifier(..) => Box::new(IdentUIController::new()),
             &HunkTypes::String(..) => Box::new(EntryUIController::new("text-x-generic")),
             &HunkTypes::Label(..) => Box::new(TextUIController::new()),
             &HunkTypes::Volume(..) => Box::new(VolumeUIController::new()),
@@ -75,10 +77,11 @@ impl HunkUI {
     }
 }
 impl CommandLine {
-    pub fn new(tx: BackendSender, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(tx: BackendSender, ts: TreeStore, b: &Builder) -> Rc<RefCell<Self>> {
         let line = CommandLine {
             cd: None,
             uuid: None,
+            completion: ts,
             tx: tx,
             hunks: Vec::new(),
             ready: false,
@@ -100,10 +103,12 @@ impl CommandLine {
             name_lbl.set_markup(&format!("<span weight=\"bold\" fgcolor=\"#666666\">{}</span>", selfish.cd.as_ref().unwrap().name));
             selfish.line.pack_start(&name_lbl, false, false, 3);
             let mut hunks = Vec::new();
+            let compl = selfish.completion.clone();
             for (i, hunk) in selfish.cd.as_ref().unwrap().hunks.iter().enumerate() {
                 let mut hui = HunkUI::from_state(hunk.clone());
                 hui.ctl.pack(&selfish.line);
                 hui.ctl.bind(selfish2.clone(), i, hunk.val.clone());
+                hui.ctl.bind_completions(compl.clone());
                 hunks.push(hui);
             }
             selfish.line.show_all();

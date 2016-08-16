@@ -20,7 +20,14 @@ impl<T> BoxClone for T where T: Clone + Command + 'static {
     }
 }
 pub trait StreamController {
-
+    fn unpause(&mut self);
+    fn pause(&mut self);
+    fn restart(&mut self);
+}
+pub struct CommandArgs<'a> {
+    ctx: &'a mut Context<'a>,
+    evl: &'a mut EventLoop<Context<'a>>,
+    uu: Uuid
 }
 /// Command thingy.
 pub trait Command: mopa::Any + Send + BoxClone + 'static {
@@ -37,8 +44,12 @@ pub trait Command: mopa::Any + Send + BoxClone + 'static {
 
     fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) -> Result<bool, String>;
 
-    fn sources(&self) -> Vec<(String, Uuid)> { vec![] }
-    fn sinks(&self) -> Vec<(String, Uuid)> { vec![] }
+    fn sources(&self) -> Vec<Uuid> { vec![] }
+    fn sinks(&self) -> Vec<Uuid> { vec![] }
+
+    fn can_ctl_stream(&self) -> bool { false }
+    fn ctl_stream<'a>(&'a mut self) -> Option<Box<StreamController + 'a>> { None }
+    fn drop(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) {}
 }
 
 mopafy!(Command);

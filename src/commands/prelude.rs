@@ -1,4 +1,4 @@
-pub use command::{Command, HunkTypes, Hunk, TextHunk, GenericHunk, new_update};
+pub use command::{Command, HunkTypes, Hunk, TextHunk, GenericHunk, StreamController, new_update};
 pub use state::{Context, Database, CommandState};
 pub use mio::EventLoop;
 pub use uuid::Uuid;

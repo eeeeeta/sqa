@@ -16,6 +16,8 @@
       <column type="gchararray"/>
       <!-- column-name backgroundc -->
       <column type="gchararray"/>
+      <!-- column-name uuid -->
+      <column type="gchararray"/>
     </columns>
   </object>
   <object class="GtkApplicationWindow" id="SQA Main Window">
@@ -226,6 +228,28 @@
           </packing>
         </child>
       </object>
+    </child>
+  </object>
+  <object class="GtkEntryCompletion" id="identifier-completion">
+    <property name="model">command-tree</property>
+    <property name="minimum_key_length">0</property>
+    <property name="text_column">3</property>
+    <property name="inline_completion">True</property>
+    <child>
+      <object class="GtkCellRendererPixbuf" id="idc-state">
+        <property name="stock_size">1</property>
+      </object>
+      <attributes>
+        <attribute name="cell-background">5</attribute>
+        <attribute name="icon-name">0</attribute>
+      </attributes>
+    </child>
+    <child>
+      <object class="GtkCellRendererText" id="idc-desc"/>
+      <attributes>
+        <attribute name="background">5</attribute>
+        <attribute name="markup">3</attribute>
+      </attributes>
     </child>
   </object>
   <object class="GtkImage" id="image1">

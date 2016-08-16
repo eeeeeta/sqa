@@ -2,22 +2,25 @@ mod entry;
 mod text;
 mod time;
 mod volume;
+mod ident;
 
 pub use self::entry::EntryUIController;
 pub use self::text::TextUIController;
 pub use self::time::TimeUIController;
 pub use self::volume::VolumeUIController;
+pub use self::ident::IdentUIController;
 pub use super::line::CommandLine;
 
 use command::HunkTypes;
 use std::cell::RefCell;
 use std::rc::Rc;
 use gtk::prelude::*;
-use gtk::{Label, Image, Button, Builder, Popover};
+use gtk::{Label, Image, Button, Builder, Popover, TreeStore};
 use gtk::Box as GtkBox;
 
 pub trait HunkUIController {
     fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes);
+    fn bind_completions(&mut self, compl: TreeStore) {}
     fn focus(&self) {}
     fn pack(&self, onto: &GtkBox);
     fn set_help(&mut self, _help: &'static str) {}

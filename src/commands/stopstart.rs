@@ -50,11 +50,21 @@ impl Command for StopStartCommand {
         };
         let ident_egetter = move |selfish: &Self, ctx: &Context| -> Option<String> {
             if let Some(ref ident) = selfish.ident {
-                if ctx.db.resolve_ident(ident).is_none() {
-                    Some(format!("Identifier ${} does not exist.", selfish.ident.as_ref().unwrap()))
+                if let Ok(uu) = Uuid::parse_str(ident) {
+                    if let Some(ref strm) = ctx.commands.get(&uu) {
+                        if strm.can_ctl_stream() {
+                            None
+                        }
+                        else {
+                            Some(format!("That command isn't a stream."))
+                        }
+                    }
+                    else {
+                        Some(format!("That UUID doesn't exist."))
+                    }
                 }
                 else {
-                    None
+                    Some(format!("That UUID has been entered incorrectly."))
                 }
             }
             else {
@@ -67,22 +77,27 @@ impl Command for StopStartCommand {
             StopStartChoice::ReStart => "Provide an identifier to restart, or leave blank to restart all streams."
         };
         vec![
-            hunk!(Identifier, verbiage, false, ident_getter, ident_setter, ident_egetter)
+            hunk!(Identifier, verbiage, false, ident_getter, ident_setter, ident_egetter),
+            TextHunk::new(format!("[leave blank for all]"))
         ]
     }
     fn execute(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>, _: Uuid) -> Result<bool, String> {
         let ident = if let Some(ref id) = self.ident {
-            Some(ctx.db.resolve_ident(id).unwrap().0)
+            Some(Uuid::parse_str(id).unwrap())
         }
         else {
             None
         };
-        for ch in ctx.db.iter_mut_type(ObjectType::FileStream(String::new(), 0), ident.as_ref()) {
-            let ctl = ch.controller.as_mut().unwrap().downcast_mut::<FileStreamX>().unwrap();
-            match self.which {
-                StopStartChoice::Stop => ctl.pause(),
-                StopStartChoice::Start => ctl.unpause(),
-                StopStartChoice::ReStart => ctl.start()
+        for (k, v) in ctx.commands.iter_mut() {
+            if let Some(ident) = ident {
+                if ident != *k { continue }
+            }
+            if let Some(mut ctl) = v.ctl_stream() {
+                match self.which {
+                    StopStartChoice::Stop => ctl.pause(),
+                    StopStartChoice::Start => ctl.unpause(),
+                    StopStartChoice::ReStart => ctl.restart()
+                }
             }
         }
         Ok(true)

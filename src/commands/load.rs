@@ -8,6 +8,20 @@ pub struct StreamInfo {
     pub lp: LiveParameters,
     ctl: FileStreamX
 }
+pub struct FileStreamController<'a> {
+    si: &'a mut StreamInfo
+}
+impl<'a> StreamController for FileStreamController<'a> {
+    fn unpause(&mut self) {
+        self.si.ctl.unpause();
+    }
+    fn pause(&mut self) {
+        self.si.ctl.pause();
+    }
+    fn restart(&mut self) {
+        self.si.ctl.start();
+    }
+}
 #[derive(Clone)]
 pub struct LoadCommand {
     file: Option<String>,
@@ -148,5 +162,17 @@ impl Command for LoadCommand {
             panic!("woops");
         }
         Ok(false)
+    }
+    fn sources(&self) -> Vec<Uuid> {
+        self.streams.iter().map(|x| x.ctl.uuid()).collect()
+    }
+    fn can_ctl_stream(&self) -> bool { true }
+    fn ctl_stream<'a>(&'a mut self) -> Option<Box<StreamController + 'a>> {
+        if self.streams.get_mut(0).is_some() {
+            Some(Box::new(FileStreamController { si: self.streams.get_mut(0).unwrap() }))
+        }
+        else {
+            None
+        }
     }
 }

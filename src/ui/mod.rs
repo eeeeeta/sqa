@@ -20,6 +20,8 @@ mod hunks;
 pub use self::chooser::CommandChooserController;
 pub use self::line::CommandLine;
 
+pub static INTERFACE_SRC: &'static str = include_str!("interface.glade");
+
 use std::collections::BTreeMap;
 use state::{CommandDescriptor, CommandState, Message, ThreadNotifier};
 use uuid::Uuid;
@@ -41,14 +43,15 @@ pub struct UIContext {
 }
 impl UIContext {
     pub fn init(sender: BackendSender, recvr: Receiver<Message>, tn: ThreadNotifier, win: Window, builder: &Builder)  -> Rc<RefCell<Self>> {
-        let line = CommandLine::new(sender, &builder);
+        let ts: TreeStore = builder.get_object("command-tree").unwrap();
+        let line = CommandLine::new(sender, ts.clone(), &builder);
         let ccc = CommandChooserController::new(line.clone(), &builder);
         let uic = Rc::new(RefCell::new(UIContext {
             commands: BTreeMap::new(),
             chooser: ccc,
             line: line,
             rx: recvr,
-            store: builder.get_object("command-tree").unwrap()
+            store: ts
         }));
         tn.register_handler(clone!(uic; || {
             UIContext::handler(uic.clone());
@@ -96,6 +99,7 @@ impl UIContext {
             self.store.set(ti, &vec![3], vec![&v.desc as &ToValue].deref());
             self.store.set(ti, &vec![4], vec![&format!("") as &ToValue].deref());
             self.store.set(ti, &vec![5], vec![&format!("white") as &ToValue].deref());
+            self.store.set(ti, &vec![6], vec![&format!("{}", v.uuid) as &ToValue].deref());
             match v.state {
                 CommandState::Incomplete => {
                     self.store.set(ti, &vec![0], vec![&"dialog-error".to_string() as &ToValue].deref());
