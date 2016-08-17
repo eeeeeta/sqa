@@ -1,10 +1,8 @@
-use state::{Context, ThreadNotifier, Message};
+use state::{Context, ThreadNotifier, Message, ChainType};
 use std::sync::mpsc::{Sender};
 use portaudio as pa;
 use mio;
 use mio::{Handler, EventLoop};
-use std::rc::Rc;
-use std::cell::RefCell;
 
 pub type BackendSender = mio::Sender<Message>;
 pub trait BackendTimeout {
@@ -26,6 +24,7 @@ impl<'a> Handler for Context<'a> {
             Message::NewCmd(uu, spawner) => {
                 assert!(self.commands.insert(uu, spawner.spawn()).is_none());
                 update = Some(uu);
+                self.attach_chn(Some(ChainType::Unattached), uu);
             },
             Message::SetHunk(uu, idx, val) => {
                 let mut cmd = self.commands.get_mut(&uu).unwrap();
@@ -45,6 +44,8 @@ impl<'a> Handler for Context<'a> {
                 update = Some(uu);
             },
             Message::Delete(uu) => {
+                self.attach_chn(None, uu);
+                self.label(None, uu);
                 self.commands.remove(&uu);
                 self.send(Message::Deleted(uu));
             },

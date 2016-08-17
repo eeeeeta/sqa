@@ -9,7 +9,7 @@ pub enum StopStartChoice {
 }
 #[derive(Clone)]
 pub struct StopStartCommand {
-    ident: Option<String>,
+    ident: Option<Uuid>,
     which: StopStartChoice
 }
 impl StopStartCommand {
@@ -28,19 +28,19 @@ impl Command for StopStartCommand {
             StopStartChoice::ReStart => "Restart"
         }
     }
-    fn desc(&self) -> String {
+    fn desc(&self, ctx: &Context) -> String {
         if let Some(ref id) = self.ident {
-            format!("{} <b>{}</b>", self.name(), id)
+            format!("{} <b>{}</b>", self.name(), ctx.prettify_uuid(id))
         }
         else {
             format!("{} <b>ALL streams</b>", self.name())
         }
     }
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
-        let ident_getter = move |selfish: &Self| -> Option<String> {
+        let ident_getter = move |selfish: &Self| -> Option<Uuid> {
             selfish.ident.as_ref().map(|x| x.clone())
         };
-        let ident_setter = move |selfish: &mut Self, val: Option<String>| {
+        let ident_setter = move |selfish: &mut Self, val: Option<Uuid>| {
             if let Some(val) = val {
                 selfish.ident = Some(val.clone());
             }
@@ -50,21 +50,16 @@ impl Command for StopStartCommand {
         };
         let ident_egetter = move |selfish: &Self, ctx: &Context| -> Option<String> {
             if let Some(ref ident) = selfish.ident {
-                if let Ok(uu) = Uuid::parse_str(ident) {
-                    if let Some(ref strm) = ctx.commands.get(&uu) {
-                        if strm.can_ctl_stream() {
-                            None
-                        }
-                        else {
-                            Some(format!("That command isn't a stream."))
-                        }
+                if let Some(ref strm) = ctx.commands.get(ident) {
+                    if strm.can_ctl_stream() {
+                        None
                     }
                     else {
-                        Some(format!("That UUID doesn't exist."))
+                        Some(format!("That command isn't a stream."))
                     }
                 }
                 else {
-                    Some(format!("That UUID has been entered incorrectly."))
+                    Some(format!("That UUID doesn't exist."))
                 }
             }
             else {
@@ -82,14 +77,8 @@ impl Command for StopStartCommand {
         ]
     }
     fn execute(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>, _: Uuid) -> Result<bool, String> {
-        let ident = if let Some(ref id) = self.ident {
-            Some(Uuid::parse_str(id).unwrap())
-        }
-        else {
-            None
-        };
         for (k, v) in ctx.commands.iter_mut() {
-            if let Some(ident) = ident {
+            if let Some(ident) = self.ident {
                 if ident != *k { continue }
             }
             if let Some(mut ctl) = v.ctl_stream() {

@@ -14,11 +14,9 @@ crossbeam = "0.2.5"
 time = "0.1.35"
 chrono = "0.2.22"
 rustbox = "0.8.1"
-gtk = { version = "0.1.0", features = ["v3_12"] }
-gdk = { version = "0.5.0", features = ["v3_12"] }
-gdk-sys = { version = "0.3.1", features = ["v3_12"] }
-gtk-sys = { version = "0.3.1", features = ["v3_12"] }
-glib = { version = "0.1.0" }
+gtk = { git = "https://github.com/gtk-rs/gtk", features = ["v3_12"] }
+gdk = { git = "https://github.com/gtk-rs/gdk", features = ["v3_12"] }
+glib = { git = "https://github.com/gtk-rs/glib" }
 mopa = "0.2.2"
 bounded-spsc-queue = "0.1.2"
 mio = "0.5.0"

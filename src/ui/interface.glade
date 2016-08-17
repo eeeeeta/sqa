@@ -2,12 +2,52 @@
 <!-- Generated with glade 3.20.0 -->
 <interface>
   <requires lib="gtk+" version="3.20"/>
+  <object class="GtkListStore" id="command-identifiers-list">
+    <columns>
+      <!-- column-name identifier -->
+      <column type="gchararray"/>
+      <!-- column-name uuid -->
+      <column type="gchararray"/>
+      <!-- column-name desc -->
+      <column type="gchararray"/>
+      <!-- column-name icon -->
+      <column type="gchararray"/>
+    </columns>
+  </object>
+  <object class="GtkEntryCompletion" id="identifier-completion">
+    <property name="model">command-identifiers-list</property>
+    <property name="minimum_key_length">0</property>
+    <property name="text_column">0</property>
+    <child>
+      <object class="GtkCellRendererPixbuf" id="idc-state">
+        <property name="stock_size">1</property>
+      </object>
+      <attributes>
+        <attribute name="icon-name">3</attribute>
+      </attributes>
+    </child>
+    <child>
+      <object class="GtkCellRendererText" id="idc-ident">
+        <property name="xpad">3</property>
+        <property name="weight">600</property>
+      </object>
+      <attributes>
+        <attribute name="text">0</attribute>
+      </attributes>
+    </child>
+    <child>
+      <object class="GtkCellRendererText" id="idc-desc">
+        <property name="foreground_rgba">rgb(136,138,133)</property>
+      </object>
+      <attributes>
+        <attribute name="markup">2</attribute>
+      </attributes>
+    </child>
+  </object>
   <object class="GtkTreeStore" id="command-tree">
     <columns>
       <!-- column-name icon-state -->
       <column type="gchararray"/>
-      <!-- column-name icon-type -->
-      <column type="GdkPixbuf"/>
       <!-- column-name cue -->
       <column type="gchararray"/>
       <!-- column-name desc -->
@@ -19,6 +59,16 @@
       <!-- column-name uuid -->
       <column type="gchararray"/>
     </columns>
+  </object>
+  <object class="GtkImage" id="image1">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="icon_name">go-previous</property>
+  </object>
+  <object class="GtkImage" id="image2">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="icon_name">edit-find</property>
   </object>
   <object class="GtkApplicationWindow" id="SQA Main Window">
     <property name="can_focus">False</property>
@@ -53,7 +103,7 @@
               <object class="GtkLabel" id="line-hint-label">
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
-                <property name="label" translatable="yes">Your command is bad, and you should feel bad.</property>
+                <property name="label" translatable="yes">Talk to the UI, 'cause the code ain't listenin'</property>
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -145,6 +195,7 @@
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
                 <property name="model">command-tree</property>
+                <property name="show_expanders">False</property>
                 <property name="enable_grid_lines">horizontal</property>
                 <child internal-child="selection">
                   <object class="GtkTreeSelection"/>
@@ -156,7 +207,7 @@
                         <property name="stock_size">1</property>
                       </object>
                       <attributes>
-                        <attribute name="cell-background">5</attribute>
+                        <attribute name="cell-background">4</attribute>
                         <attribute name="icon-name">0</attribute>
                       </attributes>
                     </child>
@@ -164,12 +215,12 @@
                 </child>
                 <child>
                   <object class="GtkTreeViewColumn" id="column-cue">
-                    <property name="title" translatable="yes">Q</property>
+                    <property name="widget">image2</property>
                     <child>
                       <object class="GtkCellRendererText" id="renderer-cue"/>
                       <attributes>
-                        <attribute name="cell-background">5</attribute>
-                        <attribute name="markup">2</attribute>
+                        <attribute name="cell-background">4</attribute>
+                        <attribute name="markup">1</attribute>
                       </attributes>
                     </child>
                   </object>
@@ -180,8 +231,8 @@
                     <child>
                       <object class="GtkCellRendererText" id="renderer-desc"/>
                       <attributes>
-                        <attribute name="cell-background">5</attribute>
-                        <attribute name="markup">3</attribute>
+                        <attribute name="cell-background">4</attribute>
+                        <attribute name="markup">2</attribute>
                       </attributes>
                     </child>
                   </object>
@@ -196,8 +247,8 @@
                         <property name="alignment">right</property>
                       </object>
                       <attributes>
-                        <attribute name="cell-background">5</attribute>
-                        <attribute name="markup">4</attribute>
+                        <attribute name="cell-background">4</attribute>
+                        <attribute name="markup">3</attribute>
                       </attributes>
                     </child>
                   </object>
@@ -229,33 +280,6 @@
         </child>
       </object>
     </child>
-  </object>
-  <object class="GtkEntryCompletion" id="identifier-completion">
-    <property name="model">command-tree</property>
-    <property name="minimum_key_length">0</property>
-    <property name="text_column">3</property>
-    <property name="inline_completion">True</property>
-    <child>
-      <object class="GtkCellRendererPixbuf" id="idc-state">
-        <property name="stock_size">1</property>
-      </object>
-      <attributes>
-        <attribute name="cell-background">5</attribute>
-        <attribute name="icon-name">0</attribute>
-      </attributes>
-    </child>
-    <child>
-      <object class="GtkCellRendererText" id="idc-desc"/>
-      <attributes>
-        <attribute name="background">5</attribute>
-        <attribute name="markup">3</attribute>
-      </attributes>
-    </child>
-  </object>
-  <object class="GtkImage" id="image1">
-    <property name="visible">True</property>
-    <property name="can_focus">False</property>
-    <property name="icon_name">go-previous</property>
   </object>
   <object class="GtkPopover" id="command-chooser-popover">
     <property name="can_focus">False</property>

@@ -15,12 +15,12 @@ use command::HunkTypes;
 use std::cell::RefCell;
 use std::rc::Rc;
 use gtk::prelude::*;
-use gtk::{Label, Image, Button, Builder, Popover, TreeStore};
+use gtk::{Label, Image, Button, Builder, Popover, ListStore};
 use gtk::Box as GtkBox;
 
 pub trait HunkUIController {
     fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes);
-    fn bind_completions(&mut self, compl: TreeStore) {}
+    fn bind_completions(&mut self, compl: ListStore) {}
     fn focus(&self) {}
     fn pack(&self, onto: &GtkBox);
     fn set_help(&mut self, _help: &'static str) {}

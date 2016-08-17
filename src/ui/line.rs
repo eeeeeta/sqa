@@ -3,7 +3,7 @@ use state::{CommandDescriptor, Message};
 use std::cell::RefCell;
 use std::rc::Rc;
 use gtk::prelude::*;
-use gtk::{Label, Image, Builder, TreeStore};
+use gtk::{Label, Image, Builder, ListStore};
 use gtk::Box as GtkBox;
 use std::sync::{Arc, Mutex};
 use backend::BackendSender;
@@ -36,7 +36,7 @@ pub struct CommandLine {
     pub line: GtkBox,
     pub h_image: Image,
     pub h_label: Label,
-    pub completion: TreeStore
+    pub completion: ListStore
 }
 impl HunkUI {
     pub fn from_state(hs: HunkState) -> Self {
@@ -77,7 +77,7 @@ impl HunkUI {
     }
 }
 impl CommandLine {
-    pub fn new(tx: BackendSender, ts: TreeStore, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(tx: BackendSender, ts: ListStore, b: &Builder) -> Rc<RefCell<Self>> {
         let line = CommandLine {
             cd: None,
             uuid: None,

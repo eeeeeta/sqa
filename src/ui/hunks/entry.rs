@@ -10,14 +10,16 @@ use super::HunkUIController;
 
 pub struct EntryUIController {
     pub pop: Rc<RefCell<PopoverUIController>>,
-    pub ent: Entry
+    pub ent: Entry,
+    pub activate_handler: Option<u64>
 }
 
 impl EntryUIController {
     pub fn new(icon: &'static str) -> Self {
         let uic = EntryUIController {
             pop: Rc::new(RefCell::new(PopoverUIController::new())),
-            ent: Entry::new()
+            ent: Entry::new(),
+            activate_handler: None
         };
         uic.pop.borrow().popover.set_relative_to(Some(&uic.ent));
         uic.ent.set_icon_from_icon_name(::gtk::EntryIconPosition::Primary, Some(icon));
@@ -50,11 +52,11 @@ impl HunkUIController for EntryUIController {
             entc.activate();
             Inhibit(false)
         }));
-        self.ent.connect_activate(move |selfish| {
+        self.activate_handler = Some(self.ent.connect_activate(move |selfish| {
             let txt = selfish.get_text().unwrap();
             let val = if txt == "" { None } else { Some(txt) };
             CommandLine::set_val(line.clone(), idx, ht.string_of(val));
-        });
+        }));
     }
     fn set_val(&mut self, val: &::std::any::Any) {
         let val = val.downcast_ref::<Option<String>>().unwrap();

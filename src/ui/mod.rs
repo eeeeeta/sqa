@@ -23,35 +23,41 @@ pub use self::line::CommandLine;
 pub static INTERFACE_SRC: &'static str = include_str!("interface.glade");
 
 use std::collections::BTreeMap;
-use state::{CommandDescriptor, CommandState, Message, ThreadNotifier};
+use state::{CommandDescriptor, CommandState, Message, ThreadNotifier, ChainType, Chain};
 use uuid::Uuid;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::sync::mpsc::Receiver;
 use backend::BackendSender;
-use gtk::{Builder, Label, TreeStore, Window, Image};
+use gtk::{Builder, Label, TreeStore, ListStore, Window, Image};
 use gtk::prelude::*;
 use gdk::enums::key as gkey;
 use std::ops::Deref;
 
 pub struct UIContext {
     pub commands: BTreeMap<Uuid, CommandDescriptor>,
+    pub identifiers: BTreeMap<String, Uuid>,
+    pub chains: BTreeMap<ChainType, Chain>,
     pub chooser: Rc<RefCell<CommandChooserController>>,
     pub line: Rc<RefCell<CommandLine>>,
     pub store: TreeStore,
+    pub completions: ListStore,
     pub rx: Receiver<Message>
 }
 impl UIContext {
     pub fn init(sender: BackendSender, recvr: Receiver<Message>, tn: ThreadNotifier, win: Window, builder: &Builder)  -> Rc<RefCell<Self>> {
-        let ts: TreeStore = builder.get_object("command-tree").unwrap();
-        let line = CommandLine::new(sender, ts.clone(), &builder);
+        let compl: ListStore = builder.get_object("command-identifiers-list").unwrap();
+        let line = CommandLine::new(sender, compl.clone(), &builder);
         let ccc = CommandChooserController::new(line.clone(), &builder);
         let uic = Rc::new(RefCell::new(UIContext {
             commands: BTreeMap::new(),
+            identifiers: BTreeMap::new(),
+            chains: BTreeMap::new(),
             chooser: ccc,
             line: line,
             rx: recvr,
-            store: ts
+            completions: compl,
+            store: builder.get_object("command-tree").unwrap()
         }));
         tn.register_handler(clone!(uic; || {
             UIContext::handler(uic.clone());
@@ -92,36 +98,78 @@ impl UIContext {
     }
     pub fn update(&mut self) {
         self.store.clear();
-        for (ref k, ref v) in &self.commands {
-            let ref ti = self.store.insert(None, -1);
-            self.store.set(ti, &vec![0], vec![&"dialog-question".to_string() as &ToValue].deref());
-            self.store.set(ti, &vec![2], vec![&format!("") as &ToValue].deref());
-            self.store.set(ti, &vec![3], vec![&v.desc as &ToValue].deref());
-            self.store.set(ti, &vec![4], vec![&format!("") as &ToValue].deref());
-            self.store.set(ti, &vec![5], vec![&format!("white") as &ToValue].deref());
-            self.store.set(ti, &vec![6], vec![&format!("{}", v.uuid) as &ToValue].deref());
-            match v.state {
-                CommandState::Incomplete => {
-                    self.store.set(ti, &vec![0], vec![&"dialog-error".to_string() as &ToValue].deref());
-                    self.store.set(ti, &vec![5], vec![&format!("lightpink") as &ToValue].deref());
-                },
-                CommandState::Ready => {
-                    self.store.set(ti, &vec![0], vec![&"".to_string() as &ToValue].deref());
-                },
-                CommandState::Loaded => {
-                    self.store.set(ti, &vec![0], vec![&"go-home".to_string() as &ToValue].deref());
-                    self.store.set(ti, &vec![5], vec![&format!("lemonchiffon") as &ToValue].deref());
-                },
-                CommandState::Running(dur) => {
-                    self.store.set(ti, &vec![0], vec![&"media-seek-forward".to_string() as &ToValue].deref());
-                    self.store.set(ti, &vec![5], vec![&format!("powderblue") as &ToValue].deref());
-                    self.store.set(ti, &vec![4], vec![
-                        &format!("{:02}:{:02}:{:02}",
-                                 dur.num_hours(),
-                                 dur.num_minutes() - (60 * dur.num_hours()),
-                                 dur.num_seconds() - (60 * dur.num_minutes())) as &ToValue].deref());
-                },
-                _ => {}
+        self.completions.clear();
+        for (ref ct, ref chn) in &self.chains {
+            for (i, ref uu) in chn.commands.iter().enumerate() {
+                if let Some(ref v) = self.commands.get(uu) {
+                    let (mut icon, ident, desc, mut dur, mut bgc) =
+                        (format!("dialog-question"),
+                         format!("{}<span fgcolor=\"#666666\">{}</span>", ct, i),
+                         v.desc.clone(),
+                         format!(""),
+                         format!("white"));
+                    match v.state {
+                        CommandState::Incomplete => {
+                            icon = format!("dialog-error");
+                            bgc = format!("lightpink");
+                        },
+                        CommandState::Ready => {
+                            icon = format!("");
+                        },
+                        CommandState::Loaded => {
+                            icon = format!("go-home");
+                            bgc = format!("lemonchiffon");
+                        },
+                        CommandState::Running(cd) => {
+                            icon = format!("media-seek-forward");
+                            bgc = format!("powderblue");
+                            dur = format!("{:02}:{:02}:{:02}",
+                                          cd.num_hours(),
+                                          cd.num_minutes() - (60 * cd.num_hours()),
+                                          cd.num_seconds() - (60 * cd.num_minutes()));
+                        },
+                        _ => {}
+                    }
+                    self.store.set(&self.store.append(None), &vec![
+                        0, // icon
+                        1, // identifier (looking glass column)
+                        2, // description
+                        3, // duration
+                        4, // background colour
+                    ], &vec![
+                        &icon as &ToValue,
+                        &ident as &ToValue,
+                        &desc as &ToValue,
+                        &dur as &ToValue,
+                        &bgc as &ToValue,
+                    ].deref());
+                    self.completions.set(&self.completions.append(), &vec![
+                        0, // identifier
+                        1, // uuid
+                        2, // description
+                        3, // icon
+                    ], &vec![
+                        &format!("{}{}", ct, i) as &ToValue,
+                        &format!("{}", uu) as &ToValue,
+                        &desc as &ToValue,
+                        &icon as &ToValue,
+                    ].deref());
+                    for (k, v) in self.identifiers.iter() {
+                        if *uu == v {
+                            self.completions.set(&self.completions.append(), &vec![
+                                0, // identifier
+                                1, // uuid
+                                2, // description
+                                3, // icon
+                            ], &vec![
+                                &format!("${}", k) as &ToValue,
+                                &format!("{}", uu) as &ToValue,
+                                &desc as &ToValue,
+                                &icon as &ToValue,
+                            ].deref());
+                        }
+                    }
+                }
             }
         }
     }
@@ -159,6 +207,18 @@ impl UIContext {
                     },
                     _ => {}
                 }
+                selfish.update();
+            },
+            Message::ChainDesc(ct, chn) => {
+                selfish.chains.insert(ct, chn);
+                selfish.update();
+            },
+            Message::ChainDeleted(ct) => {
+                selfish.chains.remove(&ct);
+                selfish.update();
+            },
+            Message::Identifiers(id) => {
+                selfish.identifiers = id;
                 selfish.update();
             },
             _ => unimplemented!()

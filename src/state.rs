@@ -83,6 +83,23 @@ impl ObjectType {
         }
     }
 }
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+pub enum ChainType {
+    Unattached,
+    Q(String)
+}
+impl fmt::Display for ChainType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &ChainType::Unattached => write!(f, "X"),
+            &ChainType::Q(ref st) => write!(f, "Q{}.", st),
+        }
+    }
+}
+#[derive(Clone)]
+pub struct Chain {
+    pub commands: Vec<Uuid>
+}
 pub enum Message {
     /// C -> S: Create a new command with given UUID from spawner.
     NewCmd(Uuid, ::commands::CommandSpawner),
@@ -94,8 +111,14 @@ pub enum Message {
     Delete(Uuid),
     /// S -> C: Update your descriptor of command with given UUID.
     CmdDesc(Uuid, CommandDescriptor),
+    /// S -> C: Update given chain.
+    ChainDesc(ChainType, Chain),
     /// S -> C: Delete command.
     Deleted(Uuid),
+    /// S -> C: Delete given chain.
+    ChainDeleted(ChainType),
+    /// S -> C: Update list of named identifiers.
+    Identifiers(BTreeMap<String, Uuid>),
     /// Other Backend Threads -> S: Apply closure to command with given UUID & propagate changes.
     Update(Uuid, CommandUpdate)
 }
@@ -137,130 +160,13 @@ impl CommandDescriptor {
         }
     }
 }
-/// A descriptor for a single-channel object stored in the database.
-pub struct Descriptor {
-    /// The object's type.
-    pub typ: ObjectType,
-    /// The object's named identifier (if any).
-    pub ident: Option<String>,
-    /// The UUID of the object's input (if any).
-    pub inp: Option<Uuid>,
-    /// The UUID of the object's output (if any).
-    pub out: Option<Uuid>,
-    /// The controller type of this object. (absent in ReadableContext)
-    pub controller: Option<Box<Any>>,
-    /// Optional objects related to this object (like other channels).
-    /// May include this object itself.
-    pub others: Option<Vec<Uuid>>
-}
-impl fmt::Display for Descriptor {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.typ {
-            ObjectType::FileStream(ref src, c) => write!(f, "FileStream (channel {}) of file {}", c, src),
-            ObjectType::QChannel(c) => write!(f, "QChannel {}", c),
-            ObjectType::DeviceOut(c) => write!(f, "Device output channel {}", c)
-        }
-    }
-}
-pub trait Database {
-    /// Get the descriptor of a numbered QChannel.
-    fn get_qch(&self, qch: usize) -> Option<&Descriptor>;
-    /// Resolve a named identifier to a Uuid and ObjectType.
-    fn resolve_ident(&self, ident: &str) -> Option<(Uuid, ObjectType)>;
-    /// Get the controllers for each channel of a FileStream.
-    fn control_filestream(&mut self, uu: &Uuid) -> Option<Vec<&mut FileStreamX>>;
-    /// Iterate over all instances of a certain object type, optionally filtering with a given UUID.
-    fn iter_mut_type<'a>(&'a mut self, ty: ObjectType, uu: Option<&'a Uuid>) -> Box<Iterator<Item=&mut Descriptor> + 'a>;
-    /// Get the type of a given UUID.
-    fn type_of(&self, uu: &Uuid) -> Option<&ObjectType>;
-}
-
-impl Database for BTreeMap<Uuid, Descriptor> {
-    fn get_qch(&self, qch: usize) -> Option<&Descriptor> {
-        for (_, v) in self.iter() {
-            if let ObjectType::QChannel(x) = v.typ {
-                if x == qch {
-                    return Some(v);
-                }
-            }
-        }
-        None
-    }
-    fn type_of(&self, uu: &Uuid) -> Option<&ObjectType> {
-        if let Some(desc) = self.get(uu) {
-            Some(&desc.typ)
-        }
-        else {
-            None
-        }
-    }
-    fn iter_mut_type<'a>(&'a mut self, ty: ObjectType, uu: Option<&'a Uuid>) -> Box<Iterator<Item=&mut Descriptor> + 'a> {
-        Box::new(
-            self.iter_mut()
-                .filter(move |&(k, ref v)| {
-                    if v.typ.is_same_type(&ty) {
-                        if let Some(id) = uu.as_ref() {
-                            if *id == k {
-                                true
-                            }
-                            else {
-                                false
-                            }
-                        }
-                        else {
-                            true
-                        }
-                    } else {
-                        false
-                    }
-                })
-                .map(|(_, v)| v))
-    }
-    fn resolve_ident(&self, ident: &str) -> Option<(Uuid, ObjectType)> {
-        for (k, v) in self.iter() {
-            if let Some(ref id) = v.ident {
-                if id == ident {
-                    return Some((k.clone(), v.typ.clone()));
-                }
-            }
-        }
-        None
-    }
-    fn control_filestream(&mut self, uu: &Uuid) -> Option<Vec<&mut FileStreamX>> {
-        let mut _uus = vec![];
-        if let Some(v) = self.get(uu) {
-            if let Some(ref others) = v.others {
-                _uus = others.clone();
-            }
-            else {
-                return None;
-            }
-        }
-        else {
-            return None;
-        }
-        _uus.sort();
-        let mut ret = vec![];
-        for (k, v) in self.iter_mut() {
-            if _uus.binary_search(k).is_ok() {
-                if let Some(ctl) = v.controller.as_mut().and_then(|b| b.downcast_mut()) {
-                    ret.push(ctl);
-                }
-                else {
-                    return None;
-                }
-            }
-        }
-        Some(ret)
-    }
-}
 
 /// Global context
 pub struct Context<'a> {
     pub pa: &'a mut ::portaudio::PortAudio,
-    pub db: BTreeMap<Uuid, Descriptor>,
     pub commands: BTreeMap<Uuid, Box<Command>>,
     pub identifiers: BTreeMap<String, Uuid>,
+    pub chains: BTreeMap<ChainType, Chain>,
     pub mstr: Magister,
     pub tx: ::std::sync::mpsc::Sender<Message>,
     pub tn: ThreadNotifier
@@ -269,14 +175,62 @@ impl<'a> Context<'a> {
     pub fn new(pa: &'a mut ::portaudio::PortAudio, tx: ::std::sync::mpsc::Sender<Message>, tn: ThreadNotifier) -> Self {
         let mut ctx = Context {
             pa: pa,
-            db: BTreeMap::new(),
             commands: BTreeMap::new(),
             identifiers: BTreeMap::new(),
+            chains: BTreeMap::new(),
             mstr: Magister::new(),
             tx: tx,
             tn: tn
         };
+        ctx.chains.insert(ChainType::Unattached, Chain { commands: vec![] });
         ctx
+    }
+    pub fn prettify_uuid(&self, uu: &Uuid) -> String {
+        for (ct, chn) in self.chains.iter() {
+            for (i, v) in chn.commands.iter().enumerate() {
+                if v == uu { return format!("{}{}", ct, i) }
+            }
+        }
+        format!("{}", uu)
+    }
+    pub fn label(&mut self, lbl: Option<String>, uu: Uuid) {
+        if let Some(lbl) = lbl {
+            self.identifiers.insert(lbl, uu);
+        }
+        else {
+            let mut todel = vec![];
+            for (k, v) in self.identifiers.iter() {
+                if *v == uu { todel.push(k.clone()); }
+            }
+            for k in todel {
+                self.identifiers.remove(&k);
+            }
+        }
+        let idents = { self.identifiers.clone() };
+        self.send(Message::Identifiers(idents));
+    }
+    pub fn update_chn(&mut self, ct: ChainType) {
+        let chn = self.chains.get(&ct).unwrap().clone();
+        self.send(Message::ChainDesc(ct, chn));
+    }
+    pub fn attach_chn(&mut self, ct: Option<ChainType>, cu: Uuid) {
+        let mut modified = vec![];
+        for (ref mut ct, ref mut chn) in &mut self.chains {
+            chn.commands.retain(|uu| {
+                if *uu == cu {
+                    modified.push(ct.clone());
+                    false
+                }
+                else { true }
+            });
+        }
+        for ct in modified {
+            self.update_chn(ct);
+        }
+        if let Some(ct) = ct {
+            self.chains.entry(ct.clone()).or_insert(Chain { commands: vec![] }).commands.push(cu);
+            self.update_chn(ct);
+        }
     }
     pub fn update_cmd(&mut self, cu: Uuid) {
         let cd = {
@@ -294,7 +248,7 @@ impl<'a> Context<'a> {
                 CommandState::Ready
             };
             CommandDescriptor::new(
-                cmd.desc(),
+                cmd.desc(self),
                 cmd.name(),
                 state,
                 cmd.get_hunks().into_iter().map(|c| c.get_val(cmd.deref(), &self)).collect(),
@@ -305,49 +259,5 @@ impl<'a> Context<'a> {
     pub fn send(&mut self, msg: Message) {
         self.tx.send(msg).unwrap();
         self.tn.notify();
-    }
-    pub fn insert_device(&mut self, dev: Vec<DeviceSink>) -> Uuid {
-        let mut descs = vec![];
-        for (i, stream) in dev.into_iter().enumerate() {
-            let uu = stream.uuid();
-            self.mstr.add_sink(Box::new(stream));
-            if let Some(qch) = self.db.get_qch(i) {
-                self.mstr.wire(qch.out.as_ref().unwrap().clone(), uu).unwrap();
-            }
-            descs.push((Uuid::new_v4(), Descriptor {
-                typ: ObjectType::DeviceOut(i),
-                ident: None,
-                inp: Some(uu),
-                out: None,
-                controller: None,
-                others: None
-            }));
-        }
-        let ids: Vec<Uuid> = descs.iter().map(|x| x.0.clone()).collect();
-        for mut d in descs.into_iter() {
-            d.1.others = Some(ids.clone());
-            self.db.insert(d.0, d.1);
-        }
-        ids[0]
-    }
-    pub fn insert_filestream(&mut self, source: String, fs: Vec<(FileStream, FileStreamX)>) -> Uuid {
-        let mut descs = vec![];
-        for (i, (stream, x)) in fs.into_iter().enumerate() {
-            self.mstr.add_source(Box::new(stream));
-            descs.push((Uuid::new_v4(), Descriptor {
-                typ: ObjectType::FileStream(source.clone(), i),
-                ident: None,
-                inp: None,
-                out: Some(x.uuid()),
-                controller: Some(Box::new(x)),
-                others: None
-            }));
-        }
-        let ids: Vec<Uuid> = descs.iter().map(|x| x.0.clone()).collect();
-        for mut d in descs.into_iter() {
-            d.1.others = Some(ids.clone());
-            self.db.insert(d.0, d.1);
-        }
-        ids[0]
     }
 }

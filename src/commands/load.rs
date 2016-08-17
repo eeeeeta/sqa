@@ -6,7 +6,7 @@ use chrono::Duration;
 #[derive(Clone)]
 pub struct StreamInfo {
     pub lp: LiveParameters,
-    ctl: FileStreamX
+    pub ctl: FileStreamX
 }
 pub struct FileStreamController<'a> {
     si: &'a mut StreamInfo
@@ -41,8 +41,11 @@ impl LoadCommand {
 }
 impl Command for LoadCommand {
     fn name(&self) -> &'static str { "Load file" }
-    fn desc(&self) -> String {
-        format!("Load file <b>{}</b> as <b>{}</b>", desc!(self.file), desc!(self.ident))
+    fn desc(&self, _: &Context) -> String {
+        match self.ident {
+            None => format!("Load file <b>{}</b>", desc!(self.file)),
+            Some(ref id) => format!("Load file <b>{}</b> as $<b>{}</b>", desc!(self.file), id)
+        }
     }
     fn run_state(&self) -> Option<CommandState> {
         if let Some(ref info) = self.streams.get(0) {
@@ -63,13 +66,14 @@ impl Command for LoadCommand {
         let file_setter = move |selfish: &mut Self, val: Option<String>| {
             if let Some(val) = val {
                 selfish.file = Some(val.clone());
+                /* FIXME: find a way to make this work
                 if !selfish.ident_set {
                     if let Some(osstr) = ::std::path::Path::new(&val).file_stem() {
                         if let Some(realstr) = osstr.to_str() {
                             selfish.ident = Some(realstr.to_owned());
                         }
                     }
-                }
+                }*/
             }
             else {
                 selfish.file = None;
@@ -107,7 +111,7 @@ impl Command for LoadCommand {
         };
         let ident_egetter = move |selfish: &Self, ctx: &Context| -> Option<String> {
             if let Some(ref ident) = selfish.ident {
-                if ctx.db.resolve_ident(ident).is_some() {
+                if ctx.identifiers.get(ident).is_some() {
                     Some(format!("Identifier ${} is already in use.", selfish.ident.as_ref().unwrap()))
                 }
                 else {
@@ -118,7 +122,7 @@ impl Command for LoadCommand {
                 None
             }
             else {
-                Some(format!("Please enter an identifier (we can't guess one)"))
+                None
             }
         };
         vec![
@@ -138,7 +142,7 @@ impl Command for LoadCommand {
             ctx.mstr.locate_source(ctl.uuid()).unwrap();
         }
         if let Some(i) = ident {
-            ctx.identifiers.insert(i, uu);
+            ctx.label(Some(i), uu);
         }
         for (i, (fs, fsx)) in streams.into_iter().enumerate() {
             let uu = fsx.uuid();

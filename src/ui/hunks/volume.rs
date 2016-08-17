@@ -86,8 +86,8 @@ impl HunkUIController for VolumeUIController {
             }
             Inhibit(false)
         }));
-        self.sc.connect_change_value(clone!(uierr, line, ent; |_sc, _st, val| {
-            let mut val = val as f32; /* stupid macro */
+        self.sc.connect_value_changed(clone!(uierr, line, ent; |sc| {
+            let mut val = sc.get_value() as f32; /* stupid macro */
             if val < 0.0002 {
                 val = ::std::f32::NEG_INFINITY;
             }
@@ -97,7 +97,6 @@ impl HunkUIController for VolumeUIController {
             *uierr.borrow_mut() = false;
             ent.set_text(&format!("{:.2}", val));
             CommandLine::set_val(line.clone(), idx, HunkTypes::Volume(val));
-            Inhibit(false)
         }));
     }
     fn set_val(&mut self, val: &::std::any::Any) {

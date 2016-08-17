@@ -1,4 +1,5 @@
 use super::prelude::*;
+use super::LoadCommand;
 use streamv2::db_lin;
 use backend::{BackendTimeout, BackendSender};
 use chrono::Duration;
@@ -8,7 +9,7 @@ const FADER_INTERVAL: u64 = 100;
 
 #[derive(Clone)]
 pub struct VolCommand {
-    ident: Option<String>,
+    ident: Option<Uuid>,
     vol: f32,
     fade: Option<u64>,
     runtime: Option<Duration>
@@ -27,12 +28,12 @@ impl VolCommand {
 }
 impl Command for VolCommand {
     fn name(&self) -> &'static str { "Set volume of" }
-    fn desc(&self) -> String {
+    fn desc(&self, ctx: &Context) -> String {
         if let Some(amt) = self.fade {
-            format!("Fade volume of <b>{}</b> to <b>{}</b>dB over <b>{}</b>ms", desc!(self.ident), self.vol, amt)
+            format!("Fade volume of <b>{}</b> to <b>{}</b>dB over <b>{}</b>ms", desc_uuid!(self.ident, ctx), self.vol, amt)
         }
         else {
-            format!("Set volume of <b>{}</b> to <b>{}</b>dB", desc!(self.ident), self.vol)
+            format!("Set volume of <b>{}</b> to <b>{}</b>dB", desc_uuid!(self.ident, ctx), self.vol)
         }
     }
     fn run_state(&self) -> Option<CommandState> {
@@ -58,10 +59,10 @@ impl Command for VolCommand {
                 None
             }
         };
-        let ident_getter = move |selfish: &Self| -> Option<String> {
+        let ident_getter = move |selfish: &Self| -> Option<Uuid> {
             selfish.ident.as_ref().map(|x| x.clone())
         };
-        let ident_setter = move |selfish: &mut Self, val: Option<String>| {
+        let ident_setter = move |selfish: &mut Self, val: Option<Uuid>| {
             if let Some(val) = val {
                 selfish.ident = Some(val.clone());
             }
@@ -71,15 +72,20 @@ impl Command for VolCommand {
         };
         let ident_egetter = move |selfish: &Self, ctx: &Context| -> Option<String> {
             if let Some(ref ident) = selfish.ident {
-                if ctx.db.resolve_ident(ident).is_none() {
-                    Some(format!("Identifier ${} does not exist.", selfish.ident.as_ref().unwrap()))
+                if let Some(ref strm) = ctx.commands.get(ident) {
+                    if strm.is::<LoadCommand>() {
+                        None
+                    }
+                    else {
+                        Some(format!("That command isn't a Load command."))
+                    }
                 }
                 else {
-                    None
+                    Some(format!("That UUID doesn't exist."))
                 }
             }
             else {
-                Some(format!("A target identifier is required."))
+                None
             }
         };
         let fade_getter = move |selfish: &Self| -> Option<u64> {
@@ -108,16 +114,15 @@ impl Command for VolCommand {
     }
     fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, auuid: Uuid) -> Result<bool, String> {
         let (ident, target) = (self.ident.clone().unwrap(), db_lin(self.vol));
-        let uu = ctx.db.resolve_ident(&ident).unwrap().0;
-        let mut fsx = ctx.db.control_filestream(&uu).unwrap();
+        let mut tgt = ctx.commands.get_mut(&ident).unwrap().downcast_mut::<LoadCommand>().unwrap();
         if let Some(fade_secs) = self.fade {
-            LinearFader::register(evl, uu, fade_secs, target, auuid);
+            LinearFader::register(evl, ident, fade_secs, target, auuid);
             self.runtime = Some(Duration::seconds(0));
             Ok(false)
         }
         else {
-            for ch in fsx.iter_mut() {
-                ch.set_vol(target);
+            for si in tgt.streams.iter_mut() {
+                si.ctl.set_vol(target);
             }
             Ok(true)
         }
@@ -139,15 +144,16 @@ impl LinearFader {
 }
 impl BackendTimeout for LinearFader {
     fn execute(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>) -> Option<u64> {
-        if let Some(mut fsx) = ctx.db.control_filestream(&self.fsu) {
-            let lp = fsx[0].lp();
+        if let Some(cmd) = ctx.commands.get_mut(&self.fsu) {
+            let ref mut streams = cmd.downcast_mut::<LoadCommand>().unwrap().streams;
+            let lp = streams[0].lp;
             let fade_left = lp.vol - self.target;
             if fade_left == 0.0 { return None };
             let pos = ((::time::precise_time_s() - self.ptn) * 1000.0).round() as u64;
             let units_left = (self.dur.saturating_sub(pos)) / 100;
             if units_left == 0 {
-                for ch in fsx.iter_mut() {
-                    ch.set_vol(self.target);
+                for si in streams {
+                    si.ctl.set_vol(self.target);
                 }
                 self.sender.send(Message::Update(self.auuid, new_update(move |cmd: &mut VolCommand| {
                     cmd.runtime = None;
@@ -155,8 +161,8 @@ impl BackendTimeout for LinearFader {
                 None
             }
             else {
-                for ch in fsx.iter_mut() {
-                    ch.set_vol(lp.vol - (fade_left / units_left as f32));
+                for si in streams {
+                    si.ctl.set_vol(lp.vol - (fade_left / units_left as f32));
                 }
                 self.sender.send(Message::Update(self.auuid, new_update(move |cmd: &mut VolCommand| {
                     cmd.runtime = Some(Duration::milliseconds(pos as i64));

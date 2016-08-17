@@ -32,9 +32,10 @@ pub struct CommandArgs<'a> {
 /// Command thingy.
 pub trait Command: mopa::Any + Send + BoxClone + 'static {
     fn name(&self) -> &'static str;
-    fn desc(&self) -> String {
+    fn desc(&self, ctx: &Context) -> String {
         format!("{}", self.name())
     }
+
     fn get_hunks(&self) -> Vec<Box<Hunk>>;
 
     fn run_state(&self) -> Option<CommandState> { None }
@@ -58,8 +59,8 @@ mopafy!(Command);
 pub enum HunkTypes {
     /// File path: `String`
     FilePath(Option<String>),
-    /// Identifier: `String`
-    Identifier(Option<String>),
+    /// Identifier: `Uuid`
+    Identifier(Option<Uuid>),
     /// Volume: `f32`
     Volume(f32),
     /// Time: `u64`
@@ -103,7 +104,6 @@ impl HunkTypes {
     pub fn string_of(&self, st: Option<String>) -> HunkTypes {
         match self {
             &HunkTypes::FilePath(..) => HunkTypes::FilePath(st),
-            &HunkTypes::Identifier(..) => HunkTypes::Identifier(st),
             &HunkTypes::String(..) => HunkTypes::String(st),
             _ => panic!("eta dun goofed"),
         }

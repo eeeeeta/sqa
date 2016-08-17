@@ -30,37 +30,7 @@ impl HunkUIController for TimeUIController {
         self.entuic.set_help(help);
     }
     fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
-        let ref pop = self.entuic.pop;
-        let ref ent = self.entuic.ent;
         let ref uierr = self.err;
-
-        pop.borrow().bind_defaults(line.clone(), idx, ht);
-        self.entuic.ent.connect_focus_in_event(clone!(pop; |_s, _y| {
-            pop.borrow().visible(true);
-            Inhibit(false)
-        }));
-        self.entuic.ent.connect_focus_out_event(clone!(pop, uierr, line, ent; |_s, _y| {
-            pop.borrow().visible(false);
-            if let Some(strn) = ent.get_text() {
-                if let Ok(_) = str::parse::<u64>(&strn) {
-                    ent.activate();
-                    return Inhibit(false);
-                }
-                else if strn == "" {
-                    CommandLine::set_val(line.clone(), idx, HunkTypes::Time(None));
-                    *uierr.borrow_mut() = None;
-                    return Inhibit(false);
-                }
-            }
-            else {
-                CommandLine::set_val(line.clone(), idx, HunkTypes::Time(None));
-                *uierr.borrow_mut() = None;
-                return Inhibit(false);
-            }
-            *uierr.borrow_mut() = Some(ent.get_text().unwrap().to_owned());
-            CommandLine::update(line.clone(), None);
-            Inhibit(false)
-        }));
         self.entuic.ent.connect_activate(clone!(line, uierr; |ent| {
             *uierr.borrow_mut() = None;
             if let Some(strn) = ent.get_text() {
@@ -80,6 +50,8 @@ impl HunkUIController for TimeUIController {
                 CommandLine::set_val(line.clone(), idx, HunkTypes::Time(None));
             }
         }));
+        self.entuic.bind(line.clone(), idx, ht.clone());
+        ::glib::signal_handler_block(&self.entuic.ent, self.entuic.activate_handler.unwrap());
     }
     fn set_val(&mut self, val: &::std::any::Any) {
         if self.err.borrow().is_some() {
