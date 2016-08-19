@@ -25,10 +25,10 @@ impl Command for OutputCommand {
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
         vec![TextHunk::new(format!("[TODO]"))]
     }
-    fn load(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) {
+    fn load(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>, _: Uuid) {
         let idx = ctx.pa.default_output_device().unwrap();
-        let dcs = DeviceSink::from_device_chans(ctx.pa, idx).unwrap();
-        self.chans = Vec::new();
+        let dcs = DeviceSink::from_device_chans(ctx.pa, idx,
+                                                ::std::mem::replace(&mut self.chans, Vec::new())).unwrap();
         for (i, dc) in dcs.into_iter().enumerate() {
             let dc: Box<::mixer::Sink> = Box::new(dc);
             self.chans.push(dc.uuid());
@@ -45,7 +45,7 @@ impl Command for OutputCommand {
         if self.chans.get(0).is_none() {
             self.load(ctx, evl, uu);
         }
-        Ok(false)
+        Ok(true)
     }
     fn sinks(&self) -> Vec<Uuid> {
         self.chans.clone()

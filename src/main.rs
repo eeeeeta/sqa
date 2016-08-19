@@ -46,6 +46,7 @@ fn main() {
     println!("[+] Initialising backend...");
     let (stx, srx) = channel();
     let (tx, rx) = channel();
+    let uitx = tx.clone();
     let tn = ThreadNotifier::new();
     let ttn = tn.clone();
     thread::spawn(move || {
@@ -56,7 +57,7 @@ fn main() {
     let sender = srx.recv().unwrap();
     println!("[+] Setting up window & GTK objects...");
     let win: Window = builder.get_object("SQA Main Window").unwrap();
-    let uic = UIContext::init(sender, rx, tn, win, &builder);
+    let uic = UIContext::init(sender, uitx, rx, tn, win, &builder);
     println!("[+] Initialisation complete!");
     gtk::main();
 }

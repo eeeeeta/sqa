@@ -41,7 +41,10 @@ pub enum GridNode {
     Choice(CommandSpawner),
     Grid(Vec<(&'static str, gkey, GridNode)>),
     Clear,
-    Execute
+    Execute,
+    Mode,
+    Go,
+    GotoQ
 }
 pub fn get_chooser_grid() -> Vec<(&'static str, gkey, GridNode)> {
     vec![
@@ -57,7 +60,13 @@ pub fn get_chooser_grid() -> Vec<(&'static str, gkey, GridNode)> {
         ("<b>Mixer</b> <i>M</i>", gkeys::m, GridNode::Grid(vec![
             ("Output <i>O</i>", gkeys::o, GridNode::Choice(CommandSpawner { cmd: Commands::Output }))
         ])),
+        ("<b>Cue</b> <i>Q</i>", gkeys::q, GridNode::Grid(vec![
+            ("Go To <i>G</i>", gkeys::g, GridNode::GotoQ)
+        ])),
+        ("Mode <i>O</i>", gkeys::o, GridNode::Mode),
         ("Clear <i>C</i>", gkeys::c, GridNode::Clear),
-        ("Execute <b>↵</b>", gkeys::Return, GridNode::Execute),
+        // The menu will overwrite the following commands' text depending on mode.
+        ("[left blank]", gkeys::g, GridNode::Go),
+        ("[left blank]", gkeys::Return, GridNode::Execute),
     ]
 }

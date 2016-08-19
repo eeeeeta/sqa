@@ -13,6 +13,9 @@
 .gridnode-execute {
     background-color: #d8ffad;
 }
+.gridnode-mode {
+    background-color: #ffadd2;
+}
 @keyframes err-pulse {
     0% { background-color: inherit }
     25% { background-color: #ffadad }

@@ -1,4 +1,4 @@
-use state::{Context, ThreadNotifier, Message, ChainType};
+use state::{Context, ThreadNotifier, Message, ChainType, CommandState};
 use std::sync::mpsc::{Sender};
 use portaudio as pa;
 use mio;
@@ -26,11 +26,24 @@ impl<'a> Handler for Context<'a> {
                 assert!(self.commands.insert(uu, spawner.spawn()).is_none());
                 update = Some(uu);
                 self.attach_chn(Some(ChainType::Unattached), uu);
+
+                if let CommandState::Ready = self.desc_cmd(uu).state {
+                    let mut cmd = self.commands.get_mut(&uu).unwrap().box_clone();
+                    cmd.load(self, evl, uu);
+                    self.commands.insert(uu, cmd);
+                }
             },
             Message::SetHunk(uu, idx, val) => {
-                let mut cmd = self.commands.get_mut(&uu).unwrap();
-                let ref mut hunk = cmd.get_hunks()[idx];
-                hunk.set_val(::std::ops::DerefMut::deref_mut(cmd), val);
+                {
+                    let mut cmd = self.commands.get_mut(&uu).unwrap();
+                    let ref mut hunk = cmd.get_hunks()[idx];
+                    hunk.set_val(::std::ops::DerefMut::deref_mut(cmd), val);
+                }
+                if let CommandState::Ready = self.desc_cmd(uu).state {
+                    let mut cmd = self.commands.get_mut(&uu).unwrap().box_clone();
+                    cmd.load(self, evl, uu);
+                    self.commands.insert(uu, cmd);
+                }
                 update = Some(uu);
             },
             Message::Execute(uu) => {

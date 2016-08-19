@@ -26,14 +26,56 @@ use std::collections::BTreeMap;
 use state::{CommandDescriptor, CommandState, Message, ThreadNotifier, ChainType, Chain};
 use uuid::Uuid;
 use std::rc::Rc;
+use std::fmt;
 use std::cell::RefCell;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Sender, Receiver};
 use backend::BackendSender;
 use gtk::{Builder, Label, TreeStore, ListStore, Window, Image};
 use gtk::prelude::*;
 use gdk::enums::key as gkey;
 use std::ops::Deref;
 
+#[derive(Clone)]
+pub struct UISender {
+    tx: Sender<Message>,
+    tn: ThreadNotifier
+}
+impl UISender {
+    pub fn new(tx: Sender<Message>, tn: ThreadNotifier) -> Self {
+        UISender {
+            tx: tx,
+            tn: tn
+        }
+    }
+    /// WARNING: This function will cause a borrow of all UI elements.
+    /// It thus stands that you should NOT call this in a UI element if you're borrowing it,
+    /// as this will cause a panic.
+    pub fn send(&mut self, m: Message) {
+        self.tx.send(m).unwrap();
+        self.tn.notify();
+    }
+}
+#[derive(Clone)]
+pub enum UIMode {
+    Live(ChainType),
+    Blind(ChainType)
+}
+impl UIMode {
+    fn get_ct(&self) -> ChainType {
+        match self {
+            &UIMode::Live(ref ct) => ct.clone(),
+            &UIMode::Blind(ref ct) => ct.clone(),
+        }
+    }
+}
+impl fmt::Display for UIMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &UIMode::Live(ref ct) => write!(f, "LIVE: {}", ct),
+            &UIMode::Blind(ref ct) => write!(f, "BLIND: {}", ct),
+        }
+    }
+}
 pub struct UIContext {
     pub commands: BTreeMap<Uuid, CommandDescriptor>,
     pub identifiers: BTreeMap<String, Uuid>,
@@ -42,13 +84,15 @@ pub struct UIContext {
     pub line: Rc<RefCell<CommandLine>>,
     pub store: TreeStore,
     pub completions: ListStore,
-    pub rx: Receiver<Message>
+    pub rx: Receiver<Message>,
+    pub uitx: Sender<Message>,
+    pub mode: UIMode
 }
 impl UIContext {
-    pub fn init(sender: BackendSender, recvr: Receiver<Message>, tn: ThreadNotifier, win: Window, builder: &Builder)  -> Rc<RefCell<Self>> {
+    pub fn init(sender: BackendSender, uisender: Sender<Message>, recvr: Receiver<Message>, tn: ThreadNotifier, win: Window, builder: &Builder)  -> Rc<RefCell<Self>> {
         let compl: ListStore = builder.get_object("command-identifiers-list").unwrap();
         let line = CommandLine::new(sender, compl.clone(), &builder);
-        let ccc = CommandChooserController::new(line.clone(), &builder);
+        let ccc = CommandChooserController::new(line.clone(), UIMode::Live(ChainType::Unattached), UISender::new(uisender.clone(), tn.clone()), &builder);
         let uic = Rc::new(RefCell::new(UIContext {
             commands: BTreeMap::new(),
             identifiers: BTreeMap::new(),
@@ -57,7 +101,9 @@ impl UIContext {
             line: line,
             rx: recvr,
             completions: compl,
-            store: builder.get_object("command-tree").unwrap()
+            store: builder.get_object("command-tree").unwrap(),
+            uitx: uisender,
+            mode: UIMode::Live(ChainType::Unattached)
         }));
         tn.register_handler(clone!(uic; || {
             UIContext::handler(uic.clone());
@@ -220,6 +266,10 @@ impl UIContext {
             Message::Identifiers(id) => {
                 selfish.identifiers = id;
                 selfish.update();
+            },
+            Message::UIChangeMode(ct) => {
+                selfish.mode = ct.clone();
+                CommandChooserController::set_mode(selfish.chooser.clone(), ct);
             },
             _ => unimplemented!()
         }

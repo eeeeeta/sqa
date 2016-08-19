@@ -3,31 +3,58 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use gdk::enums::key as gkey;
 use gtk::prelude::*;
-use gtk::{Label, Grid, Button, Builder, Popover};
+use gtk::{Label, Grid, Button, Builder, Entry, Popover};
 use std::ops::Rem;
 use state::Message;
 use uuid::Uuid;
+use state::ChainType;
 use super::line::CommandLine;
+use super::{UISender, UIMode};
 
 pub struct CommandChooserController {
     grid: Grid,
+    mode: UIMode,
+    sender: UISender,
     back_btn: Button,
+    status_lbl: Label,
     pop: Popover,
+    prompt_pop: Popover,
+    prompt_lbl: Label,
+    prompt_ent: Entry,
+    prompt_handler: Box<Fn(String)>,
     cl: Rc<RefCell<CommandLine>>,
     pos: Vec<usize>,
     top: Vec<(&'static str, gkey::Key, GridNode)>
 }
 
 impl CommandChooserController {
-    pub fn new(cl: Rc<RefCell<CommandLine>>, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(cl: Rc<RefCell<CommandLine>>, mode: UIMode, sender: UISender, b: &Builder) -> Rc<RefCell<Self>> {
         let ret = Rc::new(RefCell::new(CommandChooserController {
             grid: b.get_object("cc-grid").unwrap(),
             back_btn: b.get_object("cc-end-button").unwrap(),
+            status_lbl: b.get_object("cc-status-label").unwrap(),
             pop: b.get_object("command-chooser-popover").unwrap(),
+            prompt_pop: b.get_object("prompt-popover").unwrap(),
+            prompt_lbl: b.get_object("prompt-popover-label").unwrap(),
+            prompt_ent: b.get_object("prompt-popover-entry").unwrap(),
+            prompt_handler: Box::new(|_| {}),
             pos: vec![],
             cl: cl,
-            top: get_chooser_grid()
+            top: get_chooser_grid(),
+            mode: mode,
+            sender: sender
         }));
+        ret.borrow().prompt_ent.connect_activate(clone!(ret; |ent| {
+            let mut ret = ret.borrow_mut();
+            if let Some(txt) = ent.get_text() {
+                (ret.prompt_handler)(txt);
+                ret.prompt_handler = Box::new(|_| {});
+            }
+            ret.prompt_pop.hide();
+        }));
+        ret.borrow().prompt_ent.connect_icon_press(|ent, _, _| {
+            ent.activate();
+        });
         ret.borrow().back_btn.connect_clicked(clone!(ret; |_s| {
             {
                 let mut pos = &mut ret.borrow_mut().pos;
@@ -81,12 +108,16 @@ impl CommandChooserController {
         }
         Self::update(selfish_);
     }
-    pub fn execute(cl: Rc<RefCell<CommandLine>>) {
+    pub fn execute(selfish_: Rc<RefCell<Self>>, cl: Rc<RefCell<CommandLine>>) {
         {
             let mut cl = cl.borrow_mut();
+            let selfish = selfish_.borrow();
             if !cl.ready { return; }
             let cd = cl.cd.take().unwrap();
-            cl.tx.send(Message::Execute(cd.uuid));
+            match selfish.mode {
+                UIMode::Live(_) => cl.tx.send(Message::Execute(cd.uuid)).unwrap(),
+                UIMode::Blind(ref ct) => cl.tx.send(Message::Attach(cd.uuid, ct.clone())).unwrap()
+            }
         }
         CommandLine::update(cl, None);
     }
@@ -108,8 +139,17 @@ impl CommandChooserController {
         }
         ptr
     }
+    pub fn set_mode(selfish: Rc<RefCell<Self>>, mode: UIMode) {
+        {
+            selfish.borrow_mut().mode = mode;
+        }
+        CommandChooserController::update(selfish);
+    }
     pub fn update(selfish_: Rc<RefCell<Self>>) {
         let selfish = selfish_.borrow();
+
+        selfish.status_lbl.set_markup(&format!("{}", selfish.mode));
+
         let ptr = selfish.get_ptr();
         for chld in selfish.grid.get_children() {
             chld.destroy();
@@ -118,7 +158,6 @@ impl CommandChooserController {
             let lbl = Label::new(None);
             let btn = Button::new();
             lbl.set_markup(st);
-            btn.add(&lbl);
             match opt {
                 &GridNode::Choice(spawner) => {
                     let ref cl = selfish.cl;
@@ -149,6 +188,21 @@ impl CommandChooserController {
                     lbl.get_style_context().unwrap().add_class("gridnode-grid");
                     lbl.get_style_context().unwrap().add_class("gridnode");
                 },
+                &GridNode::Mode => {
+                    btn.connect_clicked(clone!(selfish_; |_s| {
+                        let (mut sender, mode) = {
+                            let selfish = selfish_.borrow_mut();
+                            selfish.pop.hide();
+                            (selfish.sender.clone(), match selfish.mode {
+                                UIMode::Live(ref ct) => UIMode::Blind(ct.clone()),
+                                UIMode::Blind(ref ct) => UIMode::Live(ct.clone())
+                            })
+                        };
+                        sender.send(Message::UIChangeMode(mode));
+                    }));
+                    lbl.get_style_context().unwrap().add_class("gridnode-mode");
+                    lbl.get_style_context().unwrap().add_class("gridnode");
+                },
                 &GridNode::Clear => {
                     let ref cl = selfish.cl;
                     btn.connect_clicked(clone!(selfish_, cl; |_s| {
@@ -171,10 +225,49 @@ impl CommandChooserController {
                         btn.set_sensitive(false);
                     }
                 },
+                &GridNode::Go => {
+                    let ref cl = selfish.cl;
+                    btn.connect_clicked(clone!(selfish_, cl; |_s| {
+                        {
+                            let cl = cl.borrow();
+                            let selfish = selfish_.borrow();
+                            let ct = selfish.mode.get_ct();
+                            cl.tx.send(Message::Go(ct)).unwrap();
+                        }
+                        selfish_.borrow().pop.hide();
+                    }));
+                    lbl.get_style_context().unwrap().add_class("gridnode");
+                    lbl.get_style_context().unwrap().add_class("gridnode-execute");
+                    lbl.set_markup(&format!("Go {} <b>G</b>", selfish.mode.get_ct()));
+                },
+                &GridNode::GotoQ => {
+                    let ref cl = selfish.cl;
+                    selfish.prompt_pop.set_relative_to(Some(&cl.borrow().line));
+                    btn.connect_clicked(clone!(selfish_; |_s| {
+                        {
+                            let mut selfish = selfish_.borrow_mut();
+                            selfish.pop.hide();
+                            selfish.prompt_lbl.set_markup(&format!("<b>Go to cue:</b>"));
+                            let sender = selfish.sender.clone();
+                            let mode = selfish.mode.clone();
+                            selfish.prompt_handler = Box::new(move |txt| {
+                                let mode = match mode {
+                                    UIMode::Live(_) => UIMode::Live(ChainType::Q(txt)),
+                                    UIMode::Blind(_) => UIMode::Blind(ChainType::Q(txt))
+                                };
+                                // FIXME: why the double clone?
+                                sender.clone().send(Message::UIChangeMode(mode));
+                            });
+                            selfish.prompt_pop.show_all();
+                        }
+                    }));
+                    lbl.get_style_context().unwrap().add_class("gridnode");
+                    lbl.get_style_context().unwrap().add_class("gridnode-clear");
+                },
                 &GridNode::Execute => {
                     let ref cl = selfish.cl;
                     btn.connect_clicked(clone!(selfish_, cl; |_s| {
-                        Self::execute(cl.clone());
+                        Self::execute(selfish_.clone(), cl.clone());
                         selfish_.borrow().pop.hide();
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode");
@@ -185,8 +278,13 @@ impl CommandChooserController {
                     else {
                         btn.set_sensitive(false);
                     }
+                    match selfish.mode {
+                        UIMode::Live(_) => lbl.set_markup(&format!("Execute <b>↵</b>")),
+                        UIMode::Blind(ref ct) => lbl.set_markup(&format!("Attach to {} <b>↵</b>", ct))
+                    }
                 }
             }
+            btn.add(&lbl);
             selfish.grid.attach(&btn, i.rem(3) as i32, (i/3) as i32, 1, 1);
         }
         selfish.grid.show_all();

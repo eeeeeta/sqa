@@ -169,7 +169,7 @@ impl Sink for DeviceSink {
     }
 }
 impl DeviceSink {
-    pub fn from_device_chans(pa: &mut pa::PortAudio, dev: pa::DeviceIndex) -> Result<Vec<Self>, pa::error::Error> {
+    pub fn from_device_chans(pa: &mut pa::PortAudio, dev: pa::DeviceIndex, uu: Vec<Uuid>) -> Result<Vec<Self>, pa::error::Error> {
         let dev_info = try!(pa.device_info(dev));
         let params: pa::StreamParameters<f32> = pa::StreamParameters::new(dev, dev_info.max_output_channels, false, dev_info.default_low_output_latency);
         try!(pa.is_output_format_supported(params, 44_100.0_f64));
@@ -219,7 +219,7 @@ impl DeviceSink {
             rets.push(DeviceSink {
                 stream: stream.clone(),
                 txrx: ds_to_cb.clone(),
-                uuid: Uuid::new_v4(),
+                uuid: uu.get(i).map(|x| *x).unwrap_or(Uuid::new_v4()),
                 last_uuid_wired: Uuid::new_v4(),
                 id: i
             })

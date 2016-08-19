@@ -14,6 +14,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use threadpool::ThreadPool;
 use cues::QRunnerX;
+use ui::UIMode;
 
 #[derive(Clone)]
 /// An object for cross-thread notification.
@@ -132,7 +133,9 @@ pub enum Message {
     /// QRunner -> S: I (tuple.0) am blocked on command (tuple.1).
     QRunnerBlocked(Uuid, Uuid),
     /// QRunner -> S: My thread is just about to exit, please remove my counterpart
-    QRunnerCompleted(Uuid)
+    QRunnerCompleted(Uuid),
+    /// UI objects -> UI: Change UI mode to the following
+    UIChangeMode(UIMode),
 }
 #[derive(Clone, Debug)]
 pub enum CommandState {
@@ -254,28 +257,29 @@ impl<'a> Context<'a> {
             self.update_chn(ct);
         }
     }
-    pub fn update_cmd(&mut self, cu: Uuid) {
-        let cd = {
-            let cmd = self.commands.get(&cu).unwrap();
-            let errs: u32 = cmd.get_hunks().into_iter().map(|c| {
-                if let Some(..) = c.get_val(cmd.deref(), &self).err { 1 } else { 0 }
-            }).sum();
-            let state = if let Some(st) = cmd.run_state() {
-                st
-            }
-            else if errs > 0 {
-                CommandState::Incomplete
-            }
-            else {
-                CommandState::Ready
-            };
-            CommandDescriptor::new(
-                cmd.desc(self),
-                cmd.name(),
-                state,
-                cmd.get_hunks().into_iter().map(|c| c.get_val(cmd.deref(), &self)).collect(),
-                cu)
+    pub fn desc_cmd(&self, cu: Uuid) -> CommandDescriptor {
+        let cmd = self.commands.get(&cu).unwrap();
+        let errs: u32 = cmd.get_hunks().into_iter().map(|c| {
+            if let Some(..) = c.get_val(cmd.deref(), &self).err { 1 } else { 0 }
+        }).sum();
+        let state = if let Some(st) = cmd.run_state() {
+            st
+        }
+        else if errs > 0 {
+            CommandState::Incomplete
+        }
+        else {
+            CommandState::Ready
         };
+        CommandDescriptor::new(
+            cmd.desc(self),
+            cmd.name(),
+            state,
+            cmd.get_hunks().into_iter().map(|c| c.get_val(cmd.deref(), &self)).collect(),
+            cu)
+    }
+    pub fn update_cmd(&mut self, cu: Uuid) {
+        let cd = self.desc_cmd(cu);
         self.send(Message::CmdDesc(cu, cd));
     }
     pub fn send(&mut self, msg: Message) {
