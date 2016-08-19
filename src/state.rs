@@ -12,6 +12,8 @@ use gtk::Adjustment;
 use chrono::{UTC, Duration, DateTime};
 use std::rc::Rc;
 use std::cell::RefCell;
+use threadpool::ThreadPool;
+use cues::QRunnerX;
 
 #[derive(Clone)]
 /// An object for cross-thread notification.
@@ -109,6 +111,10 @@ pub enum Message {
     Execute(Uuid),
     /// C -> S: Delete command.
     Delete(Uuid),
+    /// C -> S: Attach command to chain.
+    Attach(Uuid, ChainType),
+    /// C -> S: Start running chain.
+    Go(ChainType),
     /// S -> C: Update your descriptor of command with given UUID.
     CmdDesc(Uuid, CommandDescriptor),
     /// S -> C: Update given chain.
@@ -120,7 +126,13 @@ pub enum Message {
     /// S -> C: Update list of named identifiers.
     Identifiers(BTreeMap<String, Uuid>),
     /// Other Backend Threads -> S: Apply closure to command with given UUID & propagate changes.
-    Update(Uuid, CommandUpdate)
+    Update(Uuid, CommandUpdate),
+    /// Other Backend Threads -> S: Execution of given command completed - notify relevant QRunner
+    ExecutionCompleted(Uuid),
+    /// QRunner -> S: I (tuple.0) am blocked on command (tuple.1).
+    QRunnerBlocked(Uuid, Uuid),
+    /// QRunner -> S: My thread is just about to exit, please remove my counterpart
+    QRunnerCompleted(Uuid)
 }
 #[derive(Clone, Debug)]
 pub enum CommandState {
@@ -167,9 +179,11 @@ pub struct Context<'a> {
     pub commands: BTreeMap<Uuid, Box<Command>>,
     pub identifiers: BTreeMap<String, Uuid>,
     pub chains: BTreeMap<ChainType, Chain>,
+    pub runners: Vec<QRunnerX>,
     pub mstr: Magister,
     pub tx: ::std::sync::mpsc::Sender<Message>,
-    pub tn: ThreadNotifier
+    pub tn: ThreadNotifier,
+    pub pool: ThreadPool
 }
 impl<'a> Context<'a> {
     pub fn new(pa: &'a mut ::portaudio::PortAudio, tx: ::std::sync::mpsc::Sender<Message>, tn: ThreadNotifier) -> Self {
@@ -179,11 +193,19 @@ impl<'a> Context<'a> {
             identifiers: BTreeMap::new(),
             chains: BTreeMap::new(),
             mstr: Magister::new(),
+            runners: Vec::new(),
             tx: tx,
-            tn: tn
+            tn: tn,
+            pool: ThreadPool::new(4)
         };
         ctx.chains.insert(ChainType::Unattached, Chain { commands: vec![] });
         ctx
+    }
+    pub fn execution_completed(&mut self, uu: Uuid) {
+        println!("execution completed for {}", uu);
+        for qrx in self.runners.iter_mut() {
+            qrx.trigger(uu);
+        }
     }
     pub fn prettify_uuid(&self, uu: &Uuid) -> String {
         for (ct, chn) in self.chains.iter() {

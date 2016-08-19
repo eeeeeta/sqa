@@ -33,6 +33,8 @@ pub struct LiveParameters {
     pub pos: usize,
     /// Whether this stream is active (playing)
     pub active: bool,
+    /// Whether this stream has come to its end (stopped) and is still there
+    pub stopped: bool,
     /// The start position of this stream, in frames past the start of the file.
     pub start: u64,
     /// The end position of this stream.
@@ -45,6 +47,7 @@ impl LiveParameters {
             vol: 1.0,
             pos: 0,
             active: false,
+            stopped: false,
             start: start,
             end: end
         }
@@ -177,6 +180,7 @@ impl FileStreamSpooler {
                         self.auuid,
                         command::new_update(move |cmd: &mut LoadCommand| {
                             cmd.streams[i].lp = lp;
+                            lp.stopped
                         })
                     )).unwrap();
                 }
@@ -272,7 +276,13 @@ impl mixer::Source for FileStream {
             match fsreq {
                 FileStreamRequest::NewBuf(nb) => self.buf = nb,
                 FileStreamRequest::SetVol(vol) => self.lp.vol = vol,
-                FileStreamRequest::SetActive(act) => self.lp.active = act
+                FileStreamRequest::SetActive(act) =>
+                {
+                    self.lp.active = act;
+                    if act == true {
+                        self.lp.stopped = false;
+                    }
+                }
             }
             self.status_tx.try_push(self.lp.clone());
         }
@@ -290,6 +300,8 @@ impl mixer::Source for FileStream {
             self.lp.pos = pos;
             if pos >= self.lp.end as usize {
                 self.lp.active = false;
+                self.lp.stopped = true;
+                self.lp.pos = 0;
                 self.status_tx.try_push(self.lp.clone());
             }
             /* deliver new statuses every second */

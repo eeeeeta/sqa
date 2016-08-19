@@ -3,6 +3,7 @@ use std::sync::mpsc::{Sender};
 use portaudio as pa;
 use mio;
 use mio::{Handler, EventLoop};
+use cues::QRunner;
 
 pub type BackendSender = mio::Sender<Message>;
 pub trait BackendTimeout {
@@ -34,13 +35,23 @@ impl<'a> Handler for Context<'a> {
             },
             Message::Execute(uu) => {
                 let mut cmd = self.commands.get_mut(&uu).unwrap().box_clone();
-                cmd.execute(self, evl, uu).unwrap();
+                let finished = cmd.execute(self, evl, uu).unwrap();
                 self.commands.insert(uu, cmd);
                 update = Some(uu);
+
+                if finished {
+                    println!("calling EC on exec");
+                    self.execution_completed(uu);
+                }
             },
             Message::Update(uu, cu) => {
-                let mut cmd = self.commands.get_mut(&uu).unwrap();
-                cu(::std::ops::DerefMut::deref_mut(cmd));
+                if {
+                    let mut cmd = self.commands.get_mut(&uu).unwrap();
+                    cu(::std::ops::DerefMut::deref_mut(cmd))
+                } {
+                    println!("calling EC after update");
+                    self.execution_completed(uu);
+                }
                 update = Some(uu);
             },
             Message::Delete(uu) => {
@@ -49,6 +60,24 @@ impl<'a> Handler for Context<'a> {
                 self.commands.remove(&uu);
                 self.send(Message::Deleted(uu));
             },
+            Message::Attach(uu, ct) => {
+                self.attach_chn(Some(ct), uu);
+            },
+            Message::Go(ct) => {
+                let qr = QRunner::new(self.chains.get(&ct).unwrap().clone(), self, evl);
+                self.runners.push(qr);
+            },
+            Message::QRunnerBlocked(uu, blk) => {
+                for qrx in self.runners.iter_mut() {
+                    if qrx.uuid() == uu {
+                        qrx.blocked = Some(blk);
+                    }
+                }
+            },
+            Message::QRunnerCompleted(uu) => {
+                self.runners.retain(|uc| uc.uuid() != uu);
+            },
+            Message::ExecutionCompleted(uu) => { self.execution_completed(uu); },
             _ => unimplemented!()
         }
         if let Some(uu) = update {

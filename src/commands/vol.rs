@@ -30,10 +30,10 @@ impl Command for VolCommand {
     fn name(&self) -> &'static str { "Set volume of" }
     fn desc(&self, ctx: &Context) -> String {
         if let Some(amt) = self.fade {
-            format!("Fade volume of <b>{}</b> to <b>{}</b>dB over <b>{}</b>ms", desc_uuid!(self.ident, ctx), self.vol, amt)
+            format!("Fade volume of <b>{}</b> to <b>{:02}</b>dB over <b>{}</b>ms", desc_uuid!(self.ident, ctx), self.vol, amt)
         }
         else {
-            format!("Set volume of <b>{}</b> to <b>{}</b>dB", desc_uuid!(self.ident, ctx), self.vol)
+            format!("Set volume of <b>{}</b> to <b>{:02}</b>dB", desc_uuid!(self.ident, ctx), self.vol)
         }
     }
     fn run_state(&self) -> Option<CommandState> {
@@ -157,6 +157,7 @@ impl BackendTimeout for LinearFader {
                 }
                 self.sender.send(Message::Update(self.auuid, new_update(move |cmd: &mut VolCommand| {
                     cmd.runtime = None;
+                    true
                 }))).unwrap();
                 None
             }
@@ -166,6 +167,7 @@ impl BackendTimeout for LinearFader {
                 }
                 self.sender.send(Message::Update(self.auuid, new_update(move |cmd: &mut VolCommand| {
                     cmd.runtime = Some(Duration::milliseconds(pos as i64));
+                    false
                 }))).unwrap();
                 Some(FADER_INTERVAL)
             }

@@ -4,11 +4,11 @@ use mopa;
 use mio::EventLoop;
 use uuid::Uuid;
 
-pub type CommandUpdate = Box<Fn(&mut Command) + Send>;
-pub fn new_update<T, U>(cls: U) -> CommandUpdate where U: Fn(&mut T) + Send + 'static, T: Command {
+pub type CommandUpdate = Box<Fn(&mut Command) -> bool + Send>;
+pub fn new_update<T, U>(cls: U) -> CommandUpdate where U: Fn(&mut T) -> bool + Send + 'static, T: Command {
     Box::new(move |cmd: &mut Command| {
         let cmd = cmd.downcast_mut::<T>().unwrap();
-        cls(cmd);
+        cls(cmd)
     })
 }
 pub trait BoxClone {

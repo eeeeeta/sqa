@@ -1,4 +1,4 @@
-#![feature(borrow_state, question_mark, iter_arith)]
+#![feature(borrow_state, question_mark, iter_arith, dotdot_in_tuple_patterns)]
 extern crate rsndfile;
 extern crate portaudio;
 extern crate chrono;
@@ -13,6 +13,7 @@ extern crate mio;
 extern crate glib;
 #[macro_use]
 extern crate mopa;
+extern crate threadpool;
 mod streamv2;
 mod mixer;
 #[macro_use]
@@ -21,6 +22,7 @@ mod commands;
 mod state;
 mod ui;
 mod backend;
+mod cues;
 
 use gtk::prelude::*;
 use gtk::{Builder, Window};
