@@ -3,12 +3,14 @@ mod text;
 mod time;
 mod volume;
 mod ident;
+mod checkbox;
 
 pub use self::entry::EntryUIController;
 pub use self::text::TextUIController;
 pub use self::time::TimeUIController;
 pub use self::volume::VolumeUIController;
 pub use self::ident::IdentUIController;
+pub use self::checkbox::CheckboxUIController;
 pub use super::line::CommandLine;
 
 use command::HunkTypes;
@@ -25,6 +27,7 @@ pub trait HunkUIController {
     fn pack(&self, onto: &GtkBox);
     fn set_help(&mut self, _help: &'static str) {}
     fn set_val(&mut self, _val: &::std::any::Any) {}
+    fn set_accel(&mut self, _accel: Option<::gdk::enums::key::Key>) {}
     fn set_error(&mut self, _err: Option<String>) {}
     fn get_error(&self) -> Option<String> { None }
 }

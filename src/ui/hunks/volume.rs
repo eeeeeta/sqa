@@ -12,7 +12,8 @@ use super::EntryUIController;
 pub struct VolumeUIController {
     entuic: EntryUIController,
     sc: Scale,
-    err: Rc<RefCell<bool>>
+    err: Rc<RefCell<bool>>,
+    sc_handler: Option<u64>
 }
 
 impl VolumeUIController {
@@ -20,7 +21,8 @@ impl VolumeUIController {
         let ret = VolumeUIController {
             entuic: EntryUIController::new("volume-knob"),
             sc: Scale::new_with_range(::gtk::Orientation::Horizontal, 0.0, db_lin(3.0) as f64, 0.01),
-            err: Rc::new(RefCell::new(false))
+            err: Rc::new(RefCell::new(false)),
+            sc_handler: None
         };
         ret.sc.set_value(1.0);
         ret.sc.set_draw_value(false);
@@ -38,6 +40,7 @@ impl VolumeUIController {
         ret.sc.add_mark(db_lin(1.0) as f64, ::gtk::PositionType::Bottom, Some("1"));
         ret.sc.add_mark(db_lin(2.0) as f64, ::gtk::PositionType::Bottom, Some("2"));
         ret.sc.add_mark(db_lin(3.0) as f64, ::gtk::PositionType::Bottom, Some("3"));
+        ret.entuic.ent.set_width_chars(-1);
         ret
     }
 }
@@ -54,39 +57,24 @@ impl HunkUIController for VolumeUIController {
     fn set_help(&mut self, help: &'static str) {
         self.entuic.set_help(help);
     }
-    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, _: HunkTypes) {
-        let ref pop = self.entuic.pop;
-        let ref sc = self.sc;
-        let ref ent = self.entuic.ent;
+    fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
         let ref uierr = self.err;
-        ent.set_text(&format!("{:.2}", lin_db(sc.get_value() as f32)));
-        self.entuic.ent.connect_focus_in_event(clone!(pop; |_s, _y| {
-            pop.borrow().visible(true);
+        self.entuic.ent.connect_key_release_event(move |ent, _| {
+            ent.activate();
             Inhibit(false)
-        }));
-        self.entuic.ent.connect_focus_out_event(clone!(pop, uierr, line, ent; |_s, _y| {
-            pop.borrow().visible(false);
+        });
+        self.entuic.ent.connect_activate(clone!(line, uierr; |ent| {
             if let Some(strn) = ent.get_text() {
-                if let Ok(_) = str::parse::<f64>(&strn) {
-                    return Inhibit(false);
-                }
-            }
-            *uierr.borrow_mut() = true;
-            CommandLine::update(line.clone(), None);
-            Inhibit(false)
-        }));
-        self.entuic.ent.connect_key_release_event(clone!(sc, line, uierr; |ent, _e| {
-            if let Some(strn) = ent.get_text() {
-                if let Ok(mut flt) = str::parse::<f64>(&strn) {
+                if let Ok(flt) = str::parse::<f32>(&strn) {
                     *uierr.borrow_mut() = false;
-                    CommandLine::set_val(line.clone(), idx, HunkTypes::Volume(flt as f32));
-                    flt = db_lin(flt as f32) as f64;
-                    sc.set_value(flt);
+                    CommandLine::set_val(line.clone(), idx, HunkTypes::Volume(flt));
+                }
+                else {
+                    *uierr.borrow_mut() = true;
                 }
             }
-            Inhibit(false)
         }));
-        self.sc.connect_value_changed(clone!(uierr, line, ent; |sc| {
+        self.sc_handler = Some(self.sc.connect_value_changed(clone!(uierr, line; |sc| {
             let mut val = sc.get_value() as f32; /* stupid macro */
             if val < 0.0002 {
                 val = ::std::f32::NEG_INFINITY;
@@ -95,12 +83,33 @@ impl HunkUIController for VolumeUIController {
                 val = lin_db(val);
             }
             *uierr.borrow_mut() = false;
-            ent.set_text(&format!("{:.2}", val));
             CommandLine::set_val(line.clone(), idx, HunkTypes::Volume(val));
-        }));
+        })));
+        self.entuic.bind(line.clone(), idx, ht.clone());
+        for ch in self.entuic.pop.borrow().state_actions.get_children().into_iter() {
+            ch.destroy();
+        }
+        ::glib::signal_handler_block(&self.entuic.ent, self.entuic.activate_handler.unwrap());
     }
     fn set_val(&mut self, val: &::std::any::Any) {
-        self.sc.set_value((*val.downcast_ref::<f32>().unwrap()) as f64);
+        let val = *val.downcast_ref::<f32>().unwrap();
+        ::glib::signal_handler_block(&self.sc, self.sc_handler.unwrap());
+        self.sc.set_value(db_lin(val) as f64);
+        ::glib::signal_handler_unblock(&self.sc, self.sc_handler.unwrap());
+        if {
+            if let Some(strn) = self.entuic.ent.get_text() {
+                if let Ok(flt) = str::parse::<f32>(&strn) {
+                    flt != val
+                }
+                else {
+                    true
+                }
+            }
+            else { true }
+        } {
+            self.entuic.ent.set_text(&format!("{:.02}", val));
+        }
+
     }
     fn set_error(&mut self, err: Option<String>) {
         self.entuic.set_error(err);

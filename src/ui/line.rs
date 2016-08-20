@@ -5,15 +5,9 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::{Label, Image, Builder, ListStore};
 use gtk::Box as GtkBox;
-use std::sync::{Arc, Mutex};
 use backend::BackendSender;
 use uuid::Uuid;
-use super::hunks::HunkUIController;
-use super::hunks::EntryUIController;
-use super::hunks::TextUIController;
-use super::hunks::VolumeUIController;
-use super::hunks::TimeUIController;
-use super::hunks::IdentUIController;
+use super::hunks::*;
 
 pub enum HunkFSM {
     Err,
@@ -22,7 +16,6 @@ pub enum HunkFSM {
 }
 
 pub struct HunkUI {
-    data: HunkState,
     ctl: Box<HunkUIController>,
     state: HunkFSM
 }
@@ -46,10 +39,10 @@ impl HunkUI {
             &HunkTypes::String(..) => Box::new(EntryUIController::new("text-x-generic")),
             &HunkTypes::Label(..) => Box::new(TextUIController::new()),
             &HunkTypes::Volume(..) => Box::new(VolumeUIController::new()),
-            &HunkTypes::Time(..) => Box::new(TimeUIController::new())
+            &HunkTypes::Time(..) => Box::new(TimeUIController::new()),
+            &HunkTypes::Checkbox(..) => Box::new(CheckboxUIController::new())
         };
         HunkUI {
-            data: hs,
             ctl: ctl,
             state: HunkFSM::Err
         }
@@ -72,6 +65,7 @@ impl HunkUI {
             self.state = HunkFSM::Ok;
             self.ctl.set_error(None);
         }
+        self.ctl.set_accel(state.accel);
         self.ctl.set_val(state.val.unwrap_ref());
         self.ctl.set_help(state.help);
     }

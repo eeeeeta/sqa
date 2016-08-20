@@ -2,7 +2,7 @@ pub use command::{Command, HunkTypes, Hunk, TextHunk, GenericHunk, StreamControl
 pub use state::{Context, CommandState};
 pub use mio::EventLoop;
 pub use uuid::Uuid;
-
+pub use gdk::enums::key as Keys;
 macro_rules! desc {
     ($x:expr) => {
         $x.as_ref().unwrap_or(&"<span foreground=\"red\">[???]</span>".to_owned())

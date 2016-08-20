@@ -27,6 +27,7 @@ pub struct LoadCommand {
     file: Option<String>,
     ident: Option<String>,
     ident_set: bool,
+    start: bool,
     pub streams: Vec<StreamInfo>
 }
 impl LoadCommand {
@@ -35,6 +36,7 @@ impl LoadCommand {
             file: None,
             ident: None,
             ident_set: false,
+            start: true,
             streams: vec![]
         }
     }
@@ -125,10 +127,22 @@ impl Command for LoadCommand {
                 None
             }
         };
+        let start_getter = move |selfish: &Self| -> bool {
+            selfish.start
+        };
+        let start_setter = move |selfish: &mut Self, val: bool| {
+            selfish.start = val;
+        };
+        let start_egetter = move |_: &Self, _: &Context| -> Option<String> {
+            None
+        };
         vec![
-            hunk!(FilePath, "Provide the file path to an audio file.", true, file_getter, file_setter, file_egetter),
+            hunk!(FilePath, "Provide the file path to an audio file.", true, Keys::p, file_getter, file_setter, file_egetter),
             TextHunk::new(format!("as")),
-            hunk!(String, "Provide an optional named identifier for the new stream.", false, ident_getter, ident_setter, ident_egetter)
+            hunk!(String, "Provide an optional named identifier for the new stream.", false, Keys::a, ident_getter, ident_setter, ident_egetter),
+            TextHunk::new(format!("(started: ")),
+            hunk!(Checkbox, "Should the stream start playing when this command is executed?", false, Keys::r, start_getter, start_setter, start_egetter),
+            TextHunk::new(format!(")"))
         ]
     }
     fn load(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) {
@@ -160,7 +174,9 @@ impl Command for LoadCommand {
             self.load(ctx, evl, uu);
         }
         if let Some(ref mut info) = self.streams.get_mut(0) {
-            info.ctl.start();
+            if self.start {
+                info.ctl.start();
+            }
         }
         else {
             panic!("woops");

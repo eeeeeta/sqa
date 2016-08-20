@@ -9,6 +9,7 @@ enum_primitive = "0.1.0"
 num = "0.1.31"
 portaudio = { git = "https://github.com/RustAudio/rust-portaudio" }
 rsndfile = { path = "../rsndfile/" }
+simplemad = "0.8.1"
 uuid = { git = "https://github.com/rust-lang-nursery/uuid", rev = "34ff260", features = ["use_std", "v4"] }
 crossbeam = "0.2.5"
 time = "0.1.35"

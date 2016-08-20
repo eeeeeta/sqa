@@ -3,6 +3,7 @@ use std::any::Any;
 use mopa;
 use mio::EventLoop;
 use uuid::Uuid;
+use gdk::enums::key::Key;
 
 pub type CommandUpdate = Box<Fn(&mut Command) -> bool + Send>;
 pub fn new_update<T, U>(cls: U) -> CommandUpdate where U: Fn(&mut T) -> bool + Send + 'static, T: Command {
@@ -68,7 +69,9 @@ pub enum HunkTypes {
     /// Generic string: `String`
     String(Option<String>),
     /// Immutable text: `String` (setter always returns error)
-    Label(String)
+    Label(String),
+    /// Checkbox: `bool`
+    Checkbox(bool)
 }
 impl HunkTypes {
     pub fn is_none(&self) -> bool {
@@ -78,6 +81,7 @@ impl HunkTypes {
             &HunkTypes::String(ref opt) => opt.is_none(),
             &HunkTypes::Label(..) => false,
             &HunkTypes::Volume(..) => false,
+            &HunkTypes::Checkbox(..) => false,
             &HunkTypes::Time(ref opt) => opt.is_none()
         }
     }
@@ -89,6 +93,7 @@ impl HunkTypes {
             &HunkTypes::Label(ref opt) => opt,
             &HunkTypes::Volume(ref opt) => opt,
             &HunkTypes::Time(ref opt) => opt,
+            &HunkTypes::Checkbox(ref opt) => opt,
         }
     }
     pub fn none_of(&self) -> HunkTypes {
@@ -98,7 +103,8 @@ impl HunkTypes {
             &HunkTypes::String(..) => HunkTypes::String(None),
             &HunkTypes::Label(..) => panic!("eta dun goofed"),
             &HunkTypes::Volume(..) => HunkTypes::Volume(0.0),
-            &HunkTypes::Time(..) => HunkTypes::Time(None)
+            &HunkTypes::Time(..) => HunkTypes::Time(None),
+            &HunkTypes::Checkbox(..) => HunkTypes::Checkbox(false),
         }
     }
     pub fn string_of(&self, st: Option<String>) -> HunkTypes {
@@ -114,7 +120,8 @@ pub struct HunkState {
     pub val: HunkTypes,
     pub required: bool,
     pub help: &'static str,
-    pub err: Option<String>
+    pub err: Option<String>,
+    pub accel: Option<Key>
 }
 /// Describes a hunk of a command line that controls a specific parameter.
 ///
@@ -149,7 +156,8 @@ impl Hunk for TextHunk {
             val: HunkTypes::Label(self.text.clone()),
             required: false,
             help: "eta is a lousy coder",
-            err: None
+            err: None,
+            accel: None
         }
     }
     fn set_val(&mut self, _: &mut Command, _: HunkTypes) {
@@ -173,7 +181,7 @@ impl Hunk for GenericHunk {
     }
 }
 macro_rules! hunk {
-    ($typ:ident, $hlp:expr, $reqd:expr, $getter:expr, $setter:expr, $egetter:expr) => {{
+    ($typ:ident, $hlp:expr, $reqd:expr, spec $accel:expr, $getter:expr, $setter:expr, $egetter:expr) => {{
         use state::Context;
         use command::{Command, HunkTypes, HunkState};
         let get_val = move |cmd: &Command, ctx: &Context| -> HunkState {
@@ -182,7 +190,8 @@ macro_rules! hunk {
                 val: HunkTypes::$typ($getter(cmd)),
                 required: $reqd,
                 help: $hlp,
-                err: $egetter(cmd, ctx)
+                err: $egetter(cmd, ctx),
+                accel: $accel
             }
         };
         let set_val = move |cmd: &mut Command, val: HunkTypes| {
@@ -197,5 +206,12 @@ macro_rules! hunk {
             get: Box::new(get_val),
             set: Box::new(set_val),
         })
+    }};
+    ($typ:ident, $hlp:expr, $reqd:expr, $accel:expr, $getter:expr, $setter:expr, $egetter:expr) => {{
+
+        hunk!($typ, $hlp, $reqd, spec Some($accel), $getter, $setter, $egetter)
+    }};
+    ($typ:ident, $hlp:expr, $reqd:expr, $getter:expr, $setter:expr, $egetter:expr) => {{
+        hunk!($typ, $hlp, $reqd, spec None, $getter, $setter, $egetter)
     }}
 }

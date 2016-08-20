@@ -71,7 +71,7 @@ impl CommandChooserController {
             let mut wdgt: Option<::gtk::Widget> = None;
             {
                 let selfish = ret.borrow();
-                for (i, &(_, key, _)) in selfish.get_ptr().iter().rev().enumerate() {
+                for (i, &(_, key, _)) in selfish.get_ptr().0.iter().rev().enumerate() {
                     if ek.get_keyval() == key {
                         wdgt = Some(selfish.grid.get_children()[i].clone());
                         break;
@@ -121,12 +121,15 @@ impl CommandChooserController {
         }
         CommandLine::update(cl, None);
     }
-    fn get_ptr(&self) -> &Vec<(&'static str, gkey::Key, GridNode)> {
+    fn get_ptr(&self) -> (&Vec<(&'static str, gkey::Key, GridNode)>, String) {
         let mut ptr = &self.top;
+        let mut st = "Home".to_string();
         if self.pos.len() > 0 {
             for i in &self.pos {
-                if let Some(&(_, _, GridNode::Grid(ref vec))) = ptr.get(*i) {
+                if let Some(&(ref disp, _, GridNode::Grid(ref vec))) = ptr.get(*i) {
                     ptr = vec;
+                    st.push_str(" → ");
+                    st.push_str(disp);
                 }
                 else {
                     panic!("Grid traversal failed");
@@ -137,7 +140,7 @@ impl CommandChooserController {
         else {
             self.back_btn.set_sensitive(false);
         }
-        ptr
+        (ptr, st)
     }
     pub fn set_mode(selfish: Rc<RefCell<Self>>, mode: UIMode) {
         {
@@ -147,10 +150,8 @@ impl CommandChooserController {
     }
     pub fn update(selfish_: Rc<RefCell<Self>>) {
         let selfish = selfish_.borrow();
-
-        selfish.status_lbl.set_markup(&format!("{}", selfish.mode));
-
-        let ptr = selfish.get_ptr();
+        let (ptr, st) = selfish.get_ptr();
+        selfish.status_lbl.set_markup(&st);
         for chld in selfish.grid.get_children() {
             chld.destroy();
         }

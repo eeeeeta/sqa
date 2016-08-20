@@ -22,6 +22,8 @@ impl EntryUIController {
             activate_handler: None
         };
         uic.pop.borrow().popover.set_relative_to(Some(&uic.ent));
+        uic.ent.set_has_frame(false);
+        uic.ent.set_width_chars(0);
         uic.ent.set_icon_from_icon_name(::gtk::EntryIconPosition::Primary, Some(icon));
         uic
     }
@@ -43,11 +45,20 @@ impl HunkUIController for EntryUIController {
         let entc = self.ent.clone();
 
         pop.borrow().bind_defaults(line.clone(), idx, ht.clone());
-        self.ent.connect_focus_in_event(clone!(pop; |_x, _y| {
+        self.ent.connect_focus_in_event(clone!(pop, entc; |_x, _y| {
+            entc.set_width_chars(-1);
+            entc.set_has_frame(true);
             pop.borrow().visible(true);
             Inhibit(false)
         }));
         self.ent.connect_focus_out_event(clone!(pop; |_x, _y| {
+            if entc.get_text_length() > 0 {
+                entc.set_width_chars(-1);
+            }
+            else {
+                entc.set_width_chars(0);
+            }
+            entc.set_has_frame(false);
             pop.borrow().visible(false);
             entc.activate();
             Inhibit(false)

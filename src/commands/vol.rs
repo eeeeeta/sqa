@@ -18,9 +18,7 @@ impl VolCommand {
     pub fn new() -> Self {
         VolCommand {
             ident: None,
-            /* note: whatever value is set here does not matter,
-               as the VolumeUIController::bind() function overwrites it */
-            vol: 1.0,
+            vol: 0.0,
             fade: None,
             runtime: None
         }
@@ -30,10 +28,10 @@ impl Command for VolCommand {
     fn name(&self) -> &'static str { "Set volume of" }
     fn desc(&self, ctx: &Context) -> String {
         if let Some(amt) = self.fade {
-            format!("Fade volume of <b>{}</b> to <b>{:02}</b>dB over <b>{}</b>ms", desc_uuid!(self.ident, ctx), self.vol, amt)
+            format!("Fade volume of <b>{}</b> to <b>{:.02}</b>dB over <b>{}</b>ms", desc_uuid!(self.ident, ctx), self.vol, amt)
         }
         else {
-            format!("Set volume of <b>{}</b> to <b>{:02}</b>dB", desc_uuid!(self.ident, ctx), self.vol)
+            format!("Set volume of <b>{}</b> to <b>{:.02}</b>dB", desc_uuid!(self.ident, ctx), self.vol)
         }
     }
     fn run_state(&self) -> Option<CommandState> {
@@ -49,7 +47,7 @@ impl Command for VolCommand {
             selfish.vol
         };
         let vol_setter = move |selfish: &mut Self, val: f32| {
-            selfish.vol = val;
+            selfish.vol = (100.0 * val).round() / 100.0;
         };
         let vol_egetter = move |selfish: &Self, _: &Context| -> Option<String> {
             if selfish.vol.is_nan() {
@@ -103,12 +101,12 @@ impl Command for VolCommand {
             None
         };
         vec![
-            hunk!(Identifier, "Provide the identifier of a stream.", true, ident_getter, ident_setter, (ident_egetter)),
+            hunk!(Identifier, "Provide the identifier of a stream.", true, Keys::t, ident_getter, ident_setter, (ident_egetter)),
             TextHunk::new(format!("<b>@</b>")),
-            hunk!(Volume, "Provide a target volume.", true, (vol_getter), (vol_setter), (vol_egetter)),
+            hunk!(Volume, "Provide a target volume.", true, Keys::at, (vol_getter), (vol_setter), (vol_egetter)),
             TextHunk::new(format!("dB")),
             TextHunk::new(format!("(<b>fade</b>")),
-            hunk!(Time, "Optionally provide a time (in milliseconds) to fade this change over.", false, (fade_getter), (fade_setter), (fade_egetter)),
+            hunk!(Time, "Optionally provide a time (in milliseconds) to fade this change over.", false, Keys::f, (fade_getter), (fade_setter), (fade_egetter)),
             TextHunk::new(format!("ms)"))
         ]
     }
