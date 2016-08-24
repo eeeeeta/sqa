@@ -37,20 +37,23 @@ impl HunkUIController for IdentUIController {
         self.entuic.ent.connect_activate(clone!(line; |ent| {
             if let Some(strn) = ent.get_text() {
                 if Uuid::parse_str(&strn).is_err() {
-                    let line = line.borrow();
-                    let mut ti = match line.completion.iter_children(None) {
-                        Some(v) => v,
-                        None => return
-                    };
-                    loop {
-                        if let Some(v) = line.completion.get_value(&ti, 0).get::<String>() {
-                            if v == strn {
-                                ent.set_text(&line.completion.get_value(&ti, 1).get::<String>().unwrap());
+                    // FIXME: replace with try_borrow()
+                    if let ::std::cell::BorrowState::Unused = line.borrow_state() {
+                        let line = line.borrow();
+                        let mut ti = match line.completion.iter_children(None) {
+                            Some(v) => v,
+                            None => return
+                        };
+                        loop {
+                            if let Some(v) = line.completion.get_value(&ti, 0).get::<String>() {
+                                if v == strn {
+                                    ent.set_text(&line.completion.get_value(&ti, 1).get::<String>().unwrap());
+                                    break;
+                                }
+                            }
+                            if !line.completion.iter_next(&mut ti) {
                                 break;
                             }
-                        }
-                        if !line.completion.iter_next(&mut ti) {
-                            break;
                         }
                     }
                 }

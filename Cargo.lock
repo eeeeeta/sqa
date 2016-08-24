@@ -14,9 +14,8 @@ dependencies = [
  "mopa 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "num 0.1.34 (registry+https://github.com/rust-lang/crates.io-index)",
  "portaudio 0.7.0 (git+https://github.com/RustAudio/rust-portaudio)",
- "rsndfile 0.1.0",
  "rustbox 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "simplemad 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "simplemad 0.8.1 (git+https://github.com/eeeeeta/simple-mad.rs?rev=a0eaa56)",
  "threadpool 1.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
  "uuid 0.2.0 (git+https://github.com/rust-lang-nursery/uuid?rev=34ff260)",
@@ -472,13 +471,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rsndfile"
-version = "0.1.0"
-dependencies = [
- "libc 0.2.15 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "rustbox"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -511,15 +503,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "simplemad"
 version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/eeeeeta/simple-mad.rs?rev=a0eaa56#a0eaa5676891b985f7928831e70d41f0138d60ad"
 dependencies = [
- "simplemad_sys 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "simplemad_sys 0.5.0 (git+https://github.com/eeeeeta/simple-mad.rs?rev=a0eaa56)",
 ]
 
 [[package]]
 name = "simplemad_sys"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/eeeeeta/simple-mad.rs?rev=a0eaa56#a0eaa5676891b985f7928831e70d41f0138d60ad"
 dependencies = [
  "gcc 0.3.33 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",

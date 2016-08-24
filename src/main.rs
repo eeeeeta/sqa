@@ -1,5 +1,4 @@
 #![feature(borrow_state, question_mark, iter_arith, dotdot_in_tuple_patterns)]
-extern crate rsndfile;
 extern crate portaudio;
 extern crate chrono;
 extern crate time;
@@ -14,6 +13,7 @@ extern crate glib;
 #[macro_use]
 extern crate mopa;
 extern crate threadpool;
+extern crate simplemad;
 mod streamv2;
 mod mixer;
 #[macro_use]

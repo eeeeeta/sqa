@@ -167,6 +167,7 @@ impl UIContext {
                             bgc = format!("lemonchiffon");
                         },
                         CommandState::Running(cd) => {
+                            let cd = ::chrono::Duration::from_std(cd).unwrap();
                             icon = format!("media-seek-forward");
                             bgc = format!("powderblue");
                             dur = format!("{:02}:{:02}:{:02}",

@@ -1,7 +1,7 @@
 use super::prelude::*;
-use rsndfile::SndFile;
 use streamv2::{FileStream, FileStreamX, LiveParameters};
-use chrono::Duration;
+use std::time::Duration;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
 pub struct StreamInfo {
@@ -51,10 +51,10 @@ impl Command for LoadCommand {
     }
     fn run_state(&self) -> Option<CommandState> {
         if let Some(ref info) = self.streams.get(0) {
-            Some(if info.lp.pos == 0 && info.lp.active == false {
+            Some(if info.lp.pos == Duration::new(0, 0) && info.lp.active == false {
                 CommandState::Loaded
             } else {
-                CommandState::Running(Duration::milliseconds((info.lp.pos / 44) as i64))
+                CommandState::Running(info.lp.pos)
             })
         }
         else {
@@ -83,11 +83,11 @@ impl Command for LoadCommand {
         };
         let file_egetter = move |selfish: &Self, _: &Context| -> Option<String> {
             if let Some(ref val) = selfish.file {
-                let file = SndFile::open(val);
-                if let Err(e) = file {
-                    Some(format!("Open failed: {}", e.expl))
+                let info = FileStream::info(Path::new(val));
+                if let Err(e) = info {
+                    Some(format!("{}", e))
                 }
-                else if file.as_ref().unwrap().info.samplerate != 44_100 {
+                else if info.unwrap().sample_rate != 44_100 {
                     Some(format!("SQA only supports files with a samplerate of 44.1kHz."))
                 }
                 else {
@@ -148,10 +148,11 @@ impl Command for LoadCommand {
     fn load(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) {
         let file = self.file.clone().unwrap();
         let ident = self.ident.clone();
-
-        let streams = FileStream::new(SndFile::open(&file).unwrap(),
+        let mut path = PathBuf::new();
+        path.push(Path::new(&file));
+        let streams = FileStream::new(path,
                                       evl.channel(),
-                                      uu);
+                                      uu).unwrap();
         for StreamInfo { ctl, .. } in ::std::mem::replace(&mut self.streams, Vec::new()) {
             ctx.mstr.locate_source(ctl.uuid()).unwrap();
         }
@@ -162,7 +163,7 @@ impl Command for LoadCommand {
             let uu = fsx.uuid();
             ctx.mstr.add_source(Box::new(fs));
             self.streams.push(StreamInfo {
-                lp: LiveParameters::new(0, 0),
+                lp: LiveParameters::new(Duration::new(0, 0), Duration::new(0, 0)),
                 ctl: fsx
             });
             let dest = ctx.mstr.ichans[i].1;
@@ -175,7 +176,7 @@ impl Command for LoadCommand {
         }
         if let Some(ref mut info) = self.streams.get_mut(0) {
             if self.start {
-                info.ctl.start();
+                info.ctl.unpause();
             }
         }
         else {

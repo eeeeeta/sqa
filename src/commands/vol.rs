@@ -2,7 +2,7 @@ use super::prelude::*;
 use super::LoadCommand;
 use streamv2::db_lin;
 use backend::{BackendTimeout, BackendSender};
-use chrono::Duration;
+use std::time::Duration;
 use state::Message;
 
 const FADER_INTERVAL: u64 = 100;
@@ -115,7 +115,7 @@ impl Command for VolCommand {
         let mut tgt = ctx.commands.get_mut(&ident).unwrap().downcast_mut::<LoadCommand>().unwrap();
         if let Some(fade_secs) = self.fade {
             LinearFader::register(evl, ident, fade_secs, target, auuid);
-            self.runtime = Some(Duration::seconds(0));
+            self.runtime = Some(Duration::new(0, 0));
             Ok(false)
         }
         else {
@@ -164,7 +164,7 @@ impl BackendTimeout for LinearFader {
                     si.ctl.set_vol(lp.vol - (fade_left / units_left as f32));
                 }
                 self.sender.send(Message::Update(self.auuid, new_update(move |cmd: &mut VolCommand| {
-                    cmd.runtime = Some(Duration::milliseconds(pos as i64));
+                    cmd.runtime = Some(Duration::from_millis(pos));
                     false
                 }))).unwrap();
                 Some(FADER_INTERVAL)
