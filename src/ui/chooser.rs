@@ -8,7 +8,7 @@ use std::ops::Rem;
 use state::Message;
 use uuid::Uuid;
 use state::ChainType;
-use super::line::CommandLine;
+use super::line::{CommandLine, CommandLineFSM};
 use super::{UISender, UIMode};
 
 pub struct CommandChooserController {
@@ -113,10 +113,13 @@ impl CommandChooserController {
             let mut cl = cl.borrow_mut();
             let selfish = selfish_.borrow();
             if !cl.ready { return; }
-            let cd = cl.cd.take().unwrap();
-            match selfish.mode {
-                UIMode::Live(_) => cl.tx.send(Message::Execute(cd.uuid)).unwrap(),
-                UIMode::Blind(ref ct) => cl.tx.send(Message::Attach(cd.uuid, ct.clone())).unwrap()
+            if let CommandLineFSM::Editing(cd, creation) = ::std::mem::replace(&mut cl.state, CommandLineFSM::Idle) {
+                if creation {
+                    match selfish.mode {
+                        UIMode::Live(_) => cl.tx.send(Message::Execute(cd.uuid)).unwrap(),
+                        UIMode::Blind(ref ct) => cl.tx.send(Message::Attach(cd.uuid, ct.clone())).unwrap()
+                    }
+                }
             }
         }
         CommandLine::update(cl, None);
@@ -164,17 +167,7 @@ impl CommandChooserController {
                     let ref cl = selfish.cl;
                     btn.connect_clicked(clone!(selfish_, cl; |_s| {
                         selfish_.borrow().pop.hide();
-                        {
-                            let mut cl = cl.borrow_mut();
-                            if let Some(ref desc) = cl.cd {
-                                cl.tx.send(Message::Delete(desc.uuid)).unwrap();
-                            }
-                            let uu = Uuid::new_v4();
-                            cl.tx.send(Message::NewCmd(uu, spawner)).unwrap();
-                            cl.uuid = Some(uu);
-
-                        }
-                        CommandLine::update(cl.clone(), None);
+                        CommandLine::new_command(cl.clone(), spawner);
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode-choice");
                     lbl.get_style_context().unwrap().add_class("gridnode");
@@ -207,18 +200,11 @@ impl CommandChooserController {
                 &GridNode::Clear => {
                     let ref cl = selfish.cl;
                     btn.connect_clicked(clone!(selfish_, cl; |_s| {
-                        {
-                            let mut cl = cl.borrow_mut();
-                            if let Some(ref cd) = cl.cd {
-                                cl.tx.send(Message::Delete(cd.uuid)).unwrap();
-                            }
-                            cl.cd = None;
-                        }
-                        CommandLine::update(cl.clone(), None);
+                        CommandLine::reset(cl.clone());
                         selfish_.borrow().pop.hide();
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode");
-                    if cl.borrow().cd.is_some() {
+                    if let CommandLineFSM::Editing(..) = cl.borrow().state {
                         lbl.get_style_context().unwrap().add_class("gridnode-clear");
                         btn.set_sensitive(true);
                     }
@@ -272,16 +258,21 @@ impl CommandChooserController {
                         selfish_.borrow().pop.hide();
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode");
-                    if cl.borrow().ready {
-                        btn.set_sensitive(true);
-                        lbl.get_style_context().unwrap().add_class("gridnode-execute");
-                    }
-                    else {
-                        btn.set_sensitive(false);
-                    }
                     match selfish.mode {
                         UIMode::Live(_) => lbl.set_markup(&format!("Execute <b>↵</b>")),
                         UIMode::Blind(ref ct) => lbl.set_markup(&format!("Attach to {} <b>↵</b>", ct))
+                    }
+                    if cl.borrow().ready {
+                        btn.set_sensitive(true);
+                        lbl.get_style_context().unwrap().add_class("gridnode-execute");
+                        if let CommandLineFSM::Editing(_, creation) = cl.borrow().state {
+                            if !creation {
+                                lbl.set_markup(&format!("Done <b>↵</b>"));
+                            }
+                        }
+                    }
+                    else {
+                        btn.set_sensitive(false);
                     }
                 }
             }

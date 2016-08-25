@@ -1,7 +1,10 @@
-use command::{Hunk, HunkTypes, HunkState};
+use command::{HunkTypes, HunkState};
+use commands::CommandSpawner;
+use ui::UIMode;
 use state::{CommandDescriptor, Message};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::mem;
 use gtk::prelude::*;
 use gtk::{Label, Image, Builder, ListStore};
 use gtk::Box as GtkBox;
@@ -20,16 +23,21 @@ pub struct HunkUI {
     state: HunkFSM
 }
 
+#[derive(Clone)]
+pub enum CommandLineFSM {
+    Idle,
+    AwaitingCreation(Uuid),
+    Editing(CommandDescriptor, bool)
+}
 pub struct CommandLine {
-    pub cd: Option<CommandDescriptor>,
-    pub uuid: Option<Uuid>,
+    pub state: CommandLineFSM,
     pub tx: BackendSender,
     pub hunks: Vec<HunkUI>,
     pub ready: bool,
     pub line: GtkBox,
     pub h_image: Image,
     pub h_label: Label,
-    pub completion: ListStore
+    pub completion: ListStore,
 }
 impl HunkUI {
     pub fn from_state(hs: HunkState) -> Self {
@@ -73,8 +81,7 @@ impl HunkUI {
 impl CommandLine {
     pub fn new(tx: BackendSender, ts: ListStore, b: &Builder) -> Rc<RefCell<Self>> {
         let line = CommandLine {
-            cd: None,
-            uuid: None,
+            state: CommandLineFSM::Idle,
             completion: ts,
             tx: tx,
             hunks: Vec::new(),
@@ -87,24 +94,25 @@ impl CommandLine {
         Self::update(line.clone(), None);
         line
     }
-    pub fn build(selfish2: Rc<RefCell<Self>>, cd: CommandDescriptor) {
+    fn build(selfish2: Rc<RefCell<Self>>, cd: CommandDescriptor, creation: bool) {
         {
             let mut selfish = selfish2.borrow_mut();
             selfish.clear();
-            selfish.uuid = None;
-            selfish.cd = Some(cd);
+
             let name_lbl = Label::new(None);
-            name_lbl.set_markup(&format!("<span weight=\"bold\" fgcolor=\"#666666\">{}</span>", selfish.cd.as_ref().unwrap().name));
+            name_lbl.set_markup(&format!("<span weight=\"bold\" fgcolor=\"#666666\">{}</span>", cd.name));
             selfish.line.pack_start(&name_lbl, false, false, 3);
             let mut hunks = Vec::new();
             let compl = selfish.completion.clone();
-            for (i, hunk) in selfish.cd.as_ref().unwrap().hunks.iter().enumerate() {
+            for (i, hunk) in cd.hunks.iter().enumerate() {
                 let mut hui = HunkUI::from_state(hunk.clone());
                 hui.ctl.pack(&selfish.line);
                 hui.ctl.bind(selfish2.clone(), i, hunk.val.clone());
                 hui.ctl.bind_completions(compl.clone());
                 hunks.push(hui);
             }
+
+            selfish.state = CommandLineFSM::Editing(cd, creation);
             selfish.line.show_all();
             if let Some(wdgt) = hunks.get(0) {
                 wdgt.ctl.focus();
@@ -116,18 +124,49 @@ impl CommandLine {
     pub fn set_val(selfish: Rc<RefCell<Self>>, idx: usize, val: HunkTypes) {
         // FIXME: this check is required because some hunks' event handlers may fire on destruction.
         if let ::std::cell::BorrowState::Unused = selfish.borrow_state() {
-            {
-                let mut selfish = selfish.borrow_mut();
-                selfish.tx.send(Message::SetHunk(selfish.cd.as_ref().unwrap().uuid, idx, val));
+            let mut selfish = selfish.borrow_mut();
+            if let CommandLineFSM::Editing(ref cd, ..) = selfish.state {
+                selfish.tx.send(Message::SetHunk(cd.uuid, idx, val));
                 selfish.h_image.set_from_icon_name("dialog-warning", 1);
                 selfish.h_label.set_text("Waiting for backend...");
             }
         }
     }
-    pub fn update(selfish: Rc<RefCell<Self>>, cd: Option<CommandDescriptor>) {
-        let mut selfish = selfish.borrow_mut();
-        if selfish.cd.is_none() {
-            if selfish.uuid.is_some() {
+    pub fn new_command(selfish: Rc<RefCell<Self>>, spawner: CommandSpawner) {
+        CommandLine::reset(selfish.clone());
+        {
+            let mut selfish = selfish.borrow_mut();
+            let uu = Uuid::new_v4();
+            selfish.tx.send(Message::NewCmd(uu, spawner)).unwrap();
+            selfish.state = CommandLineFSM::AwaitingCreation(uu);
+        }
+        CommandLine::update(selfish, None);
+    }
+    pub fn edit_command(selfish: Rc<RefCell<Self>>, cd: CommandDescriptor) {
+        CommandLine::reset(selfish.clone());
+        CommandLine::build(selfish, cd, false);
+    }
+    pub fn reset(selfish: Rc<RefCell<Self>>) {
+        {
+            let mut selfish = selfish.borrow_mut();
+            match selfish.state {
+                CommandLineFSM::Editing(ref cd, creation) => {
+                    if creation {
+                        selfish.tx.send(Message::Delete(cd.uuid)).unwrap();
+                    }
+                },
+                _ => {}
+            }
+            selfish.state = CommandLineFSM::Idle;
+        }
+        CommandLine::update(selfish, None);
+    }
+
+    pub fn update(selfish: Rc<RefCell<Self>>, input: Option<CommandDescriptor>) {
+        let state = { selfish.borrow().state.clone() };
+        if let CommandLineFSM::AwaitingCreation(uu) = state {
+            {
+                let mut selfish = selfish.borrow_mut();
                 selfish.h_image.set_from_icon_name("dialog-warning", 1);
                 selfish.h_label.set_text("Waiting for backend...");
                 selfish.clear();
@@ -136,40 +175,50 @@ impl CommandLine {
                 selfish.line.pack_start(&label, false, false, 0);
                 selfish.line.show_all();
             }
-            else {
-                selfish.h_image.set_from_icon_name("dialog-question", 1);
-                selfish.h_label.set_text("Command line idle.");
-                selfish.clear();
-                let label = Label::new(None);
-                label.set_markup("<span fgcolor=\"#888888\"><i>Select a command with Ctrl+Enter</i></span>");
-                selfish.line.pack_start(&label, false, false, 0);
-                selfish.line.show_all();
+            if let Some(newdesc) = input {
+                assert!(newdesc.uuid == uu);
+                CommandLine::build(selfish, newdesc, true);
             }
             return;
         }
-        assert!(selfish.hunks.len() > 0);
-        if let Some(c) = cd {
-            selfish.cd = Some(c);
+        else if let CommandLineFSM::Idle = state {
+            let mut selfish = selfish.borrow_mut();
+            selfish.h_image.set_from_icon_name("dialog-question", 1);
+            selfish.h_label.set_text("Command line idle.");
+            selfish.clear();
+            let label = Label::new(None);
+            label.set_markup("<span fgcolor=\"#888888\"><i>Select a command with Ctrl+Enter</i></span>");
+            selfish.line.pack_start(&label, false, false, 0);
+            selfish.line.show_all();
+            return;
         }
-        let mut erred = 0;
-        let mut cd = selfish.cd.clone().unwrap().hunks.into_iter();
-        for (i, hunk) in selfish.hunks.iter_mut().enumerate() {
-            hunk.update(cd.next().unwrap());
-            match hunk.state {
-                HunkFSM::Err => erred += 1,
-                HunkFSM::UIErr => erred += 1,
-                _ => {}
+        let mut selfish = selfish.borrow_mut();
+        if let CommandLineFSM::Editing(mut cd, _) = selfish.state.clone() {
+            assert!(selfish.hunks.len() > 0);
+            if let Some(c) = input {
+                cd = c;
             }
-        }
-        if erred > 0 {
-            selfish.ready = false;
-            selfish.h_image.set_from_icon_name("dialog-error", 1);
-            selfish.h_label.set_markup(&format!("{} error(s) <span fgcolor=\"#888888\">- Ctrl+Enter to change or clear command</span>", erred));
-        }
-        else {
-            selfish.ready = true;
-            selfish.h_image.set_from_icon_name("dialog-ok", 1);
-            selfish.h_label.set_markup("Ready <span fgcolor=\"#888888\">- Ctrl+Enter twice to execute</span>");
+            let mut erred = 0;
+            let mut hunk_states = cd.hunks.into_iter();
+            for (i, hunk) in selfish.hunks.iter_mut().enumerate() {
+                hunk.update(hunk_states.next().unwrap());
+                match hunk.state {
+                    HunkFSM::Err => erred += 1,
+                    HunkFSM::UIErr => erred += 1,
+                    _ => {}
+                }
+            }
+            if erred > 0 {
+                selfish.ready = false;
+                selfish.h_image.set_from_icon_name("dialog-error", 1);
+                selfish.h_label.set_markup(&format!("{} error(s) <span fgcolor=\"#888888\">- Ctrl+Enter to change or clear command</span>", erred));
+            }
+            else {
+                selfish.ready = true;
+                selfish.h_image.set_from_icon_name("dialog-ok", 1);
+                selfish.h_label.set_markup("Ready <span fgcolor=\"#888888\">- Ctrl+Enter twice to execute</span>");
+
+            }
         }
     }
     fn clear(&mut self) {

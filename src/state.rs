@@ -137,6 +137,8 @@ pub enum Message {
     QRunnerCompleted(Uuid),
     /// UI objects -> UI: Change UI mode to the following
     UIChangeMode(UIMode),
+    /// UI objects -> UI: Start editing command on the command line.
+    UIBeginEditing(Uuid)
 }
 #[derive(Clone, Debug)]
 pub enum CommandState {

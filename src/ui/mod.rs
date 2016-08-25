@@ -19,7 +19,7 @@ mod hunks;
 mod list;
 
 use self::chooser::CommandChooserController;
-use self::line::CommandLine;
+use self::line::{CommandLine, CommandLineFSM};
 use self::list::ListController;
 
 pub static INTERFACE_SRC: &'static str = include_str!("interface.glade");
@@ -85,7 +85,7 @@ pub struct UIContext {
     pub chooser: Rc<RefCell<CommandChooserController>>,
     pub line: Rc<RefCell<CommandLine>>,
     pub completions: ListStore,
-    pub list: ListController,
+    pub list: Rc<RefCell<ListController>>,
     pub rx: Receiver<Message>,
     pub uitx: Sender<Message>,
     pub mode: UIMode
@@ -102,7 +102,7 @@ impl UIContext {
             chooser: ccc,
             line: line,
             rx: recvr,
-            list: ListController::new(&builder),
+            list: ListController::new(UISender::new(uisender.clone(), tn.clone()), &builder),
             completions: compl,
             uitx: uisender,
             mode: UIMode::Live(ChainType::Unattached)
@@ -132,17 +132,12 @@ impl UIContext {
 
         uic
     }
-    pub fn cstate(&self, uu: Uuid) -> u16 {
-        if let Some(ref cd) = self.line.borrow().cd {
-            if cd.uuid == uu {
-                1
-            } else { 0 }
+    fn update_cline(&self, uu: Uuid) -> bool {
+        match self.line.borrow().state {
+            CommandLineFSM::AwaitingCreation(u2) => { u2 == uu },
+            CommandLineFSM::Editing(ref u2, ..) => { u2.uuid == uu },
+            _ => false
         }
-        else if let Some(uu2) = self.line.borrow().uuid {
-            if uu == uu2 {
-                2
-            } else { 0 }
-        } else { 0 }
     }
     pub fn update(&mut self) {
         self.completions.clear();
@@ -214,41 +209,36 @@ impl UIContext {
         match msg {
             Message::CmdDesc(uu, desc) => {
                 selfish.commands.insert(uu, desc.clone());
-                match selfish.cstate(uu) {
-                    1 => {
-                        CommandLine::update(selfish.line.clone(), Some(desc.clone()));
-                        CommandChooserController::update(selfish.chooser.clone());
-                    },
-                    2 => {
-                        CommandLine::build(selfish.line.clone(), desc.clone());
-                        CommandChooserController::update(selfish.chooser.clone());
-                    },
-                    _ => {}
+                if selfish.update_cline(uu) {
+                    CommandLine::update(selfish.line.clone(), Some(desc.clone()));
+                    CommandChooserController::update(selfish.chooser.clone());
                 }
-                selfish.list.update_desc(uu, desc);
+                ListController::update_desc(selfish.list.clone(), uu, desc);
                 selfish.update();
+            },
+            Message::UIBeginEditing(uu) => {
+                if let Some(desc) = selfish.commands.get(&uu) {
+                    CommandLine::edit_command(selfish.line.clone(), desc.clone());
+                }
             },
             Message::Deleted(uu) => {
                 selfish.commands.remove(&uu);
-                match selfish.cstate(uu) {
-                    1 | 2 => {
-                        selfish.line.borrow_mut().cd = None;
-                        CommandLine::update(selfish.line.clone(), None);
-                        CommandChooserController::update(selfish.chooser.clone());
-                    },
-                    _ => {}
+                if selfish.update_cline(uu) {
+                    selfish.line.borrow_mut().state = CommandLineFSM::Idle;
+                    CommandLine::update(selfish.line.clone(), None);
+                    CommandChooserController::update(selfish.chooser.clone());
                 }
-                selfish.list.delete(uu);
+                ListController::delete(selfish.list.clone(), uu);
                 selfish.update();
             },
             Message::ChainDesc(ct, chn) => {
                 selfish.chains.insert(ct.clone(), chn.clone());
-                selfish.list.update_chain(ct, chn);
+                ListController::update_chain(selfish.list.clone(), ct, chn);
                 selfish.update();
             },
             Message::ChainDeleted(ct) => {
                 selfish.chains.remove(&ct);
-                selfish.list.update_chain(ct, Chain { commands: vec![] });
+                ListController::update_chain(selfish.list.clone(), ct, Chain { commands: vec![] });
                 selfish.update();
             },
             Message::Identifiers(id) => {
