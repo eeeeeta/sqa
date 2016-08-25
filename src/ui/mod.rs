@@ -16,9 +16,11 @@ macro_rules! clone {
 mod line;
 mod chooser;
 mod hunks;
+mod list;
 
-pub use self::chooser::CommandChooserController;
-pub use self::line::CommandLine;
+use self::chooser::CommandChooserController;
+use self::line::CommandLine;
+use self::list::ListController;
 
 pub static INTERFACE_SRC: &'static str = include_str!("interface.glade");
 
@@ -82,8 +84,8 @@ pub struct UIContext {
     pub chains: BTreeMap<ChainType, Chain>,
     pub chooser: Rc<RefCell<CommandChooserController>>,
     pub line: Rc<RefCell<CommandLine>>,
-    pub store: TreeStore,
     pub completions: ListStore,
+    pub list: ListController,
     pub rx: Receiver<Message>,
     pub uitx: Sender<Message>,
     pub mode: UIMode
@@ -100,8 +102,8 @@ impl UIContext {
             chooser: ccc,
             line: line,
             rx: recvr,
+            list: ListController::new(&builder),
             completions: compl,
-            store: builder.get_object("command-tree").unwrap(),
             uitx: uisender,
             mode: UIMode::Live(ChainType::Unattached)
         }));
@@ -143,7 +145,6 @@ impl UIContext {
         } else { 0 }
     }
     pub fn update(&mut self) {
-        self.store.clear();
         self.completions.clear();
         for (ref ct, ref chn) in &self.chains {
             for (i, ref uu) in chn.commands.iter().enumerate() {
@@ -177,19 +178,6 @@ impl UIContext {
                         },
                         _ => {}
                     }
-                    self.store.set(&self.store.append(None), &vec![
-                        0, // icon
-                        1, // identifier (looking glass column)
-                        2, // description
-                        3, // duration
-                        4, // background colour
-                    ], &vec![
-                        &icon as &ToValue,
-                        &ident as &ToValue,
-                        &desc as &ToValue,
-                        &dur as &ToValue,
-                        &bgc as &ToValue,
-                    ].deref());
                     self.completions.set(&self.completions.append(), &vec![
                         0, // identifier
                         1, // uuid
@@ -228,40 +216,39 @@ impl UIContext {
                 selfish.commands.insert(uu, desc.clone());
                 match selfish.cstate(uu) {
                     1 => {
-                        CommandLine::update(selfish.line.clone(), Some(desc));
+                        CommandLine::update(selfish.line.clone(), Some(desc.clone()));
                         CommandChooserController::update(selfish.chooser.clone());
                     },
                     2 => {
-                        CommandLine::build(selfish.line.clone(), desc);
+                        CommandLine::build(selfish.line.clone(), desc.clone());
                         CommandChooserController::update(selfish.chooser.clone());
                     },
                     _ => {}
                 }
+                selfish.list.update_desc(uu, desc);
                 selfish.update();
             },
             Message::Deleted(uu) => {
                 selfish.commands.remove(&uu);
                 match selfish.cstate(uu) {
-                    1 => {
+                    1 | 2 => {
                         selfish.line.borrow_mut().cd = None;
-                        CommandLine::update(selfish.line.clone(), None);
-                        CommandChooserController::update(selfish.chooser.clone());
-                    },
-                    2 => {
-                        selfish.line.borrow_mut().uuid = None;
                         CommandLine::update(selfish.line.clone(), None);
                         CommandChooserController::update(selfish.chooser.clone());
                     },
                     _ => {}
                 }
+                selfish.list.delete(uu);
                 selfish.update();
             },
             Message::ChainDesc(ct, chn) => {
-                selfish.chains.insert(ct, chn);
+                selfish.chains.insert(ct.clone(), chn.clone());
+                selfish.list.update_chain(ct, chn);
                 selfish.update();
             },
             Message::ChainDeleted(ct) => {
                 selfish.chains.remove(&ct);
+                selfish.list.update_chain(ct, Chain { commands: vec![] });
                 selfish.update();
             },
             Message::Identifiers(id) => {

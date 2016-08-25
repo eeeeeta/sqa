@@ -24,7 +24,7 @@ impl<'a> Handler for Context<'a> {
         match msg {
             Message::NewCmd(uu, spawner) => {
                 assert!(self.commands.insert(uu, spawner.spawn()).is_none());
-                update = Some(uu);
+                self.update_cmd(uu);
                 self.attach_chn(Some(ChainType::Unattached), uu);
 
                 if let CommandState::Ready = self.desc_cmd(uu).state {

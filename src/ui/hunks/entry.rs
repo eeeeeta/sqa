@@ -45,6 +45,11 @@ impl HunkUIController for EntryUIController {
         let entc = self.ent.clone();
 
         pop.borrow().bind_defaults(line.clone(), idx, ht.clone());
+        self.ent.connect_icon_press(move |ent, pos, _| {
+            if let ::gtk::EntryIconPosition::Primary = pos {
+                ent.grab_focus();
+            }
+        });
         self.ent.connect_focus_in_event(clone!(pop, entc; |_x, _y| {
             entc.set_width_chars(-1);
             entc.set_has_frame(true);

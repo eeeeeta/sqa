@@ -59,6 +59,8 @@
       <column type="gchararray"/>
       <!-- column-name uuid -->
       <column type="gchararray"/>
+      <!-- column-name chain-uuid -->
+      <column type="gchararray"/>
     </columns>
   </object>
   <object class="GtkImage" id="image1">
@@ -204,68 +206,74 @@
             <property name="vexpand">True</property>
             <property name="transition_type">over-up-down</property>
             <child>
-              <object class="GtkTreeView" id="command-tree-view">
+              <object class="GtkScrolledWindow">
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
-                <property name="model">command-tree</property>
-                <property name="show_expanders">False</property>
-                <property name="enable_grid_lines">horizontal</property>
-                <child internal-child="selection">
-                  <object class="GtkTreeSelection"/>
-                </child>
                 <child>
-                  <object class="GtkTreeViewColumn" id="column-state">
-                    <child>
-                      <object class="GtkCellRendererPixbuf" id="renderer-state">
-                        <property name="stock_size">1</property>
-                      </object>
-                      <attributes>
-                        <attribute name="cell-background">4</attribute>
-                        <attribute name="icon-name">0</attribute>
-                      </attributes>
+                  <object class="GtkTreeView" id="command-tree-view">
+                    <property name="visible">True</property>
+                    <property name="can_focus">True</property>
+                    <property name="model">command-tree</property>
+                    <property name="show_expanders">False</property>
+                    <property name="enable_grid_lines">horizontal</property>
+                    <child internal-child="selection">
+                      <object class="GtkTreeSelection"/>
                     </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkTreeViewColumn" id="column-cue">
-                    <property name="widget">image2</property>
-                    <property name="alignment">0.5</property>
                     <child>
-                      <object class="GtkCellRendererText" id="renderer-cue">
-                        <property name="alignment">center</property>
+                      <object class="GtkTreeViewColumn" id="column-state">
+                        <child>
+                          <object class="GtkCellRendererPixbuf" id="renderer-state">
+                            <property name="stock_size">1</property>
+                          </object>
+                          <attributes>
+                            <attribute name="cell-background">4</attribute>
+                            <attribute name="icon-name">0</attribute>
+                          </attributes>
+                        </child>
                       </object>
-                      <attributes>
-                        <attribute name="cell-background">4</attribute>
-                        <attribute name="markup">1</attribute>
-                      </attributes>
                     </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkTreeViewColumn" id="column-desc">
-                    <property name="title" translatable="yes">Description</property>
                     <child>
-                      <object class="GtkCellRendererText" id="renderer-desc"/>
-                      <attributes>
-                        <attribute name="cell-background">4</attribute>
-                        <attribute name="markup">2</attribute>
-                      </attributes>
-                    </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkTreeViewColumn" id="column-duration">
-                    <property name="title" translatable="yes">Dur</property>
-                    <property name="alignment">1</property>
-                    <child>
-                      <object class="GtkCellRendererText" id="renderer-duration">
-                        <property name="xalign">1</property>
-                        <property name="alignment">right</property>
+                      <object class="GtkTreeViewColumn" id="column-cue">
+                        <property name="widget">image2</property>
+                        <property name="alignment">0.5</property>
+                        <child>
+                          <object class="GtkCellRendererText" id="renderer-cue">
+                            <property name="alignment">center</property>
+                          </object>
+                          <attributes>
+                            <attribute name="cell-background">4</attribute>
+                            <attribute name="markup">1</attribute>
+                          </attributes>
+                        </child>
                       </object>
-                      <attributes>
-                        <attribute name="cell-background">4</attribute>
-                        <attribute name="markup">3</attribute>
-                      </attributes>
+                    </child>
+                    <child>
+                      <object class="GtkTreeViewColumn" id="column-desc">
+                        <property name="title" translatable="yes">Description</property>
+                        <child>
+                          <object class="GtkCellRendererText" id="renderer-desc"/>
+                          <attributes>
+                            <attribute name="cell-background">4</attribute>
+                            <attribute name="markup">2</attribute>
+                          </attributes>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkTreeViewColumn" id="column-duration">
+                        <property name="title" translatable="yes">Dur</property>
+                        <property name="alignment">1</property>
+                        <child>
+                          <object class="GtkCellRendererText" id="renderer-duration">
+                            <property name="xalign">1</property>
+                            <property name="alignment">right</property>
+                          </object>
+                          <attributes>
+                            <attribute name="cell-background">4</attribute>
+                            <attribute name="markup">3</attribute>
+                          </attributes>
+                        </child>
+                      </object>
                     </child>
                   </object>
                 </child>
