@@ -1,21 +1,16 @@
 //! Program state management.
 
-use streamv2::{FileStream, FileStreamX};
-use mixer::{QChannel, Magister, Sink, Source, DeviceSink};
+use mixer::Magister;
 use command::{Command, CommandUpdate, HunkState, HunkTypes};
 use std::collections::{HashMap, BTreeMap};
 use uuid::Uuid;
-use std::any::Any;
-use std::fmt;
 use std::ops::Deref;
 use gtk::Adjustment;
 use chrono::{UTC, DateTime};
 use std::time::Duration;
-use std::rc::Rc;
-use std::cell::RefCell;
-use threadpool::ThreadPool;
-use cues::QRunnerX;
 use ui::UIMode;
+use mio::EventLoop;
+pub use cues::{ChainType, Chain}; // FIXME: hacky
 
 #[derive(Clone)]
 /// An object for cross-thread notification.
@@ -47,63 +42,6 @@ impl ThreadNotifier {
 /// so we should be fine.
 unsafe impl Send for ThreadNotifier {}
 
-#[derive(Clone)]
-/// The type of an object stored in the database.
-pub enum ObjectType {
-    /// A channel of a FileStream created from a given file path.
-    FileStream(String, usize),
-    /// A numbered QChannel.
-    QChannel(usize),
-    /// A numbered device output channel.
-    DeviceOut(usize)
-}
-impl ObjectType {
-    fn is_same_type(&self, rhs: &Self) -> bool {
-        match rhs {
-            &ObjectType::FileStream(_, _) => {
-                if let &ObjectType::FileStream(_, _) = self {
-                    true
-                }
-                else {
-                    false
-                }
-            },
-            &ObjectType::QChannel(_) => {
-                if let &ObjectType::QChannel(_) = self {
-                    true
-                }
-                else {
-                    false
-                }
-            },
-            &ObjectType::DeviceOut(_) => {
-                if let &ObjectType::DeviceOut(_) = self {
-                    true
-                }
-                else {
-                    false
-                }
-            }
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
-pub enum ChainType {
-    Unattached,
-    Q(String)
-}
-impl fmt::Display for ChainType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &ChainType::Unattached => write!(f, "X"),
-            &ChainType::Q(ref st) => write!(f, "Q{}.", st),
-        }
-    }
-}
-#[derive(Clone)]
-pub struct Chain {
-    pub commands: Vec<Uuid>
-}
 pub enum Message {
     /// C -> S: Create a new command with given UUID from spawner.
     NewCmd(Uuid, ::commands::CommandSpawner),
@@ -117,10 +55,16 @@ pub enum Message {
     Attach(Uuid, ChainType),
     /// C -> S: Start running chain.
     Go(ChainType),
+    /// C -> S: Standby on given chain - this removes all other standby states
+    Standby(Option<ChainType>),
+    /// C -> S: Set fallthrough of command to given state.
+    SetFallthru(Uuid, bool),
     /// S -> C: Update your descriptor of command with given UUID.
     CmdDesc(Uuid, CommandDescriptor),
     /// S -> C: Update given chain.
     ChainDesc(ChainType, Chain),
+    /// S -> C: Update fallthrough field for given chain.
+    ChainFallthru(ChainType, HashMap<Uuid, bool>),
     /// S -> C: Delete command.
     Deleted(Uuid),
     /// S -> C: Delete given chain.
@@ -129,12 +73,6 @@ pub enum Message {
     Identifiers(HashMap<String, Uuid>),
     /// Other Backend Threads -> S: Apply closure to command with given UUID & propagate changes.
     Update(Uuid, CommandUpdate),
-    /// Other Backend Threads -> S: Execution of given command completed - notify relevant QRunner
-    ExecutionCompleted(Uuid),
-    /// QRunner -> S: I (tuple.0) am blocked on command (tuple.1).
-    QRunnerBlocked(Uuid, Uuid),
-    /// QRunner -> S: My thread is just about to exit, please remove my counterpart
-    QRunnerCompleted(Uuid),
     /// UI objects -> UI: Change UI mode to the following
     UIChangeMode(UIMode),
     /// UI objects -> UI: Start editing command on the command line.
@@ -185,11 +123,9 @@ pub struct Context<'a> {
     pub commands: BTreeMap<Uuid, Box<Command>>,
     pub identifiers: HashMap<String, Uuid>,
     pub chains: BTreeMap<ChainType, Chain>,
-    pub runners: Vec<QRunnerX>,
     pub mstr: Magister,
     pub tx: ::std::sync::mpsc::Sender<Message>,
     pub tn: ThreadNotifier,
-    pub pool: ThreadPool
 }
 impl<'a> Context<'a> {
     pub fn new(pa: &'a mut ::portaudio::PortAudio, tx: ::std::sync::mpsc::Sender<Message>, tn: ThreadNotifier) -> Self {
@@ -199,18 +135,48 @@ impl<'a> Context<'a> {
             identifiers: HashMap::new(),
             chains: BTreeMap::new(),
             mstr: Magister::new(),
-            runners: Vec::new(),
             tx: tx,
             tn: tn,
-            pool: ThreadPool::new(4)
         };
-        ctx.chains.insert(ChainType::Unattached, Chain { commands: vec![] });
+        ctx.chains.insert(ChainType::Unattached, Chain::new());
         ctx
     }
-    pub fn execution_completed(&mut self, uu: Uuid) {
-        println!("execution completed for {}", uu);
-        for qrx in self.runners.iter_mut() {
-            qrx.trigger(uu);
+    fn loadunload_cmd(&mut self, uu: Uuid, evl: &mut EventLoop<Context>, load: bool) {
+        let mut cmd = self.commands.get_mut(&uu).unwrap().box_clone();
+        if load {
+            cmd.load(self, evl, uu);
+        }
+        else {
+            cmd.unload(self, evl, uu);
+        }
+        self.commands.insert(uu, cmd);
+    }
+    pub fn load_cmd(&mut self, uu: Uuid, evl: &mut EventLoop<Context>) {
+        self.loadunload_cmd(uu, evl, true);
+        self.update_cmd(uu);
+    }
+    pub fn unload_cmd(&mut self, uu: Uuid, evl: &mut EventLoop<Context>) {
+        self.loadunload_cmd(uu, evl, false);
+        self.update_cmd(uu);
+    }
+    pub fn exec_cmd(&mut self, uu: Uuid, evl: &mut EventLoop<Context>) -> bool {
+        let mut cmd = self.commands.get_mut(&uu).unwrap().box_clone();
+        let finished = cmd.execute(self, evl, uu).unwrap();
+        self.commands.insert(uu, cmd);
+        self.update_cmd(uu);
+        finished
+    }
+    pub fn execution_completed(&mut self, uu: Uuid, evl: &mut EventLoop<Context>) {
+        let mut blocked = None;
+        for (k, chn) in self.chains.iter_mut() {
+            if chn.is_blocked_on(uu) {
+                blocked = Some((k.clone(), chn.clone()));
+                break;
+            }
+        }
+        if let Some((k, mut blk)) = blocked {
+            blk.on_exec_completed(uu, self, evl);
+            self.chains.insert(k, blk);
         }
     }
     pub fn prettify_uuid(&self, uu: &Uuid) -> String {
@@ -242,21 +208,17 @@ impl<'a> Context<'a> {
         self.send(Message::ChainDesc(ct, chn));
     }
     pub fn attach_chn(&mut self, ct: Option<ChainType>, cu: Uuid) {
-        let mut modified = vec![];
+        let mut modified = None;
         for (ref mut ct, ref mut chn) in &mut self.chains {
-            chn.commands.retain(|uu| {
-                if *uu == cu {
-                    modified.push(ct.clone());
-                    false
-                }
-                else { true }
-            });
+            if chn.remove(cu) {
+                modified = Some(ct.clone());
+            }
         }
-        for ct in modified {
+        if let Some(ct) = modified {
             self.update_chn(ct);
         }
         if let Some(ct) = ct {
-            self.chains.entry(ct.clone()).or_insert(Chain { commands: vec![] }).commands.push(cu);
+            self.chains.entry(ct.clone()).or_insert(Chain::new()).push(cu);
             self.update_chn(ct);
         }
     }

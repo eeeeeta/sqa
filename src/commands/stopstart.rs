@@ -1,6 +1,5 @@
 use super::prelude::*;
 use streamv2::FileStreamX;
-use state::ObjectType;
 #[derive(Clone)]
 pub enum StopStartChoice {
     Stop,

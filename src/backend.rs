@@ -3,7 +3,6 @@ use std::sync::mpsc::{Sender};
 use portaudio as pa;
 use mio;
 use mio::{Handler, EventLoop};
-use cues::QRunner;
 
 pub type BackendSender = mio::Sender<Message>;
 pub trait BackendTimeout {
@@ -28,9 +27,7 @@ impl<'a> Handler for Context<'a> {
                 self.attach_chn(Some(ChainType::Unattached), uu);
 
                 if let CommandState::Ready = self.desc_cmd(uu).state {
-                    let mut cmd = self.commands.get_mut(&uu).unwrap().box_clone();
-                    cmd.load(self, evl, uu);
-                    self.commands.insert(uu, cmd);
+                    self.load_cmd(uu, evl);
                 }
             },
             Message::SetHunk(uu, idx, val) => {
@@ -40,30 +37,19 @@ impl<'a> Handler for Context<'a> {
                     hunk.set_val(::std::ops::DerefMut::deref_mut(cmd), val);
                 }
                 if let CommandState::Ready = self.desc_cmd(uu).state {
-                    let mut cmd = self.commands.get_mut(&uu).unwrap().box_clone();
-                    cmd.load(self, evl, uu);
-                    self.commands.insert(uu, cmd);
+                    self.load_cmd(uu, evl);
                 }
                 update = Some(uu);
             },
             Message::Execute(uu) => {
-                let mut cmd = self.commands.get_mut(&uu).unwrap().box_clone();
-                let finished = cmd.execute(self, evl, uu).unwrap();
-                self.commands.insert(uu, cmd);
-                update = Some(uu);
-
-                if finished {
-                    println!("calling EC on exec");
-                    self.execution_completed(uu);
-                }
+                self.exec_cmd(uu, evl);
             },
             Message::Update(uu, cu) => {
                 if {
                     let mut cmd = self.commands.get_mut(&uu).unwrap();
                     cu(::std::ops::DerefMut::deref_mut(cmd))
                 } {
-                    println!("calling EC after update");
-                    self.execution_completed(uu);
+                    self.execution_completed(uu, evl);
                 }
                 update = Some(uu);
             },
@@ -76,21 +62,34 @@ impl<'a> Handler for Context<'a> {
             Message::Attach(uu, ct) => {
                 self.attach_chn(Some(ct), uu);
             },
-            Message::Go(ct) => {
-                let qr = QRunner::new(self.chains.get(&ct).unwrap().clone(), self, evl);
-                self.runners.push(qr);
-            },
-            Message::QRunnerBlocked(uu, blk) => {
-                for qrx in self.runners.iter_mut() {
-                    if qrx.uuid() == uu {
-                        qrx.blocked = Some(blk);
+            Message::Standby(ct) => {
+                for (k, mut chn) in self.chains.clone().into_iter() {
+                    if ct.is_some() && ct.clone().unwrap() == k {
+                        chn.standby(self, evl);
                     }
+                    else {
+                        chn.unstandby(self, evl);
+                    }
+                    self.chains.insert(k, chn);
                 }
             },
-            Message::QRunnerCompleted(uu) => {
-                self.runners.retain(|uc| uc.uuid() != uu);
+            Message::SetFallthru(uu, state) => {
+                let mut msg = None;
+                for (k, chn) in self.chains.iter_mut() {
+                    if chn.set_fallthru(uu, state) {
+                        msg = Some(Message::ChainFallthru(k.clone(), chn.fallthru.clone()));
+                        break;
+                    }
+                }
+                if let Some(msg) = msg {
+                    self.send(msg);
+                }
             },
-            Message::ExecutionCompleted(uu) => { self.execution_completed(uu); },
+            Message::Go(ct) => {
+                let mut chn = self.chains.remove(&ct).unwrap();
+                chn.go(self, evl);
+                self.chains.insert(ct, chn);
+            },
             _ => unimplemented!()
         }
         if let Some(uu) = update {

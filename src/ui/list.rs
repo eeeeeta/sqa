@@ -1,4 +1,5 @@
 use state::{CommandState, ChainType, Chain, CommandDescriptor, Message};
+use backend::BackendSender;
 use ui::UISender;
 use std::collections::{BTreeMap, HashMap};
 use gtk::prelude::*;
@@ -17,6 +18,15 @@ fn extract_uuid(ts: &TreeStore, ti: &TreeIter, col: i32) -> Option<Uuid> {
     }
     None
 }
+fn extract_ft(ts: &TreeStore, ti: &TreeIter, col: i32) -> bool {
+    if let Some(v) = ts.get_value(ti, col).get::<String>() {
+        v.len() != 0
+    }
+    else {
+        false
+    }
+}
+
 pub struct ListController {
     store: TreeStore,
     view: TreeView,
@@ -25,10 +35,11 @@ pub struct ListController {
     pub commands: HashMap<Uuid, CommandDescriptor>,
     identifiers: HashMap<String, Uuid>,
     completions: ListStore,
-    sender: UISender
+    sender: UISender,
+    tx: BackendSender,
 }
 impl ListController {
-    pub fn new(sender: UISender, compl: ListStore, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(sender: UISender, tx: BackendSender, compl: ListStore, b: &Builder) -> Rc<RefCell<Self>> {
         let view: TreeView = b.get_object("command-tree-view").unwrap();
         view.set_enable_search(false);
         let sel = view.get_selection();
@@ -41,7 +52,8 @@ impl ListController {
             commands: HashMap::new(),
             identifiers: HashMap::new(),
             sender: sender,
-            completions: compl
+            completions: compl,
+            tx: tx
         }));
         ret.borrow().view.connect_key_press_event(clone!(ret; |_s, ek| {
             if !ek.get_state().contains(::gdk::CONTROL_MASK) {
@@ -62,6 +74,24 @@ impl ListController {
                             }
                         };
                         sender.send(Message::UIBeginEditing(uu));
+                        Inhibit(true)
+                    },
+                    gkey::f => {
+                        let (sender, uu, to) = {
+                            let selfish = ret.borrow();
+                            if let Some((_, iter)) = selfish.sel.get_selected() {
+                                if let Some(uu) = extract_uuid(&selfish.store, &iter, 5) {
+                                    (selfish.tx.clone(), uu, !extract_ft(&selfish.store, &iter, 6))
+                                }
+                                else {
+                                    return Inhibit(false)
+                                }
+                            }
+                            else {
+                                return Inhibit(false)
+                            }
+                        };
+                        sender.send(Message::SetFallthru(uu, to)).unwrap();
                         Inhibit(true)
                     },
                     _ => Inhibit(false)
@@ -116,7 +146,7 @@ impl ListController {
                 if let Some(v) = self.commands.get(uu) {
                     let iter = self.store.append(None);
                     let (icon, desc) = self.render(&iter, v, *uu);
-                    self.chain_render(&iter, ct, i);
+                    self.chain_render(&iter, ct, i, *chn.fallthru.get(uu).unwrap_or(&false));
                     self.completions_render(desc, icon, ct, i, *uu);
                 }
             }
@@ -167,12 +197,20 @@ impl ListController {
         }
 
     }
-    fn chain_render(&self, ti: &TreeIter, ct: &ChainType, cidx: usize) {
-        let ident = format!("{}<span fgcolor=\"#666666\">{}</span>", ct, cidx);
+    fn chain_render(&self, ti: &TreeIter, ct: &ChainType, cidx: usize, ft: bool) {
+        let ident = format!("{}{}", ct, cidx);
+        let ft = if ft {
+            format!("go-down")
+        }
+        else {
+            format!("")
+        };
         self.store.set(ti, &vec![
             1, // identifier (looking glass column)
+            6, // flags (preferences column)
         ], &vec![
             &ident as &ToValue,
+            &ft as &ToValue,
         ].deref());
     }
     fn get_render_data(v: &CommandDescriptor)
@@ -249,6 +287,28 @@ impl ListController {
             selfish.chains.remove(&ct);
         }
         selfish.redraw();
+    }
+    pub fn update_chain_fallthru(selfish: Rc<RefCell<Self>>, ct: ChainType, chain: HashMap<Uuid, bool>) {
+        let mut selfish = selfish.borrow_mut();
+        let _: Option<()> = selfish.run_for_each(|ti, ts| {
+            if let Some(uu) = extract_uuid(ts, ti, 5) {
+                if let Some(b) = chain.get(&uu) {
+                    let ft = if *b {
+                        format!("go-down")
+                    }
+                    else {
+                        format!("")
+                    };
+                    ts.set(ti, &vec![
+                        6, // flags (preferences column)
+                    ], &vec![
+                        &ft as &ToValue,
+                    ].deref());
+                }
+            }
+            None
+        });
+        selfish.chains.get_mut(&ct).unwrap().fallthru = chain;
     }
     pub fn update_identifiers(selfish: Rc<RefCell<Self>>, idents: HashMap<String, Uuid>) {
         let mut selfish = selfish.borrow_mut();

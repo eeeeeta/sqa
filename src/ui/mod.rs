@@ -24,7 +24,6 @@ use self::list::ListController;
 
 pub static INTERFACE_SRC: &'static str = include_str!("interface.glade");
 
-use std::collections::BTreeMap;
 use state::{CommandDescriptor, CommandState, Message, ThreadNotifier, ChainType, Chain};
 use uuid::Uuid;
 use std::rc::Rc;
@@ -32,10 +31,9 @@ use std::fmt;
 use std::cell::RefCell;
 use std::sync::mpsc::{Sender, Receiver};
 use backend::BackendSender;
-use gtk::{Builder, Label, TreeStore, ListStore, Window, Image};
+use gtk::{Builder, ListStore, Window};
 use gtk::prelude::*;
 use gdk::enums::key as gkey;
-use std::ops::Deref;
 
 #[derive(Clone)]
 pub struct UISender {
@@ -90,13 +88,13 @@ pub struct UIContext {
 impl UIContext {
     pub fn init(sender: BackendSender, uisender: Sender<Message>, recvr: Receiver<Message>, tn: ThreadNotifier, win: Window, builder: &Builder)  -> Rc<RefCell<Self>> {
         let compl: ListStore = builder.get_object("command-identifiers-list").unwrap();
-        let line = CommandLine::new(sender, compl.clone(), &builder);
+        let line = CommandLine::new(sender.clone(), compl.clone(), &builder);
         let ccc = CommandChooserController::new(line.clone(), UIMode::Live(ChainType::Unattached), UISender::new(uisender.clone(), tn.clone()), &builder);
         let uic = Rc::new(RefCell::new(UIContext {
             chooser: ccc,
             line: line,
             rx: recvr,
-            list: ListController::new(UISender::new(uisender.clone(), tn.clone()), compl.clone(), &builder),
+            list: ListController::new(UISender::new(uisender.clone(), tn.clone()), sender, compl.clone(), &builder),
             completions: compl,
             uitx: uisender,
             mode: UIMode::Live(ChainType::Unattached)
@@ -162,6 +160,9 @@ impl UIContext {
             },
             Message::ChainDeleted(ct) => {
                 ListController::update_chain(selfish.list.clone(), ct, None);
+            },
+            Message::ChainFallthru(ct, state) => {
+                ListController::update_chain_fallthru(selfish.list.clone(), ct, state);
             },
             Message::Identifiers(id) => {
                 ListController::update_identifiers(selfish.list.clone(), id);

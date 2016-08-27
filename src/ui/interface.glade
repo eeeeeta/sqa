@@ -59,7 +59,7 @@
       <column type="gchararray"/>
       <!-- column-name uuid -->
       <column type="gchararray"/>
-      <!-- column-name chain-uuid -->
+      <!-- column-name flags -->
       <column type="gchararray"/>
     </columns>
   </object>
@@ -72,6 +72,16 @@
     <property name="visible">True</property>
     <property name="can_focus">False</property>
     <property name="icon_name">edit-find</property>
+  </object>
+  <object class="GtkImage" id="image3">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="stock">gtk-preferences</property>
+  </object>
+  <object class="GtkImage" id="image4">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="stock">gtk-media-forward</property>
   </object>
   <object class="GtkApplicationWindow" id="SQA Main Window">
     <property name="can_focus">False</property>
@@ -221,6 +231,7 @@
                     </child>
                     <child>
                       <object class="GtkTreeViewColumn" id="column-state">
+                        <property name="widget">image4</property>
                         <child>
                           <object class="GtkCellRendererPixbuf" id="renderer-state">
                             <property name="stock_size">1</property>
@@ -250,11 +261,27 @@
                     <child>
                       <object class="GtkTreeViewColumn" id="column-desc">
                         <property name="title" translatable="yes">Description</property>
+                        <property name="expand">True</property>
                         <child>
                           <object class="GtkCellRendererText" id="renderer-desc"/>
                           <attributes>
                             <attribute name="cell-background">4</attribute>
                             <attribute name="markup">2</attribute>
+                          </attributes>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkTreeViewColumn" id="column-flags">
+                        <property name="widget">image3</property>
+                        <property name="alignment">1</property>
+                        <child>
+                          <object class="GtkCellRendererPixbuf" id="renderer-flags">
+                            <property name="stock_size">1</property>
+                          </object>
+                          <attributes>
+                            <attribute name="cell-background">4</attribute>
+                            <attribute name="icon-name">6</attribute>
                           </attributes>
                         </child>
                       </object>
