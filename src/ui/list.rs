@@ -2,7 +2,7 @@ use state::{CommandState, ChainType, Chain, CommandDescriptor, Message};
 use ui::UISender;
 use std::collections::{BTreeMap, HashMap};
 use gtk::prelude::*;
-use gtk::{Builder, TreeStore, TreeIter, TreeView, TreeSelection, SelectionMode};
+use gtk::{Builder, TreeStore, ListStore, TreeIter, TreeView, TreeSelection, SelectionMode};
 use uuid::Uuid;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -21,11 +21,14 @@ pub struct ListController {
     store: TreeStore,
     view: TreeView,
     sel: TreeSelection,
-    chains: HashMap<Uuid, ChainType>,
+    chains: BTreeMap<ChainType, Chain>,
+    pub commands: HashMap<Uuid, CommandDescriptor>,
+    identifiers: HashMap<String, Uuid>,
+    completions: ListStore,
     sender: UISender
 }
 impl ListController {
-    pub fn new(sender: UISender, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(sender: UISender, compl: ListStore, b: &Builder) -> Rc<RefCell<Self>> {
         let view: TreeView = b.get_object("command-tree-view").unwrap();
         view.set_enable_search(false);
         let sel = view.get_selection();
@@ -34,8 +37,11 @@ impl ListController {
             store: b.get_object("command-tree").unwrap(),
             view: view,
             sel: sel,
-            chains: HashMap::new(),
-            sender: sender
+            chains: BTreeMap::new(),
+            commands: HashMap::new(),
+            identifiers: HashMap::new(),
+            sender: sender,
+            completions: compl
         }));
         ret.borrow().view.connect_key_press_event(clone!(ret; |_s, ek| {
             if !ek.get_state().contains(::gdk::CONTROL_MASK) {
@@ -94,24 +100,88 @@ impl ListController {
             None
         })
     }
-    fn chain_render(&mut self, ti: &TreeIter, ct: &ChainType, cidx: usize, chainuu: Uuid) {
+    fn redraw(&mut self) {
+        let prev_sel = if let Some((_, iter)) = self.sel.get_selected() {
+            if let Some(uu) = extract_uuid(&self.store, &iter, 5) {
+                Some(uu)
+            }
+            else {
+                None
+            }
+        } else { None };
+        self.store.clear();
+        self.completions.clear();
+        for (ref ct, ref chn) in &self.chains {
+            for (i, uu) in chn.commands.iter().enumerate() {
+                if let Some(v) = self.commands.get(uu) {
+                    let iter = self.store.append(None);
+                    let (icon, desc) = self.render(&iter, v, *uu);
+                    self.chain_render(&iter, ct, i);
+                    self.completions_render(desc, icon, ct, i, *uu);
+                }
+            }
+        }
+        if let Some(ps) = prev_sel {
+            if let Some(iter) = self.locate(ps) {
+                self.sel.select_iter(&iter);
+            }
+        }
+    }
+    fn update_completions(&mut self) {
+        self.completions.clear();
+        for (ref ct, ref chn) in &self.chains {
+            for (i, uu) in chn.commands.iter().enumerate() {
+                if let Some(v) = self.commands.get(uu) {
+                    let (icon, desc, _, _) = Self::get_render_data(&v);
+                    self.completions_render(desc, icon, ct, i, *uu);
+                }
+            }
+        }
+    }
+    fn completions_render(&self, desc: String, icon: String, ct: &ChainType, i: usize, uu: Uuid) {
+        self.completions.set(&self.completions.append(), &vec![
+            0, // identifier
+            1, // uuid
+            2, // description
+            3, // icon
+        ], &vec![
+            &format!("{}{}", ct, i) as &ToValue,
+            &format!("{}", uu) as &ToValue,
+            &desc as &ToValue,
+            &icon as &ToValue,
+        ].deref());
+        for (k, v) in self.identifiers.iter() {
+            if uu == *v {
+                self.completions.set(&self.completions.append(), &vec![
+                    0, // identifier
+                    1, // uuid
+                    2, // description
+                    3, // icon
+                ], &vec![
+                    &format!("${}", k) as &ToValue,
+                    &format!("{}", uu) as &ToValue,
+                    &desc as &ToValue,
+                    &icon as &ToValue,
+                ].deref());
+            }
+        }
+
+    }
+    fn chain_render(&self, ti: &TreeIter, ct: &ChainType, cidx: usize) {
         let ident = format!("{}<span fgcolor=\"#666666\">{}</span>", ct, cidx);
-        let cu = format!("{}", chainuu);
         self.store.set(ti, &vec![
             1, // identifier (looking glass column)
-            6, // chain UUID
         ], &vec![
             &ident as &ToValue,
-            &cu as &ToValue
         ].deref());
     }
-    fn render(&mut self, ti: &TreeIter, v: CommandDescriptor, uu: Uuid) {
-        let (mut icon, desc, mut dur, mut bgc, uu) =
+    fn get_render_data(v: &CommandDescriptor)
+                       -> (String, String, String, String) {
+        let (mut icon, desc, mut dur, mut bgc) =
             (format!("dialog-question"),
              v.desc.clone(),
              format!(""),
-             format!("white"),
-             format!("{}", uu));
+             format!("white"));
         match v.state {
             CommandState::Incomplete => {
                 icon = format!("dialog-error");
@@ -135,6 +205,11 @@ impl ListController {
             },
             _ => {}
         }
+        (icon, desc, dur, bgc)
+    }
+    fn render(&self, ti: &TreeIter, v: &CommandDescriptor, uu: Uuid) -> (String, String) {
+        let (icon, desc, dur, bgc) = Self::get_render_data(v);
+        let uu = format!("{}", uu);
         self.store.set(ti, &vec![
             0, // icon
             2, // description
@@ -148,86 +223,36 @@ impl ListController {
             &bgc as &ToValue,
             &uu as &ToValue
         ].deref());
+        (icon, desc)
     }
     pub fn update_desc(selfish: Rc<RefCell<Self>>, uu: Uuid, desc: CommandDescriptor) {
         let mut selfish = selfish.borrow_mut();
+        selfish.commands.insert(uu, desc.clone());
         if let Some(ti) = selfish.locate(uu) {
-            selfish.render(&ti, desc, uu);
-        }
-        else {
-            let ti = selfish.store.append(None);
-            selfish.render(&ti, desc, uu);
+            selfish.render(&ti, &desc, uu);
         }
     }
     pub fn delete(selfish: Rc<RefCell<Self>>, uu: Uuid) {
-        let selfish = selfish.borrow_mut();
+        let mut selfish = selfish.borrow_mut();
+        selfish.commands.remove(&uu);
         if let Some(ti) = selfish.locate(uu) {
             selfish.store.remove(&ti);
-        }
-        else {
-            println!("warn: asked to delete {}, which isn't in my TreeStore!", uu);
+            selfish.redraw();
         }
     }
-    pub fn update_chain(selfish: Rc<RefCell<Self>>, ct: ChainType, chain: Chain) {
+    pub fn update_chain(selfish: Rc<RefCell<Self>>, ct: ChainType, chain: Option<Chain>) {
         let mut selfish = selfish.borrow_mut();
-        let mut uu: Option<Uuid> = None;
-        for (k, v) in selfish.chains.iter() {
-            if ct == v.clone() { // FIXME: ugh
-                uu = Some(*k);
-                break;
-            }
-        }
-        let uu = if let Some(uu) = uu {
-            uu
+        if let Some(chn) = chain {
+            selfish.chains.insert(ct.clone(), chn.clone());
         }
         else {
-            let uu = Uuid::new_v4();
-            selfish.chains.insert(uu, ct.clone());
-            uu
-        };
-        let mut iters = BTreeMap::new();
-        let _: Option<()> = selfish.run_for_each(|ti, ts| {
-            if let Some(cmduu) = extract_uuid(ts, ti, 5) {
-                if chain.commands.contains(&cmduu) {
-                    iters.insert(cmduu, ti.clone());
-                }
-                else if let Some(chainuu) = extract_uuid(ts, ti, 6) {
-                    if chainuu == uu {
-                        selfish.store.set(&ti, &vec![1, 6], &vec![
-                            &format!("") as &ToValue,
-                            &format!("") as &ToValue
-                        ].deref());
-                    }
-                }
-            }
-            None
-        });
-        let mut sorted_iters = vec![];
-        for uu in chain.commands.iter() {
-            if let Some(iter) = iters.remove(uu) {
-                sorted_iters.push(iter);
-            }
+            selfish.chains.remove(&ct);
         }
-        if sorted_iters.len() == 0 { return; }
-        let mut insert_after: Option<TreeIter> = None;
-        let ct1 = ct.clone();
-        let _: Option<()> = selfish.run_for_each(|ti, ts| {
-            if let Some(chainuu) = extract_uuid(ts, ti, 6) {
-                if let Some(ct2) = selfish.chains.get(&chainuu) {
-                    if ct1 > ct2.clone() { // ugh again
-                        insert_after = Some(ti.clone());
-                    }
-                    else {
-                        return Some(());
-                    }
-                }
-            }
-            None
-        });
-        for (i, ni) in sorted_iters.into_iter().enumerate() {
-            selfish.chain_render(&ni, &ct, i, uu);
-            selfish.store.move_after(&ni, insert_after.as_ref());
-            insert_after = Some(ni);
-        }
+        selfish.redraw();
+    }
+    pub fn update_identifiers(selfish: Rc<RefCell<Self>>, idents: HashMap<String, Uuid>) {
+        let mut selfish = selfish.borrow_mut();
+        selfish.identifiers = idents;
+        selfish.update_completions();
     }
 }

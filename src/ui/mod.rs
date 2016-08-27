@@ -79,9 +79,6 @@ impl fmt::Display for UIMode {
     }
 }
 pub struct UIContext {
-    pub commands: BTreeMap<Uuid, CommandDescriptor>,
-    pub identifiers: BTreeMap<String, Uuid>,
-    pub chains: BTreeMap<ChainType, Chain>,
     pub chooser: Rc<RefCell<CommandChooserController>>,
     pub line: Rc<RefCell<CommandLine>>,
     pub completions: ListStore,
@@ -96,13 +93,10 @@ impl UIContext {
         let line = CommandLine::new(sender, compl.clone(), &builder);
         let ccc = CommandChooserController::new(line.clone(), UIMode::Live(ChainType::Unattached), UISender::new(uisender.clone(), tn.clone()), &builder);
         let uic = Rc::new(RefCell::new(UIContext {
-            commands: BTreeMap::new(),
-            identifiers: BTreeMap::new(),
-            chains: BTreeMap::new(),
             chooser: ccc,
             line: line,
             rx: recvr,
-            list: ListController::new(UISender::new(uisender.clone(), tn.clone()), &builder),
+            list: ListController::new(UISender::new(uisender.clone(), tn.clone()), compl.clone(), &builder),
             completions: compl,
             uitx: uisender,
             mode: UIMode::Live(ChainType::Unattached)
@@ -139,111 +133,38 @@ impl UIContext {
             _ => false
         }
     }
-    pub fn update(&mut self) {
-        self.completions.clear();
-        for (ref ct, ref chn) in &self.chains {
-            for (i, ref uu) in chn.commands.iter().enumerate() {
-                if let Some(ref v) = self.commands.get(uu) {
-                    let (mut icon, ident, desc, mut dur, mut bgc) =
-                        (format!("dialog-question"),
-                         format!("{}<span fgcolor=\"#666666\">{}</span>", ct, i),
-                         v.desc.clone(),
-                         format!(""),
-                         format!("white"));
-                    match v.state {
-                        CommandState::Incomplete => {
-                            icon = format!("dialog-error");
-                            bgc = format!("lightpink");
-                        },
-                        CommandState::Ready => {
-                            icon = format!("");
-                        },
-                        CommandState::Loaded => {
-                            icon = format!("go-home");
-                            bgc = format!("lemonchiffon");
-                        },
-                        CommandState::Running(cd) => {
-                            let cd = ::chrono::Duration::from_std(cd).unwrap();
-                            icon = format!("media-seek-forward");
-                            bgc = format!("powderblue");
-                            dur = format!("{:02}:{:02}:{:02}",
-                                          cd.num_hours(),
-                                          cd.num_minutes() - (60 * cd.num_hours()),
-                                          cd.num_seconds() - (60 * cd.num_minutes()));
-                        },
-                        _ => {}
-                    }
-                    self.completions.set(&self.completions.append(), &vec![
-                        0, // identifier
-                        1, // uuid
-                        2, // description
-                        3, // icon
-                    ], &vec![
-                        &format!("{}{}", ct, i) as &ToValue,
-                        &format!("{}", uu) as &ToValue,
-                        &desc as &ToValue,
-                        &icon as &ToValue,
-                    ].deref());
-                    for (k, v) in self.identifiers.iter() {
-                        if *uu == v {
-                            self.completions.set(&self.completions.append(), &vec![
-                                0, // identifier
-                                1, // uuid
-                                2, // description
-                                3, // icon
-                            ], &vec![
-                                &format!("${}", k) as &ToValue,
-                                &format!("{}", uu) as &ToValue,
-                                &desc as &ToValue,
-                                &icon as &ToValue,
-                            ].deref());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    pub fn handler(selfish: Rc<RefCell<Self>>) {
+    fn handler(selfish: Rc<RefCell<Self>>) {
         let mut selfish = selfish.borrow_mut();
         let msg = selfish.rx.recv().unwrap();
         match msg {
             Message::CmdDesc(uu, desc) => {
-                selfish.commands.insert(uu, desc.clone());
                 if selfish.update_cline(uu) {
                     CommandLine::update(selfish.line.clone(), Some(desc.clone()));
                     CommandChooserController::update(selfish.chooser.clone());
                 }
                 ListController::update_desc(selfish.list.clone(), uu, desc);
-                selfish.update();
             },
             Message::UIBeginEditing(uu) => {
-                if let Some(desc) = selfish.commands.get(&uu) {
+                if let Some(desc) = selfish.list.borrow().commands.get(&uu) {
                     CommandLine::edit_command(selfish.line.clone(), desc.clone());
                 }
             },
             Message::Deleted(uu) => {
-                selfish.commands.remove(&uu);
                 if selfish.update_cline(uu) {
                     selfish.line.borrow_mut().state = CommandLineFSM::Idle;
                     CommandLine::update(selfish.line.clone(), None);
                     CommandChooserController::update(selfish.chooser.clone());
                 }
                 ListController::delete(selfish.list.clone(), uu);
-                selfish.update();
             },
             Message::ChainDesc(ct, chn) => {
-                selfish.chains.insert(ct.clone(), chn.clone());
-                ListController::update_chain(selfish.list.clone(), ct, chn);
-                selfish.update();
+                ListController::update_chain(selfish.list.clone(), ct, Some(chn));
             },
             Message::ChainDeleted(ct) => {
-                selfish.chains.remove(&ct);
-                ListController::update_chain(selfish.list.clone(), ct, Chain { commands: vec![] });
-                selfish.update();
+                ListController::update_chain(selfish.list.clone(), ct, None);
             },
             Message::Identifiers(id) => {
-                selfish.identifiers = id;
-                selfish.update();
+                ListController::update_identifiers(selfish.list.clone(), id);
             },
             Message::UIChangeMode(ct) => {
                 selfish.mode = ct.clone();

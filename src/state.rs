@@ -3,7 +3,7 @@
 use streamv2::{FileStream, FileStreamX};
 use mixer::{QChannel, Magister, Sink, Source, DeviceSink};
 use command::{Command, CommandUpdate, HunkState, HunkTypes};
-use std::collections::BTreeMap;
+use std::collections::{HashMap, BTreeMap};
 use uuid::Uuid;
 use std::any::Any;
 use std::fmt;
@@ -126,7 +126,7 @@ pub enum Message {
     /// S -> C: Delete given chain.
     ChainDeleted(ChainType),
     /// S -> C: Update list of named identifiers.
-    Identifiers(BTreeMap<String, Uuid>),
+    Identifiers(HashMap<String, Uuid>),
     /// Other Backend Threads -> S: Apply closure to command with given UUID & propagate changes.
     Update(Uuid, CommandUpdate),
     /// Other Backend Threads -> S: Execution of given command completed - notify relevant QRunner
@@ -183,7 +183,7 @@ impl CommandDescriptor {
 pub struct Context<'a> {
     pub pa: &'a mut ::portaudio::PortAudio,
     pub commands: BTreeMap<Uuid, Box<Command>>,
-    pub identifiers: BTreeMap<String, Uuid>,
+    pub identifiers: HashMap<String, Uuid>,
     pub chains: BTreeMap<ChainType, Chain>,
     pub runners: Vec<QRunnerX>,
     pub mstr: Magister,
@@ -196,7 +196,7 @@ impl<'a> Context<'a> {
         let mut ctx = Context {
             pa: pa,
             commands: BTreeMap::new(),
-            identifiers: BTreeMap::new(),
+            identifiers: HashMap::new(),
             chains: BTreeMap::new(),
             mstr: Magister::new(),
             runners: Vec::new(),

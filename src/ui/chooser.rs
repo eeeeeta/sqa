@@ -126,7 +126,7 @@ impl CommandChooserController {
     }
     fn get_ptr(&self) -> (&Vec<(&'static str, gkey::Key, GridNode)>, String) {
         let mut ptr = &self.top;
-        let mut st = "Home".to_string();
+        let mut st = "🏠".to_string(); // U+1F3E0 HOUSE BUILDING
         if self.pos.len() > 0 {
             for i in &self.pos {
                 if let Some(&(ref disp, _, GridNode::Grid(ref vec))) = ptr.get(*i) {
