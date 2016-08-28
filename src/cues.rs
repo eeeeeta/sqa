@@ -16,7 +16,7 @@ impl fmt::Display for ChainType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &ChainType::Unattached => write!(f, "X"),
-            &ChainType::Q(ref st) => write!(f, "Q{}.", st),
+            &ChainType::Q(ref st) => write!(f, "Q{}", st),
         }
     }
 }
@@ -35,7 +35,7 @@ pub enum QFSM {
     /// Next in line for execution (all cues loaded)
     Standby,
     /// Executing, blocked on tuple.0
-    Blocked(Uuid)
+    Blocked(Uuid, usize)
 }
 
 impl Chain {
@@ -75,7 +75,7 @@ impl Chain {
         }
     }
     pub fn is_blocked_on(&mut self, uu: Uuid) -> bool {
-        if let QFSM::Blocked(u2) = self.fsm {
+        if let QFSM::Blocked(u2, _) = self.fsm {
             u2 == uu
         }
         else {
@@ -83,38 +83,28 @@ impl Chain {
         }
     }
     pub fn on_exec_completed(&mut self, completed: Uuid, ctx: &mut Context, evl: &mut EventLoop<Context>) -> bool {
-        if let QFSM::Blocked(uu) = self.fsm.clone() {
+        if let QFSM::Blocked(uu, mut idx) = self.fsm.clone() {
             if uu == completed {
-                let mut next = None;
-                for (i, cmd) in self.commands.iter().enumerate() {
-                    if *cmd == uu {
-                        if let Some(uu) = self.commands.get(i+1) {
-                            next = Some(*uu);
-                        }
-                        break;
-                    }
-                }
-                if let Some(uu) = next {
-                    self.exec(uu, ctx, evl);
-                }
-                else {
-                    self.fsm = QFSM::Idle;
-                }
+                idx += 1;
+                self.exec(idx, ctx, evl);
                 return true;
             }
         }
         false
     }
-    fn exec(&mut self, now: Uuid, ctx: &mut Context, evl: &mut EventLoop<Context>) {
-        self.fsm = QFSM::Blocked(now);
-        if ctx.exec_cmd(now, evl) || self.fallthru.get(&now).map(|x| *x).unwrap_or(false) {
-            self.on_exec_completed(now, ctx, evl);
+    fn exec(&mut self, idx: usize, ctx: &mut Context, evl: &mut EventLoop<Context>) {
+        if let Some(now) = self.commands.get(idx).map(|x| *x) {
+            self.fsm = QFSM::Blocked(now, idx);
+            if ctx.exec_cmd(now, evl) || self.fallthru.get(&now).map(|x| *x).unwrap_or(false) {
+                self.on_exec_completed(now, ctx, evl);
+            }
+        }
+        else {
+            self.fsm = QFSM::Idle;
         }
     }
     pub fn go(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>) {
-        if let Some(uu) = self.commands.get(0).map(|x| *x) {
-            self.exec(uu, ctx, evl);
-        }
+        self.exec(0, ctx, evl);
     }
     pub fn standby(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>) {
         if let QFSM::Idle = self.fsm {

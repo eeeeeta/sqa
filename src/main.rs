@@ -1,9 +1,8 @@
-#![feature(borrow_state, question_mark, iter_arith, dotdot_in_tuple_patterns)]
+#![feature(borrow_state, question_mark, dotdot_in_tuple_patterns)]
 extern crate portaudio;
 extern crate chrono;
 extern crate time;
 extern crate uuid;
-extern crate crossbeam;
 extern crate rustbox;
 extern crate gtk;
 extern crate gdk;
@@ -12,7 +11,7 @@ extern crate mio;
 extern crate glib;
 #[macro_use]
 extern crate mopa;
-extern crate threadpool;
+extern crate parking_lot;
 extern crate simplemad;
 mod streamv2;
 mod mixer;

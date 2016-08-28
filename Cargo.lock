@@ -4,7 +4,6 @@ version = "0.1.0"
 dependencies = [
  "bounded-spsc-queue 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.2.25 (registry+https://github.com/rust-lang/crates.io-index)",
- "crossbeam 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "enum_primitive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gdk 0.5.0 (git+https://github.com/gtk-rs/gdk)",
  "glib 0.1.0 (git+https://github.com/gtk-rs/glib)",
@@ -13,10 +12,10 @@ dependencies = [
  "mio 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "mopa 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "num 0.1.34 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parking_lot 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "portaudio 0.7.0 (git+https://github.com/RustAudio/rust-portaudio)",
  "rustbox 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "simplemad 0.8.1 (git+https://github.com/eeeeeta/simple-mad.rs?rev=a0eaa56)",
- "threadpool 1.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
  "uuid 0.2.0 (git+https://github.com/rust-lang-nursery/uuid?rev=34ff260)",
 ]
@@ -101,11 +100,6 @@ dependencies = [
  "num 0.1.34 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
-
-[[package]]
-name = "crossbeam"
-version = "0.2.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "enum_primitive"
@@ -447,6 +441,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "parking_lot"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "parking_lot_core 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "parking_lot_core"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.15 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)",
+ "smallvec 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -524,6 +538,11 @@ version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "smallvec"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "tempfile"
 version = "2.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -538,11 +557,6 @@ dependencies = [
 [[package]]
 name = "termbox-sys"
 version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-
-[[package]]
-name = "threadpool"
-version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -595,7 +609,6 @@ dependencies = [
 "checksum cairo-sys-rs 0.3.1 (git+https://github.com/gtk-rs/cairo)" = "<none>"
 "checksum cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "de1e760d7b6535af4241fca8bd8adf68e2e7edacc6b29f5d399050c5e48cf88c"
 "checksum chrono 0.2.25 (registry+https://github.com/rust-lang/crates.io-index)" = "9213f7cd7c27e95c2b57c49f0e69b1ea65b27138da84a170133fd21b07659c00"
-"checksum crossbeam 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)" = "0c5ea215664ca264da8a9d9c3be80d2eaf30923c259d03e870388eb927508f97"
 "checksum enum_primitive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f79eff5be92a4d7d5bddf7daa7d650717ea71628634efe6ca7bcda85b2183c23"
 "checksum gag 0.1.9 (registry+https://github.com/rust-lang/crates.io-index)" = "c606f5c0da18075916377e73de8aec7c140e1b6110a3cf26ae1f47873529b47e"
 "checksum gcc 0.3.33 (registry+https://github.com/rust-lang/crates.io-index)" = "063e8ac7c33abdf621c094e879a7fee97cda9fb42e5f12b30e95d4549f8cb310"
@@ -628,6 +641,8 @@ dependencies = [
 "checksum num-traits 0.1.34 (registry+https://github.com/rust-lang/crates.io-index)" = "95e58eac34596aac30ab134c8a8da9aa2dc99caa4b4b4838e6fc6e298016278f"
 "checksum pango 0.1.0 (git+https://github.com/gtk-rs/pango)" = "<none>"
 "checksum pango-sys 0.3.1 (git+https://github.com/gtk-rs/sys)" = "<none>"
+"checksum parking_lot 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "070cb7b176f13943d1b88576194ede0d57849ce77039e3fa39b88de2d6806a3d"
+"checksum parking_lot_core 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f0272c63053021036eb3eeaf6c8d4d88464135f69220caa1da7e5f614755c95b"
 "checksum pkg-config 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)" = "8cee804ecc7eaf201a4a207241472cc870e825206f6c031e3ee2a72fa425f2fa"
 "checksum portaudio 0.7.0 (git+https://github.com/RustAudio/rust-portaudio)" = "<none>"
 "checksum rand 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)" = "2791d88c6defac799c3f20d74f094ca33b9332612d9aef9078519c82e4fe04a5"
@@ -638,9 +653,9 @@ dependencies = [
 "checksum simplemad 0.8.1 (git+https://github.com/eeeeeta/simple-mad.rs?rev=a0eaa56)" = "<none>"
 "checksum simplemad_sys 0.5.0 (git+https://github.com/eeeeeta/simple-mad.rs?rev=a0eaa56)" = "<none>"
 "checksum slab 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "d807fd58c4181bbabed77cb3b891ba9748241a552bcc5be698faaebefc54f46e"
+"checksum smallvec 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)" = "fcc8d19212aacecf95e4a7a2179b26f7aeb9732a915cf01f05b0d3e044865410"
 "checksum tempfile 2.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "9270837a93bad1b1dac18fe67e786b3c960513af86231f6f4f57fddd594ff0c8"
 "checksum termbox-sys 0.2.9 (registry+https://github.com/rust-lang/crates.io-index)" = "10d9d43ebd02bf98d71923b11cb20575aecb877b80793cba9b5e383144db7c36"
-"checksum threadpool 1.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "8385be4e60ad9d6897ae06edff63449e9f9b213e31bdc653825d2a8294bd9c74"
 "checksum time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)" = "3c7ec6d62a20df54e07ab3b78b9a3932972f4b7981de295563686849eb3989af"
 "checksum uuid 0.2.0 (git+https://github.com/rust-lang-nursery/uuid?rev=34ff260)" = "<none>"
 "checksum winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "167dc9d6949a9b857f3451275e911c3f44255842c1f7a76f33c55103a909087a"

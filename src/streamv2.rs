@@ -1,10 +1,11 @@
 //! Extraction of audio from files, and control of the resulting stream.
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::{Mutex, Condvar};
 use std::io::{Seek, SeekFrom};
 use mixer;
 use uuid::Uuid;
 use std::thread;
-use std::ops::Rem;
+use std::sync::mpsc;
 use mixer::FRAMES_PER_CALLBACK;
 use bounded_spsc_queue;
 use bounded_spsc_queue::{Producer, Consumer};
@@ -68,13 +69,18 @@ enum SpoolerCtl {
 /// fields are.
 #[derive(Clone)]
 pub struct FileStreamX {
-    tx: Arc<Mutex<Producer<SpoolerCtl>>>,
+    tx: mpsc::Sender<SpoolerCtl>,
+    cvar: Arc<(Mutex<()>, Condvar)>,
     uuid: Uuid
 }
 impl FileStreamX {
+    fn send(&mut self, s: SpoolerCtl) {
+        self.tx.send(s).unwrap();
+        self.cvar.1.notify_one();
+    }
     /// Resets the FileStream to a given position.
     pub fn reset_pos(&mut self, pos: u64) {
-        self.tx.lock().unwrap().push(SpoolerCtl::Seek(pos));
+        self.send(SpoolerCtl::Seek(pos));
     }
     /// Resets the FileStream to its start position.
     pub fn reset(&mut self) {
@@ -83,11 +89,11 @@ impl FileStreamX {
     /// Starts playing the FileStream from the beginning.
     pub fn start(&mut self) {
         self.reset();
-        self.tx.lock().unwrap().push(SpoolerCtl::SetActive(true));
+        self.send(SpoolerCtl::SetActive(true));
     }
     /// Pauses the FileStream.
     pub fn pause(&mut self) {
-        self.tx.lock().unwrap().push(SpoolerCtl::SetActive(false));
+        self.send(SpoolerCtl::SetActive(false));
     }
     /// Resumes the FileStream.
     ///
@@ -95,11 +101,11 @@ impl FileStreamX {
     /// reset the stream's position - whereas this just sets the stream as active and
     /// calls it good.
     pub fn unpause(&mut self) {
-        self.tx.lock().unwrap().push(SpoolerCtl::SetActive(true));
+        self.send(SpoolerCtl::SetActive(true));
     }
     /// Sets the volume of the FileStream.
     pub fn set_vol(&mut self, vol: f32) {
-        self.tx.lock().unwrap().push(SpoolerCtl::SetVol(vol));
+        self.send(SpoolerCtl::SetVol(vol));
     }
     pub fn uuid(&self) -> Uuid {
         self.uuid
@@ -114,14 +120,15 @@ struct ChannelDescriptor {
 struct FileStreamSpooler {
     decoder: Decoder<File>,
     notifier: (Uuid, BackendSender),
-    rx: Consumer<SpoolerCtl>,
+    rx: mpsc::Receiver<SpoolerCtl>,
     chans: Vec<ChannelDescriptor>,
     pos: Duration,
     eof: bool,
-    filled: bool
+    filled: bool,
+    cvar: Arc<(Mutex<()>, Condvar)>
 }
 impl FileStreamSpooler {
-    fn new(dec: Decoder<File>, not: (Uuid, BackendSender), rx: Consumer<SpoolerCtl>, chans: Vec<ChannelDescriptor>) -> Self {
+    fn new(dec: Decoder<File>, not: (Uuid, BackendSender), rx: mpsc::Receiver<SpoolerCtl>, chans: Vec<ChannelDescriptor>, cvar: Arc<(Mutex<()>, Condvar)>) -> Self {
         FileStreamSpooler {
             decoder: dec,
             notifier: not,
@@ -129,7 +136,8 @@ impl FileStreamSpooler {
             chans: chans,
             pos: Duration::new(0, 0),
             eof: false,
-            filled: false
+            filled: false,
+            cvar: cvar
         }
     }
     fn reset_self(&mut self) {
@@ -180,7 +188,7 @@ impl FileStreamSpooler {
     }
     fn spool(&mut self) {
         'spooler: loop {
-            if let Some(msg) = self.rx.try_pop() {
+            if let Ok(msg) = self.rx.try_recv() {
                 self.handle(msg);
             }
             for (i, &mut ChannelDescriptor { ref mut lp_rx, ref mut bufs, ref mut buf_tx, .. }) in self.chans.iter_mut().enumerate() {
@@ -189,7 +197,9 @@ impl FileStreamSpooler {
                     lp = Some(stat);
                 }
                 if let Some(lp) = lp {
-                    self.filled = false;
+                    if buf_tx.size() * 2 < buf_tx.capacity() {
+                        self.filled = false;
+                    }
                     self.notifier.1.send(Message::Update(
                         self.notifier.0,
                         command::new_update(move |cmd: &mut LoadCommand| {
@@ -200,8 +210,8 @@ impl FileStreamSpooler {
                 }
                 Self::send_buffers(buf_tx, bufs);
             }
-            // FIXME: eventually, find some way to select over these
             if self.eof == true || self.filled == true {
+                self.cvar.1.wait(&mut self.cvar.0.lock());
                 continue 'spooler;
             }
             match self.decoder.get_frame() {
@@ -296,7 +306,8 @@ pub struct FileStream {
     lp: LiveParameters,
     sample_rate: u32,
     uuid: Uuid,
-    last_sec: u64
+    last_sec: u64,
+    cvar: Arc<(Mutex<()>, Condvar)>
 }
 pub struct FileInfo {
     pub n_chans: usize,
@@ -362,8 +373,8 @@ impl FileStream {
         let info = Self::info(filename.as_path())?;
 
         let lp = LiveParameters::new(Duration::new(0, 0), info.duration);
-        let (spooler_ctl_tx, spooler_ctl_rx) = bounded_spsc_queue::make(25);
-        let spooler_ctl_tx = Arc::new(Mutex::new(spooler_ctl_tx));
+        let (spoolertx, spoolerrx) = mpsc::channel();
+        let cvar = Arc::new((Mutex::new(()), Condvar::new()));
         let mut streams = Vec::new();
         let mut descriptors = Vec::new();
         for _ in 0..info.n_chans {
@@ -385,17 +396,19 @@ impl FileStream {
                 lp: lp.clone(),
                 sample_rate: info.sample_rate,
                 uuid: uu,
-                last_sec: 0
+                last_sec: 0,
+                cvar: cvar.clone()
             }, FileStreamX {
-                tx: spooler_ctl_tx.clone(),
-                uuid: uu.clone()
+                tx: spoolertx.clone(),
+                uuid: uu.clone(),
+                cvar: cvar.clone()
             }));
         }
         thread::spawn(move || {
             let mut file = File::open(filename.as_path()).unwrap();
             let mut decoder = Decoder::decode(file).unwrap();
 
-            let mut spooler = FileStreamSpooler::new(decoder, (auuid, channel), spooler_ctl_rx, descriptors);
+            let mut spooler = FileStreamSpooler::new(decoder, (auuid, channel), spoolerrx, descriptors, cvar);
             spooler.spool();
         });
         Ok(streams)
@@ -419,6 +432,7 @@ impl mixer::Source for FileStream {
                     }
                 }
             }
+            self.cvar.1.notify_one();
             self.status_tx.try_push(self.lp.clone());
         }
         if self.lp.active == false {
@@ -438,10 +452,12 @@ impl mixer::Source for FileStream {
                 self.lp.stopped = true;
                 self.lp.pos = Duration::new(0, 0);
                 self.status_tx.try_push(self.lp.clone());
+                self.cvar.1.notify_one();
             }
             else if pos.as_secs() > self.last_sec {
                 self.last_sec = pos.as_secs();
                 self.status_tx.try_push(self.lp.clone());
+                self.cvar.1.notify_one();
             }
         }
         else {

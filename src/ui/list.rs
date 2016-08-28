@@ -198,7 +198,7 @@ impl ListController {
 
     }
     fn chain_render(&self, ti: &TreeIter, ct: &ChainType, cidx: usize, ft: bool) {
-        let ident = format!("{}{}", ct, cidx);
+        let ident = format!("{}/{}", ct, cidx);
         let ft = if ft {
             format!("go-down")
         }
