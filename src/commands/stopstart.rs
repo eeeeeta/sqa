@@ -1,9 +1,10 @@
 use super::prelude::*;
 use streamv2::FileStreamX;
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub enum StopStartChoice {
     Stop,
-    Start,
+    Unpause,
+    Pause,
     ReStart
 }
 #[derive(Clone)]
@@ -23,7 +24,8 @@ impl Command for StopStartCommand {
     fn name(&self) -> &'static str {
         match self.which {
             StopStartChoice::Stop => "Stop",
-            StopStartChoice::Start => "Start",
+            StopStartChoice::Unpause => "Unpause",
+            StopStartChoice::Pause => "Pause",
             StopStartChoice::ReStart => "Restart"
         }
     }
@@ -67,7 +69,8 @@ impl Command for StopStartCommand {
         };
         let verbiage = match self.which {
             StopStartChoice::Stop => "Provide an identifier to stop, or leave blank to stop all streams.",
-            StopStartChoice::Start => "Provide an identifier to start, or leave blank to start all streams.",
+            StopStartChoice::Unpause => "Provide an identifier to unpause, or leave blank to unpause all streams.",
+            StopStartChoice::Pause => "Provide an identifier to pause, or leave blank to pause all streams.",
             StopStartChoice::ReStart => "Provide an identifier to restart, or leave blank to restart all streams."
         };
         vec![
@@ -82,8 +85,9 @@ impl Command for StopStartCommand {
             }
             if let Some(mut ctl) = v.ctl_stream() {
                 match self.which {
-                    StopStartChoice::Stop => ctl.pause(),
-                    StopStartChoice::Start => ctl.unpause(),
+                    StopStartChoice::Stop => ctl.stop(),
+                    StopStartChoice::Pause => ctl.pause(),
+                    StopStartChoice::Unpause => ctl.unpause(),
                     StopStartChoice::ReStart => ctl.restart()
                 }
             }

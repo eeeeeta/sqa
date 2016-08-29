@@ -27,6 +27,8 @@ pub trait Sink {
     fn wire(&mut self, cli: Box<Source>) -> Option<Box<Source>>;
     /// Retrieves the client with a given `uuid` from this sink.
     fn unwire(&mut self, uuid: Uuid) -> Option<Box<Source>>;
+    /// Called on sink destruction. Returns all sources this sink owns.
+    fn drop(&mut self) -> Vec<Box<Source>>;
     /// Get this object's Universally Unique Identifier (UUID).
     fn uuid(&self) -> Uuid;
 }
@@ -112,6 +114,17 @@ impl Magister {
         }
         source
     }
+    pub fn locate_sink(&mut self, from: Uuid) -> Option<Box<Sink>> {
+        if let Some(mut snk) = self.sinks.remove(&from) {
+            for src in snk.drop() {
+                self.add_source(src);
+            }
+            Some(snk)
+        }
+        else {
+            None
+        }
+    }
     pub fn wire(&mut self, from: Uuid, to: Uuid) -> Result<WireResult, WireResult> {
         let source = self.locate_source(from);
         if source.is_none() {
@@ -163,6 +176,12 @@ impl Sink for DeviceSink {
         else {
             None
         }
+    }
+    fn drop(&mut self) -> Vec<Box<Source>> {
+        let mut lck = self.txrx.lock().unwrap();
+        let &mut (ref mut tx, ref mut rx) = lck.deref_mut();
+        tx.push((self.id, None));
+        rx.pop().map(|x| vec![x]).unwrap_or(vec![])
     }
     fn uuid(&self) -> Uuid {
         self.uuid.clone()
@@ -256,6 +275,16 @@ impl Sink for QChannelX {
             None
         }
     }
+    fn drop(&mut self) -> Vec<Box<Source>> {
+        let mut ret = vec![];
+        for uu in self.sent_uuids.iter_mut() {
+            self.tx.push(QCXRequest::GetClient(*uu));
+            if let Some(cli) = self.rx.pop() {
+                ret.push(cli);
+            }
+        }
+        ret
+    }
 }
 pub struct QChannel {
     clients: Vec<Box<Source>>,
@@ -269,7 +298,7 @@ impl QChannel {
         let (qch_tx, x_rx) = bounded_spsc_queue::make(10);
         let (x_tx, qch_rx) = bounded_spsc_queue::make(10);
         (QChannel {
-            clients: Vec::new(),
+            clients: Vec::with_capacity(100),
             rx: qch_rx,
             tx: qch_tx,
             sample_rate: sample_rate,

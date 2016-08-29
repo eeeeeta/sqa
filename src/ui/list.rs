@@ -26,7 +26,6 @@ fn extract_ft(ts: &TreeStore, ti: &TreeIter, col: i32) -> bool {
         false
     }
 }
-
 pub struct ListController {
     store: TreeStore,
     view: TreeView,
@@ -39,6 +38,20 @@ pub struct ListController {
     tx: BackendSender,
 }
 impl ListController {
+    pub fn get_sender_and_sel(selfish: Rc<RefCell<Self>>) -> Option<(UISender, BackendSender, Uuid)> {
+        let selfish = selfish.borrow();
+        if let Some((_, iter)) = selfish.sel.get_selected() {
+            if let Some(uu) = extract_uuid(&selfish.store, &iter, 5) {
+                Some((selfish.sender.clone(), selfish.tx.clone(), uu))
+            }
+            else {
+                None
+            }
+        }
+        else {
+            None
+        }
+    }
     pub fn new(sender: UISender, tx: BackendSender, compl: ListStore, b: &Builder) -> Rc<RefCell<Self>> {
         let view: TreeView = b.get_object("command-tree-view").unwrap();
         view.set_enable_search(false);
@@ -59,40 +72,31 @@ impl ListController {
             if !ek.get_state().contains(::gdk::CONTROL_MASK) {
                 match ek.get_keyval() {
                     gkey::e => {
-                        let (mut sender, uu) = {
-                            let selfish = ret.borrow();
-                            if let Some((_, iter)) = selfish.sel.get_selected() {
-                                if let Some(uu) = extract_uuid(&selfish.store, &iter, 5) {
-                                    (selfish.sender.clone(), uu)
-                                }
-                                else {
-                                    return Inhibit(false)
-                                }
-                            }
-                            else {
-                                return Inhibit(false)
-                            }
-                        };
-                        sender.send(Message::UIBeginEditing(uu));
-                        Inhibit(true)
+                        if let Some((mut sender, _, uu)) = Self::get_sender_and_sel(ret.clone()) {
+                            sender.send(Message::UIBeginEditing(uu));
+                            Inhibit(true)
+                        }
+                        else {
+                            Inhibit(false)
+                        }
+                    },
+                    gkey::x => {
+                        if let Some((_, sender, uu)) = Self::get_sender_and_sel(ret.clone()) {
+                            sender.send(Message::Delete(uu)).unwrap();
+                            Inhibit(true)
+                        }
+                        else {
+                            Inhibit(false)
+                        }
                     },
                     gkey::f => {
-                        let (sender, uu, to) = {
-                            let selfish = ret.borrow();
-                            if let Some((_, iter)) = selfish.sel.get_selected() {
-                                if let Some(uu) = extract_uuid(&selfish.store, &iter, 5) {
-                                    (selfish.tx.clone(), uu, !extract_ft(&selfish.store, &iter, 6))
-                                }
-                                else {
-                                    return Inhibit(false)
-                                }
-                            }
-                            else {
-                                return Inhibit(false)
-                            }
-                        };
-                        sender.send(Message::SetFallthru(uu, to)).unwrap();
-                        Inhibit(true)
+                        if let Some((mut sender, _, uu)) = Self::get_sender_and_sel(ret.clone()) {
+                            sender.send(Message::UIToggleFallthru(uu));
+                            Inhibit(true)
+                        }
+                        else {
+                            Inhibit(false)
+                        }
                     },
                     _ => Inhibit(false)
                 }
@@ -119,6 +123,15 @@ impl ListController {
             }
         }
         None
+    }
+    pub fn get_fallthru_state(selfish: Rc<RefCell<Self>>, uu: Uuid) -> bool {
+        let selfish = selfish.borrow();
+        if let Some(ti) = selfish.locate(uu) {
+            extract_ft(&selfish.store, &ti, 6)
+        }
+        else {
+            false
+        }
     }
     fn locate(&self, uu: Uuid) -> Option<TreeIter> {
         self.run_for_each(|ti, ts| {
@@ -175,7 +188,7 @@ impl ListController {
             2, // description
             3, // icon
         ], &vec![
-            &format!("{}{}", ct, i) as &ToValue,
+            &format!("{}-{}", ct, i) as &ToValue,
             &format!("{}", uu) as &ToValue,
             &desc as &ToValue,
             &icon as &ToValue,
@@ -198,7 +211,7 @@ impl ListController {
 
     }
     fn chain_render(&self, ti: &TreeIter, ct: &ChainType, cidx: usize, ft: bool) {
-        let ident = format!("{}/{}", ct, cidx);
+        let ident = format!("{}-{}", ct, cidx);
         let ft = if ft {
             format!("go-down")
         }

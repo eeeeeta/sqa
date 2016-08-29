@@ -8,12 +8,13 @@ use std::ops::Rem;
 use state::Message;
 use uuid::Uuid;
 use state::ChainType;
+use std::ascii::AsciiExt;
 use super::line::{CommandLine, CommandLineFSM};
-use super::{UISender, UIMode};
+use super::{UISender, UIState};
 
 pub struct CommandChooserController {
     grid: Grid,
-    mode: UIMode,
+    state: UIState,
     sender: UISender,
     back_btn: Button,
     status_lbl: Label,
@@ -21,14 +22,14 @@ pub struct CommandChooserController {
     prompt_pop: Popover,
     prompt_lbl: Label,
     prompt_ent: Entry,
-    prompt_handler: Box<Fn(String)>,
+    prompt_handler: Box<Fn(&mut CommandChooserController, String) -> bool>,
     cl: Rc<RefCell<CommandLine>>,
     pos: Vec<usize>,
     top: Vec<(&'static str, gkey::Key, GridNode)>
 }
 
 impl CommandChooserController {
-    pub fn new(cl: Rc<RefCell<CommandLine>>, mode: UIMode, sender: UISender, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(cl: Rc<RefCell<CommandLine>>, state: UIState, sender: UISender, b: &Builder) -> Rc<RefCell<Self>> {
         let ret = Rc::new(RefCell::new(CommandChooserController {
             grid: b.get_object("cc-grid").unwrap(),
             back_btn: b.get_object("cc-end-button").unwrap(),
@@ -37,20 +38,31 @@ impl CommandChooserController {
             prompt_pop: b.get_object("prompt-popover").unwrap(),
             prompt_lbl: b.get_object("prompt-popover-label").unwrap(),
             prompt_ent: b.get_object("prompt-popover-entry").unwrap(),
-            prompt_handler: Box::new(|_| {}),
+            prompt_handler: Box::new(|_, _| {true}),
             pos: vec![],
             cl: cl,
             top: get_chooser_grid(),
-            mode: mode,
+            state: state,
             sender: sender
         }));
         ret.borrow().prompt_ent.connect_activate(clone!(ret; |ent| {
             let mut ret = ret.borrow_mut();
             if let Some(txt) = ent.get_text() {
-                (ret.prompt_handler)(txt);
-                ret.prompt_handler = Box::new(|_| {});
+                let ph = ::std::mem::replace(&mut ret.prompt_handler, Box::new(|_, _| {true}));
+                if ph(&mut ret, txt) {
+                    ret.prompt_pop.hide();
+                }
+                else {
+                    let sctx = ret.prompt_pop.get_style_context().unwrap();
+                    sctx.add_class("err-pulse");
+                    ::gdk::beep();
+                    timeout_add(450, move || {
+                        sctx.remove_class("err-pulse");
+                        Continue(false)
+                    });
+                    ret.prompt_handler = ph;
+                }
             }
-            ret.prompt_pop.hide();
         }));
         ret.borrow().prompt_ent.connect_icon_press(|ent, _, _| {
             ent.activate();
@@ -114,11 +126,8 @@ impl CommandChooserController {
             let selfish = selfish_.borrow();
             if !cl.ready { return; }
             if let CommandLineFSM::Editing(cd, creation) = ::std::mem::replace(&mut cl.state, CommandLineFSM::Idle) {
-                if creation {
-                    match selfish.mode {
-                        UIMode::Live(_) => cl.tx.send(Message::Execute(cd.uuid)).unwrap(),
-                        UIMode::Blind(ref ct) => cl.tx.send(Message::Attach(cd.uuid, ct.clone())).unwrap()
-                    }
+                if creation && selfish.state.live {
+                    cl.tx.send(Message::Execute(cd.uuid)).unwrap();
                 }
             }
         }
@@ -145,9 +154,11 @@ impl CommandChooserController {
         }
         (ptr, st)
     }
-    pub fn set_mode(selfish: Rc<RefCell<Self>>, mode: UIMode) {
+    pub fn set_ui_state(selfish: Rc<RefCell<Self>>, state: UIState) {
         {
-            selfish.borrow_mut().mode = mode;
+            let mut selfish = selfish.borrow_mut();
+            selfish.state = state.clone();
+            CommandLine::set_ui_state(selfish.cl.clone(), state);
         }
         CommandChooserController::update(selfish);
     }
@@ -184,18 +195,20 @@ impl CommandChooserController {
                 },
                 &GridNode::Mode => {
                     btn.connect_clicked(clone!(selfish_; |_s| {
-                        let (mut sender, mode) = {
+                        let (mut sender, live) = {
                             let selfish = selfish_.borrow_mut();
-                            selfish.pop.hide();
-                            (selfish.sender.clone(), match selfish.mode {
-                                UIMode::Live(ref ct) => UIMode::Blind(ct.clone()),
-                                UIMode::Blind(ref ct) => UIMode::Live(ct.clone())
-                            })
+                            (selfish.sender.clone(), !selfish.state.live)
                         };
-                        sender.send(Message::UIChangeMode(mode));
+                        sender.send(Message::UIChangeLive(live));
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode-mode");
                     lbl.get_style_context().unwrap().add_class("gridnode");
+                    if selfish.state.live {
+                        lbl.set_markup(&format!("»Blind <b>O</b>"));
+                    }
+                    else {
+                        lbl.set_markup(&format!("»Live <b>O</b>"));
+                    }
                 },
                 &GridNode::Clear => {
                     let ref cl = selfish.cl;
@@ -212,44 +225,85 @@ impl CommandChooserController {
                         btn.set_sensitive(false);
                     }
                 },
-                &GridNode::Go => {
+                &GridNode::Fallthru => {
                     let ref cl = selfish.cl;
                     btn.connect_clicked(clone!(selfish_, cl; |_s| {
-                        {
-                            let cl = cl.borrow();
-                            let selfish = selfish_.borrow();
-                            let ct = selfish.mode.get_ct();
-                            cl.tx.send(Message::Go(ct)).unwrap();
+                        if let CommandLineFSM::Editing(ref cd, _) = cl.borrow().state {
+                            selfish_.borrow_mut().sender.send(Message::UIToggleFallthru(cd.uuid));
                         }
-                        selfish_.borrow().pop.hide();
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode");
-                    lbl.get_style_context().unwrap().add_class("gridnode-execute");
-                    lbl.set_markup(&format!("Go {} <b>G</b>", selfish.mode.get_ct()));
+                    if let CommandLineFSM::Editing(..) = cl.borrow().state {
+                        lbl.get_style_context().unwrap().add_class("gridnode-choice");
+                        btn.set_sensitive(true);
+                    }
+                    else {
+                        btn.set_sensitive(false);
+                    }
                 },
-                &GridNode::GotoQ => {
+                &GridNode::Reorder => {
                     let ref cl = selfish.cl;
-                    selfish.prompt_pop.set_relative_to(Some(&cl.borrow().line));
                     btn.connect_clicked(clone!(selfish_; |_s| {
                         {
                             let mut selfish = selfish_.borrow_mut();
                             selfish.pop.hide();
-                            selfish.prompt_lbl.set_markup(&format!("<b>Go to cue:</b>"));
-                            let sender = selfish.sender.clone();
-                            let mode = selfish.mode.clone();
-                            selfish.prompt_handler = Box::new(move |txt| {
-                                let mode = match mode {
-                                    UIMode::Live(_) => UIMode::Live(ChainType::Q(txt)),
-                                    UIMode::Blind(_) => UIMode::Blind(ChainType::Q(txt))
-                                };
-                                // FIXME: why the double clone?
-                                sender.clone().send(Message::UIChangeMode(mode));
+                            selfish.prompt_lbl.set_markup(&format!(
+                                "<b>New position:</b>
+<small>Enter a chain name (eg: <i>X</i>, <i>Q1</i>) to attach to,
+followed by an optional position (eg: <i>X-1</i>, <i>Q1-4</i>)</small>"));
+                            selfish.prompt_handler = Box::new(move |s, txt| {
+                                let mut txt = txt.split("-");
+                                let chn = txt.next();
+                                let pos = txt.next();
+
+                                let mut ct = None;
+                                let mut idx = None;
+                                if let Some(chn) = chn {
+                                    let mut chn = chn.to_string();
+                                    if chn.len() >= 1 {
+                                        match chn.remove(0).to_ascii_lowercase() {
+                                            'x' => ct = Some(ChainType::Unattached),
+                                            'q' => {
+                                                if let Ok(num) = chn.parse::<usize>() {
+                                                    ct = Some(ChainType::Q(num));
+                                                }
+                                            },
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                if let Some(pos) = pos {
+                                    if let Ok(pos) = pos.parse::<usize>() {
+                                        idx = Some(pos);
+                                    }
+                                }
+                                let mut cl = s.cl.borrow_mut();
+                                if let CommandLineFSM::Editing(cd, _) = cl.state.clone() {
+                                    if let Some(ct) = ct {
+                                        if let Some(idx) = idx {
+                                            cl.tx.send(Message::Insert(cd.uuid, ct, idx)).unwrap();
+                                            return true;
+                                        }
+                                        else {
+                                            cl.tx.send(Message::Attach(cd.uuid, ct)).unwrap();
+                                            return true;
+                                        }
+                                    }
+                                }
+                                false
                             });
                             selfish.prompt_pop.show_all();
                         }
+                        selfish_.borrow().pop.hide();
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode");
-                    lbl.get_style_context().unwrap().add_class("gridnode-clear");
+                    if let CommandLineFSM::Editing(..) = cl.borrow().state {
+                        lbl.get_style_context().unwrap().add_class("gridnode-execute");
+                        btn.set_sensitive(true);
+                    }
+                    else {
+                        btn.set_sensitive(false);
+                    }
                 },
                 &GridNode::Execute => {
                     let ref cl = selfish.cl;
@@ -258,16 +312,18 @@ impl CommandChooserController {
                         selfish_.borrow().pop.hide();
                     }));
                     lbl.get_style_context().unwrap().add_class("gridnode");
-                    match selfish.mode {
-                        UIMode::Live(_) => lbl.set_markup(&format!("Execute <b>↵</b>")),
-                        UIMode::Blind(ref ct) => lbl.set_markup(&format!("Attach to {} <b>↵</b>", ct))
+                    if selfish.state.live {
+                        lbl.set_markup(&format!("Execute <b>↵</b>"));
+                    }
+                    else {
+                        lbl.set_markup(&format!("Create <b>↵</b>"));
                     }
                     if cl.borrow().ready {
                         btn.set_sensitive(true);
                         lbl.get_style_context().unwrap().add_class("gridnode-execute");
                         if let CommandLineFSM::Editing(_, creation) = cl.borrow().state {
                             if !creation {
-                                lbl.set_markup(&format!("Done <b>↵</b>"));
+                                lbl.set_markup(&format!("Finish <b>↵</b>"));
                             }
                         }
                     }

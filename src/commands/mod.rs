@@ -16,9 +16,7 @@ use gdk::enums::key as gkeys;
 enum Commands {
     Load,
     Vol,
-    Stop,
-    Start,
-    ReStart,
+    StopStart(stopstart::StopStartChoice),
     Output
 }
 #[derive(Copy, Clone)]
@@ -30,9 +28,7 @@ impl CommandSpawner {
         match self.cmd {
             Commands::Load => Box::new(LoadCommand::new()),
             Commands::Vol => Box::new(VolCommand::new()),
-            Commands::Stop => Box::new(StopStartCommand::new(stopstart::StopStartChoice::Stop)),
-            Commands::Start => Box::new(StopStartCommand::new(stopstart::StopStartChoice::Start)),
-            Commands::ReStart => Box::new(StopStartCommand::new(stopstart::StopStartChoice::ReStart)),
+            Commands::StopStart(c) => Box::new(StopStartCommand::new(c)),
             Commands::Output => Box::new(OutputCommand::new()),
         }
     }
@@ -41,32 +37,30 @@ pub enum GridNode {
     Choice(CommandSpawner),
     Grid(Vec<(&'static str, gkey, GridNode)>),
     Clear,
+    Fallthru,
     Execute,
+    Reorder,
     Mode,
-    Go,
-    GotoQ
 }
 pub fn get_chooser_grid() -> Vec<(&'static str, gkey, GridNode)> {
     vec![
         ("<b>Stream</b> <i>S</i>", gkeys::s, GridNode::Grid(vec![
-            ("Stop <i>O</i>", gkeys::o, GridNode::Choice(CommandSpawner { cmd: Commands::Stop })),
-            ("Start <i>S</i>", gkeys::s, GridNode::Choice(CommandSpawner { cmd: Commands::Start })),
-            ("Restart <i>R</i>", gkeys::r, GridNode::Choice(CommandSpawner { cmd: Commands::ReStart })),
+            ("<b>Load</b> <i>L</i>", gkeys::l, GridNode::Choice(CommandSpawner { cmd: Commands::Load })),
+            ("Stop <i>O</i>", gkeys::o, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::Stop) })),
+            ("Unpause <i>U</i>", gkeys::u, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::Unpause) })),
+            ("Pause <i>P</i>", gkeys::p, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::Pause) })),
+            ("Restart <i>R</i>", gkeys::r, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::ReStart) })),
             ("Volume <i>V</i>", gkeys::v, GridNode::Choice(CommandSpawner { cmd: Commands::Vol }))
-        ])),
-        ("<b>I/O</b> <i>I</i>", gkeys::i, GridNode::Grid(vec![
-            ("Load <i>L</i>", gkeys::l, GridNode::Choice(CommandSpawner { cmd: Commands::Load }))
         ])),
         ("<b>Mixer</b> <i>M</i>", gkeys::m, GridNode::Grid(vec![
             ("Output <i>O</i>", gkeys::o, GridNode::Choice(CommandSpawner { cmd: Commands::Output }))
         ])),
-        ("<b>Cue</b> <i>Q</i>", gkeys::q, GridNode::Grid(vec![
-            ("Go To <i>G</i>", gkeys::g, GridNode::GotoQ)
-        ])),
-        ("Mode <i>O</i>", gkeys::o, GridNode::Mode),
+        // Some of these commands have their text overwritten by the CommandChooserController
+        // at runtime. It should be clear which ones they are.
+        ("my hands are typing words", gkeys::o, GridNode::Mode),
         ("Clear <i>C</i>", gkeys::c, GridNode::Clear),
-        // The menu will overwrite the following commands' text depending on mode.
-        ("[left blank]", gkeys::g, GridNode::Go),
-        ("[left blank]", gkeys::Return, GridNode::Execute),
+        ("F'thru <i>F</i>", gkeys::f, GridNode::Fallthru),
+        ("Reorder <i>R</i>", gkeys::r, GridNode::Reorder),
+        ("here have code", gkeys::Return, GridNode::Execute),
     ]
 }

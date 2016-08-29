@@ -24,6 +24,7 @@ pub trait StreamController {
     fn unpause(&mut self);
     fn pause(&mut self);
     fn restart(&mut self);
+    fn stop(&mut self);
 }
 pub struct CommandArgs<'a> {
     ctx: &'a mut Context<'a>,
@@ -51,7 +52,6 @@ pub trait Command: mopa::Any + Send + BoxClone + 'static {
 
     fn can_ctl_stream(&self) -> bool { false }
     fn ctl_stream<'a>(&'a mut self) -> Option<Box<StreamController + 'a>> { None }
-    fn drop(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) {}
 }
 
 mopafy!(Command);

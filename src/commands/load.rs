@@ -2,6 +2,7 @@ use super::prelude::*;
 use streamv2::{FileStream, FileStreamX, LiveParameters};
 use std::time::Duration;
 use std::path::{Path, PathBuf};
+use std::convert::From;
 
 #[derive(Clone)]
 pub struct StreamInfo {
@@ -21,10 +22,26 @@ impl<'a> StreamController for FileStreamController<'a> {
     fn restart(&mut self) {
         self.si.ctl.start();
     }
+    fn stop(&mut self) {
+        self.si.ctl.stop();
+    }
+}
+fn describe_path(p: &Option<PathBuf>) -> String {
+    if let &Some(ref pb) = p {
+        if let Some(filename) = pb.as_path().file_name() {
+            format!("{}", filename.to_string_lossy())
+        }
+        else {
+            format!("{}", pb.to_string_lossy())
+        }
+    }
+    else {
+        format!("[???]")
+    }
 }
 #[derive(Clone)]
 pub struct LoadCommand {
-    file: Option<String>,
+    file: Option<PathBuf>,
     ident: Option<String>,
     ident_set: bool,
     start: bool,
@@ -45,8 +62,8 @@ impl Command for LoadCommand {
     fn name(&self) -> &'static str { "Load file" }
     fn desc(&self, _: &Context) -> String {
         match self.ident {
-            None => format!("Load file <b>{}</b>", desc!(self.file)),
-            Some(ref id) => format!("Load file <b>{}</b> as $<b>{}</b>", desc!(self.file), id)
+            None => format!("Load file <b>{}</b>", describe_path(&self.file)),
+            Some(ref id) => format!("Load file <b>{}</b> as $<b>{}</b>", describe_path(&self.file), id)
         }
     }
     fn run_state(&self) -> Option<CommandState> {
@@ -63,11 +80,11 @@ impl Command for LoadCommand {
     }
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
         let file_getter = move |selfish: &Self| -> Option<String> {
-            selfish.file.as_ref().map(|x| x.clone())
+            selfish.file.as_ref().map(|x| x.to_string_lossy().into_owned())
         };
         let file_setter = move |selfish: &mut Self, val: Option<String>| {
             if let Some(val) = val {
-                selfish.file = Some(val.clone());
+                selfish.file = Some(From::from(val));
                 /* FIXME: find a way to make this work
                 if !selfish.ident_set {
                     if let Some(osstr) = ::std::path::Path::new(&val).file_stem() {
@@ -88,7 +105,7 @@ impl Command for LoadCommand {
                     Some(format!("{}", e))
                 }
                 else if info.unwrap().sample_rate != 44_100 {
-                    Some(format!("SQA only supports files with a samplerate of 44.1kHz."))
+                    Some(format!("SQA currently only supports files with a samplerate of 44.1kHz."))
                 }
                 else {
                     None
@@ -148,9 +165,7 @@ impl Command for LoadCommand {
     fn load(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) {
         let file = self.file.clone().unwrap();
         let ident = self.ident.clone();
-        let mut path = PathBuf::new();
-        path.push(Path::new(&file));
-        let streams = FileStream::new(path,
+        let streams = FileStream::new(file,
                                       evl.channel(),
                                       uu).unwrap();
         for StreamInfo { ctl, .. } in ::std::mem::replace(&mut self.streams, Vec::new()) {
@@ -168,6 +183,11 @@ impl Command for LoadCommand {
             });
             let dest = ctx.mstr.ichans[i].1;
             ctx.mstr.wire(uu, dest).unwrap();
+        }
+    }
+    fn unload(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>, _: Uuid) {
+        for StreamInfo { ctl, .. } in ::std::mem::replace(&mut self.streams, Vec::new()) {
+            ctx.mstr.locate_source(ctl.uuid()).unwrap();
         }
     }
     fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) -> Result<bool, String> {

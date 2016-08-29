@@ -29,6 +29,7 @@ use uuid::Uuid;
 use std::rc::Rc;
 use std::fmt;
 use std::cell::RefCell;
+use std::default::Default;
 use std::sync::mpsc::{Sender, Receiver};
 use backend::BackendSender;
 use gtk::{Builder, ListStore, Window};
@@ -56,23 +57,15 @@ impl UISender {
     }
 }
 #[derive(Clone)]
-pub enum UIMode {
-    Live(ChainType),
-    Blind(ChainType)
+pub struct UIState {
+    live: bool,
+    sel: Option<(ChainType, usize)>
 }
-impl UIMode {
-    fn get_ct(&self) -> ChainType {
-        match self {
-            &UIMode::Live(ref ct) => ct.clone(),
-            &UIMode::Blind(ref ct) => ct.clone(),
-        }
-    }
-}
-impl fmt::Display for UIMode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &UIMode::Live(ref ct) => write!(f, "LIVE: {}", ct),
-            &UIMode::Blind(ref ct) => write!(f, "BLIND: {}", ct),
+impl Default for UIState {
+    fn default() -> Self {
+        UIState {
+            live: true,
+            sel: None
         }
     }
 }
@@ -83,21 +76,23 @@ pub struct UIContext {
     pub list: Rc<RefCell<ListController>>,
     pub rx: Receiver<Message>,
     pub uitx: Sender<Message>,
-    pub mode: UIMode
+    pub tx: BackendSender,
+    pub state: UIState
 }
 impl UIContext {
     pub fn init(sender: BackendSender, uisender: Sender<Message>, recvr: Receiver<Message>, tn: ThreadNotifier, win: Window, builder: &Builder)  -> Rc<RefCell<Self>> {
         let compl: ListStore = builder.get_object("command-identifiers-list").unwrap();
-        let line = CommandLine::new(sender.clone(), compl.clone(), &builder);
-        let ccc = CommandChooserController::new(line.clone(), UIMode::Live(ChainType::Unattached), UISender::new(uisender.clone(), tn.clone()), &builder);
+        let line = CommandLine::new(sender.clone(), compl.clone(), Default::default(), &builder);
+        let ccc = CommandChooserController::new(line.clone(), Default::default(), UISender::new(uisender.clone(), tn.clone()), &builder);
         let uic = Rc::new(RefCell::new(UIContext {
             chooser: ccc,
             line: line,
             rx: recvr,
-            list: ListController::new(UISender::new(uisender.clone(), tn.clone()), sender, compl.clone(), &builder),
+            list: ListController::new(UISender::new(uisender.clone(), tn.clone()), sender.clone(), compl.clone(), &builder),
             completions: compl,
+            tx: sender,
             uitx: uisender,
-            mode: UIMode::Live(ChainType::Unattached)
+            state: Default::default()
         }));
         tn.register_handler(clone!(uic; || {
             UIContext::handler(uic.clone());
@@ -127,7 +122,7 @@ impl UIContext {
     fn update_cline(&self, uu: Uuid) -> bool {
         match self.line.borrow().state {
             CommandLineFSM::AwaitingCreation(u2) => { u2 == uu },
-            CommandLineFSM::Editing(ref u2, ..) => { u2.uuid == uu },
+            CommandLineFSM::Editing(ref u2, _) => { u2.uuid == uu },
             _ => false
         }
     }
@@ -141,11 +136,6 @@ impl UIContext {
                     CommandChooserController::update(selfish.chooser.clone());
                 }
                 ListController::update_desc(selfish.list.clone(), uu, desc);
-            },
-            Message::UIBeginEditing(uu) => {
-                if let Some(desc) = selfish.list.borrow().commands.get(&uu) {
-                    CommandLine::edit_command(selfish.line.clone(), desc.clone());
-                }
             },
             Message::Deleted(uu) => {
                 if selfish.update_cline(uu) {
@@ -167,9 +157,21 @@ impl UIContext {
             Message::Identifiers(id) => {
                 ListController::update_identifiers(selfish.list.clone(), id);
             },
-            Message::UIChangeMode(ct) => {
-                selfish.mode = ct.clone();
-                CommandChooserController::set_mode(selfish.chooser.clone(), ct);
+            Message::UIChangeLive(live) => {
+                selfish.state.live = live;
+                CommandChooserController::set_ui_state(selfish.chooser.clone(), selfish.state.clone());
+            },
+            Message::UIChangeSel(sel) => {
+                selfish.state.sel = sel;
+                CommandChooserController::set_ui_state(selfish.chooser.clone(), selfish.state.clone());
+            },
+            Message::UIBeginEditing(uu) => {
+                if let Some(desc) = selfish.list.borrow().commands.get(&uu) {
+                    CommandLine::edit_command(selfish.line.clone(), desc.clone());
+                }
+            },
+            Message::UIToggleFallthru(uu) => {
+                selfish.tx.send(Message::SetFallthru(uu, !ListController::get_fallthru_state(selfish.list.clone(), uu))).unwrap();
             },
             _ => unimplemented!()
         }

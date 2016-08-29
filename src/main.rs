@@ -1,4 +1,4 @@
-#![feature(borrow_state, question_mark, dotdot_in_tuple_patterns)]
+#![feature(borrow_state, question_mark)]
 extern crate portaudio;
 extern crate chrono;
 extern crate time;

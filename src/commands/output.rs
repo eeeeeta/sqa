@@ -41,6 +41,11 @@ impl Command for OutputCommand {
             ctx.mstr.wire(src, self.chans[i]).unwrap();
         }
     }
+    fn unload(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>, _: Uuid) {
+        for uu in ::std::mem::replace(&mut self.chans, Vec::new()) {
+            ctx.mstr.locate_sink(uu);
+        }
+    }
     fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) -> Result<bool, String> {
         if self.chans.get(0).is_none() {
             self.load(ctx, evl, uu);

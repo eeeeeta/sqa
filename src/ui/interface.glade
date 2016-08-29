@@ -441,7 +441,11 @@
             <property name="visible">True</property>
             <property name="can_focus">False</property>
             <property name="margin_bottom">5</property>
-            <property name="label" translatable="yes">Go to cue:</property>
+            <property name="label" translatable="yes">Go to cue:
+&lt;small&gt;Enter a chain name (eg: &lt;i&gt;X&lt;/i&gt;, &lt;i&gt;Q1&lt;/i&gt;) followed by an optional position (eg: &lt;i&gt;X-1&lt;/i&gt;, &lt;i&gt;Q1-4&lt;/i&gt;)&lt;/small&gt;</property>
+            <property name="use_markup">True</property>
+            <property name="justify">center</property>
+            <property name="wrap">True</property>
           </object>
           <packing>
             <property name="expand">False</property>

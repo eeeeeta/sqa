@@ -1,6 +1,6 @@
 use command::{HunkTypes, HunkState};
 use commands::CommandSpawner;
-use ui::UIMode;
+use ui::UIState;
 use state::{CommandDescriptor, Message};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -38,6 +38,7 @@ pub struct CommandLine {
     pub h_image: Image,
     pub h_label: Label,
     pub completion: ListStore,
+    uistate: UIState
 }
 impl HunkUI {
     pub fn from_state(hs: HunkState) -> Self {
@@ -79,7 +80,7 @@ impl HunkUI {
     }
 }
 impl CommandLine {
-    pub fn new(tx: BackendSender, ts: ListStore, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(tx: BackendSender, ts: ListStore, state: UIState, b: &Builder) -> Rc<RefCell<Self>> {
         let line = CommandLine {
             state: CommandLineFSM::Idle,
             completion: ts,
@@ -89,10 +90,17 @@ impl CommandLine {
             line: b.get_object("command-line").unwrap(),
             h_image: b.get_object("line-hint-image").unwrap(),
             h_label: b.get_object("line-hint-label").unwrap(),
+            uistate: state
         };
         let line = Rc::new(RefCell::new(line));
         Self::update(line.clone(), None);
         line
+    }
+    pub fn set_ui_state(selfish: Rc<RefCell<Self>>, state: UIState) {
+        {
+            selfish.borrow_mut().uistate = state;
+        }
+        Self::update(selfish, None);
     }
     fn build(selfish2: Rc<RefCell<Self>>, cd: CommandDescriptor, creation: bool) {
         {
@@ -124,9 +132,9 @@ impl CommandLine {
     pub fn set_val(selfish: Rc<RefCell<Self>>, idx: usize, val: HunkTypes) {
         // FIXME: this check is required because some hunks' event handlers may fire on destruction.
         if let ::std::cell::BorrowState::Unused = selfish.borrow_state() {
-            let mut selfish = selfish.borrow_mut();
-            if let CommandLineFSM::Editing(ref cd, ..) = selfish.state {
-                selfish.tx.send(Message::SetHunk(cd.uuid, idx, val));
+            let selfish = selfish.borrow_mut();
+            if let CommandLineFSM::Editing(ref cd, _) = selfish.state {
+                selfish.tx.send(Message::SetHunk(cd.uuid, idx, val)).unwrap();
                 selfish.h_image.set_from_icon_name("dialog-warning", 1);
                 selfish.h_label.set_text("Waiting for backend...");
             }
@@ -161,14 +169,13 @@ impl CommandLine {
         }
         CommandLine::update(selfish, None);
     }
-
     pub fn update(selfish: Rc<RefCell<Self>>, input: Option<CommandDescriptor>) {
         let state = { selfish.borrow().state.clone() };
         if let CommandLineFSM::AwaitingCreation(uu) = state {
             {
                 let mut selfish = selfish.borrow_mut();
                 selfish.h_image.set_from_icon_name("dialog-warning", 1);
-                selfish.h_label.set_text("Waiting for backend...");
+                selfish.h_label.set_text("Awaiting command creation...");
                 selfish.clear();
                 let label = Label::new(None);
                 label.set_markup("<i>If you've been staring at this for too long, the backend may have died.</i>");
@@ -183,8 +190,14 @@ impl CommandLine {
         }
         else if let CommandLineFSM::Idle = state {
             let mut selfish = selfish.borrow_mut();
-            selfish.h_image.set_from_icon_name("dialog-question", 1);
-            selfish.h_label.set_text("Command line idle.");
+            if selfish.uistate.live {
+                selfish.h_image.set_from_icon_name("media-seek-forward", 1);
+                selfish.h_label.set_markup("<b>Live mode</b> - new commands will be immediately executed <span fgcolor=\"#888888\">(Ctrl+Enter O to change to Blind)</span>");
+            }
+            else {
+                selfish.h_image.set_from_icon_name("edit-cut", 1);
+                selfish.h_label.set_markup("<b>Blind mode</b> - new commands can be attached to cues <span fgcolor=\"#888888\">(Ctrl+Enter O to change to Live)</span>");
+            }
             selfish.clear();
             let label = Label::new(None);
             label.set_markup("<span fgcolor=\"#888888\"><i>Select a command with Ctrl+Enter</i></span>");
@@ -193,7 +206,7 @@ impl CommandLine {
             return;
         }
         let mut selfish = selfish.borrow_mut();
-        if let CommandLineFSM::Editing(mut cd, _) = selfish.state.clone() {
+        if let CommandLineFSM::Editing(mut cd, creation) = selfish.state.clone() {
             assert!(selfish.hunks.len() > 0);
             if let Some(c) = input {
                 cd = c;
@@ -216,8 +229,12 @@ impl CommandLine {
             else {
                 selfish.ready = true;
                 selfish.h_image.set_from_icon_name("dialog-ok", 1);
-                selfish.h_label.set_markup("Ready <span fgcolor=\"#888888\">- Ctrl+Enter twice to execute</span>");
-
+                if selfish.uistate.live && creation {
+                    selfish.h_label.set_markup("Ready to execute <span fgcolor=\"#888888\">- Ctrl+Enter twice to execute</span>");
+                }
+                else {
+                    selfish.h_label.set_markup("Command OK <span fgcolor=\"#888888\">- Ctrl+Enter twice to apply changes</span>");
+                }
             }
         }
     }

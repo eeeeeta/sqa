@@ -56,11 +56,16 @@ impl<'a> Handler for Context<'a> {
             Message::Delete(uu) => {
                 self.attach_chn(None, uu);
                 self.label(None, uu);
-                self.commands.remove(&uu);
+                if let Some(mut cmd) = self.commands.remove(&uu) {
+                    cmd.unload(self, evl, uu);
+                }
                 self.send(Message::Deleted(uu));
             },
             Message::Attach(uu, ct) => {
                 self.attach_chn(Some(ct), uu);
+            },
+            Message::Insert(uu, ct, idx) => {
+                self.insert_chn(Some(ct), uu, Some(idx));
             },
             Message::Standby(ct) => {
                 for (k, mut chn) in self.chains.clone().into_iter() {

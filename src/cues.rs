@@ -10,13 +10,13 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub enum ChainType {
     Unattached,
-    Q(String)
+    Q(usize)
 }
 impl fmt::Display for ChainType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &ChainType::Unattached => write!(f, "X"),
-            &ChainType::Q(ref st) => write!(f, "Q{}", st),
+            &ChainType::Q(num) => write!(f, "Q{}", num),
         }
     }
 }
@@ -48,6 +48,13 @@ impl Chain {
     }
     pub fn push(&mut self, cmd: Uuid) {
         self.commands.push(cmd);
+        self.fallthru.insert(cmd, false);
+    }
+    pub fn insert(&mut self, cmd: Uuid, mut idx: usize) {
+        if idx > self.commands.len() {
+            idx = self.commands.len();
+        }
+        self.commands.insert(idx, cmd);
         self.fallthru.insert(cmd, false);
     }
     pub fn remove(&mut self, cmd: Uuid) -> bool {

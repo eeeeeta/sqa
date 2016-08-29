@@ -8,7 +8,6 @@ use std::ops::Deref;
 use gtk::Adjustment;
 use chrono::{UTC, DateTime};
 use std::time::Duration;
-use ui::UIMode;
 use mio::EventLoop;
 pub use cues::{ChainType, Chain}; // FIXME: hacky
 
@@ -53,6 +52,8 @@ pub enum Message {
     Delete(Uuid),
     /// C -> S: Attach command to chain.
     Attach(Uuid, ChainType),
+    /// C -> S: Insert command onto chain at index.
+    Insert(Uuid, ChainType, usize),
     /// C -> S: Start running chain.
     Go(ChainType),
     /// C -> S: Standby on given chain - this removes all other standby states
@@ -73,10 +74,14 @@ pub enum Message {
     Identifiers(HashMap<String, Uuid>),
     /// Other Backend Threads -> S: Apply closure to command with given UUID & propagate changes.
     Update(Uuid, CommandUpdate),
-    /// UI objects -> UI: Change UI mode to the following
-    UIChangeMode(UIMode),
+    /// UI objects -> UI: Change live/blind status (true = live)
+    UIChangeLive(bool),
+    /// UI objects -> UI: Change current focused command
+    UIChangeSel(Option<(ChainType, usize)>),
     /// UI objects -> UI: Start editing command on the command line.
-    UIBeginEditing(Uuid)
+    UIBeginEditing(Uuid),
+    /// UI objects -> UI: Toggle fallthrough for given command.
+    UIToggleFallthru(Uuid)
 }
 #[derive(Clone, Debug)]
 pub enum CommandState {
@@ -182,7 +187,7 @@ impl<'a> Context<'a> {
     pub fn prettify_uuid(&self, uu: &Uuid) -> String {
         for (ct, chn) in self.chains.iter() {
             for (i, v) in chn.commands.iter().enumerate() {
-                if v == uu { return format!("{}{}", ct, i) }
+                if v == uu { return format!("{}-{}", ct, i) }
             }
         }
         format!("{}", uu)
@@ -208,6 +213,9 @@ impl<'a> Context<'a> {
         self.send(Message::ChainDesc(ct, chn));
     }
     pub fn attach_chn(&mut self, ct: Option<ChainType>, cu: Uuid) {
+        self.insert_chn(ct, cu, None)
+    }
+    pub fn insert_chn(&mut self, ct: Option<ChainType>, cu: Uuid, idx: Option<usize>) {
         let mut modified = None;
         for (ref mut ct, ref mut chn) in &mut self.chains {
             if chn.remove(cu) {
@@ -218,7 +226,15 @@ impl<'a> Context<'a> {
             self.update_chn(ct);
         }
         if let Some(ct) = ct {
-            self.chains.entry(ct.clone()).or_insert(Chain::new()).push(cu);
+            {
+                let mut ent = self.chains.entry(ct.clone()).or_insert(Chain::new());
+                if let Some(i) = idx {
+                    ent.insert(cu, i);
+                }
+                else {
+                    ent.push(cu);
+                }
+            }
             self.update_chn(ct);
         }
     }

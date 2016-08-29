@@ -61,7 +61,7 @@ impl LiveParameters {
 enum SpoolerCtl {
     Seek(u64),
     SetVol(f32),
-    SetActive(bool)
+    SetActive(bool),
 }
 /// Controller struct for a `FileStream`.
 ///
@@ -94,6 +94,11 @@ impl FileStreamX {
     /// Pauses the FileStream.
     pub fn pause(&mut self) {
         self.send(SpoolerCtl::SetActive(false));
+    }
+    /// Stops the FileStream.
+    pub fn stop(&mut self) {
+        self.send(SpoolerCtl::SetActive(false));
+        self.send(SpoolerCtl::Seek(0));
     }
     /// Resumes the FileStream.
     ///
