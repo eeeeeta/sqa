@@ -178,6 +178,7 @@ impl ListController {
         if let Some(ps) = self.prev_sel {
             if let Some(iter) = self.locate(ps) {
                 self.sel.select_iter(&iter);
+                self.sender.send(Message::UIChangeSel(Some(ps)));
             }
         }
         ::glib::signal_handler_unblock(&self.sel, self.sel_handler.unwrap());
