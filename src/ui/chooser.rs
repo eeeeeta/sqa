@@ -1,3 +1,5 @@
+//! Control of the Control-Enter menu popup (the command chooser).
+
 use commands::{get_chooser_grid, GridNode};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,6 +14,7 @@ use std::ascii::AsciiExt;
 use super::line::{CommandLine, CommandLineFSM};
 use super::{UISender, UIState};
 
+/// The command chooser itself.
 pub struct CommandChooserController {
     grid: Grid,
     state: UIState,

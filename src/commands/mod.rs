@@ -1,3 +1,4 @@
+//! Organisation and collation of commands.
 #[macro_use]
 mod prelude;
 mod load;
@@ -12,6 +13,7 @@ pub use self::output::OutputCommand;
 use self::prelude::Command;
 use gdk::enums::key::Key as gkey;
 use gdk::enums::key as gkeys;
+/// List of possible command types for a CommandSpawner.
 #[derive(Copy, Clone)]
 enum Commands {
     Load,
@@ -19,6 +21,7 @@ enum Commands {
     StopStart(stopstart::StopStartChoice),
     Output
 }
+/// An object that creates a command based on a `Commands` enum.
 #[derive(Copy, Clone)]
 pub struct CommandSpawner {
     cmd: Commands
@@ -33,15 +36,24 @@ impl CommandSpawner {
         }
     }
 }
+/// A node on the grid displayed by the `CommandChooserController`.
 pub enum GridNode {
+    /// A command choice.
     Choice(CommandSpawner),
+    /// A submenu.
     Grid(Vec<(&'static str, gkey, GridNode)>),
+    /// Clears the command line of commands.
     Clear,
+    /// Toggles the "fallthru" state on the current command.
     Fallthru,
+    /// Executes or saves the current command.
     Execute,
+    /// Moves the current command.
     Reorder,
+    /// Toggles Live/Blind state.
     Mode,
 }
+/// Returns the grid used by the `CommandChooserController`.
 pub fn get_chooser_grid() -> Vec<(&'static str, gkey, GridNode)> {
     vec![
         ("<b>Stream</b> <i>S</i>", gkeys::s, GridNode::Grid(vec![

@@ -1,3 +1,4 @@
+//! Control of the main TreeView that lists commands.
 use state::{CommandState, ChainType, Chain, CommandDescriptor, Message};
 use backend::BackendSender;
 use ui::UISender;
@@ -10,6 +11,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use gdk::enums::key as gkey;
 
+/// Helper function to extract a UUID from a TreeStore item.
 fn extract_uuid(ts: &TreeStore, ti: &TreeIter, col: i32) -> Option<Uuid> {
     if let Some(v) = ts.get_value(ti, col).get::<String>() {
         if let Ok(uu) = Uuid::parse_str(&v) {
@@ -18,6 +20,7 @@ fn extract_uuid(ts: &TreeStore, ti: &TreeIter, col: i32) -> Option<Uuid> {
     }
     None
 }
+/// Helper function to extract fallthrough state from a TreeStore item.
 fn extract_ft(ts: &TreeStore, ti: &TreeIter, col: i32) -> bool {
     if let Some(v) = ts.get_value(ti, col).get::<String>() {
         v.len() != 0
@@ -26,6 +29,7 @@ fn extract_ft(ts: &TreeStore, ti: &TreeIter, col: i32) -> bool {
         false
     }
 }
+/// The list controller itself, responsible for drawing and updating the command list.
 pub struct ListController {
     store: TreeStore,
     view: TreeView,
@@ -38,20 +42,6 @@ pub struct ListController {
     tx: BackendSender,
 }
 impl ListController {
-    pub fn get_sender_and_sel(selfish: Rc<RefCell<Self>>) -> Option<(UISender, BackendSender, Uuid)> {
-        let selfish = selfish.borrow();
-        if let Some((_, iter)) = selfish.sel.get_selected() {
-            if let Some(uu) = extract_uuid(&selfish.store, &iter, 5) {
-                Some((selfish.sender.clone(), selfish.tx.clone(), uu))
-            }
-            else {
-                None
-            }
-        }
-        else {
-            None
-        }
-    }
     pub fn new(sender: UISender, tx: BackendSender, compl: ListStore, b: &Builder) -> Rc<RefCell<Self>> {
         let view: TreeView = b.get_object("command-tree-view").unwrap();
         view.set_enable_search(false);
@@ -107,6 +97,9 @@ impl ListController {
         }));
         ret
     }
+    /// Iterates over every item in the TreeStore, running a closure for each one.
+    ///
+    /// Stops and returns the value if the closure returns Some.
     fn run_for_each<T, U>(&self, mut cls: T) -> Option<U> where T: FnMut(&TreeIter, &TreeStore) -> Option<U> {
         let mut ti = match self.store.iter_children(None) {
             Some(v) => v,
@@ -124,6 +117,7 @@ impl ListController {
         }
         None
     }
+    /// Gets the fallthru state for a command..
     pub fn get_fallthru_state(selfish: Rc<RefCell<Self>>, uu: Uuid) -> bool {
         let selfish = selfish.borrow();
         if let Some(ti) = selfish.locate(uu) {
@@ -133,6 +127,7 @@ impl ListController {
             false
         }
     }
+    /// Locates a command in the list.
     fn locate(&self, uu: Uuid) -> Option<TreeIter> {
         self.run_for_each(|ti, ts| {
             if let Some(u2) = extract_uuid(ts, ti, 5) {
@@ -143,6 +138,7 @@ impl ListController {
             None
         })
     }
+    /// Redraws the entire TreeStore, preserving the user's selection if possible.
     fn redraw(&mut self) {
         let prev_sel = if let Some((_, iter)) = self.sel.get_selected() {
             if let Some(uu) = extract_uuid(&self.store, &iter, 5) {
@@ -170,6 +166,7 @@ impl ListController {
             }
         }
     }
+    /// Updates the list of identifier completions.
     fn update_completions(&mut self) {
         self.completions.clear();
         for (ref ct, ref chn) in &self.chains {
@@ -181,6 +178,7 @@ impl ListController {
             }
         }
     }
+    /// Renders a completion list item.
     fn completions_render(&self, desc: String, icon: String, ct: &ChainType, i: usize, uu: Uuid) {
         self.completions.set(&self.completions.append(), &vec![
             0, // identifier
@@ -210,6 +208,7 @@ impl ListController {
         }
 
     }
+    /// Renders the chain-specific information pertaining to a command.
     fn chain_render(&self, ti: &TreeIter, ct: &ChainType, cidx: usize, ft: bool) {
         let ident = format!("{}-{}", ct, cidx);
         let ft = if ft {
@@ -226,6 +225,7 @@ impl ListController {
             &ft as &ToValue,
         ].deref());
     }
+    /// Gets the (icon, description, duration, background colour) of a command for rendering.
     fn get_render_data(v: &CommandDescriptor)
                        -> (String, String, String, String) {
         let (mut icon, desc, mut dur, mut bgc) =
@@ -258,6 +258,7 @@ impl ListController {
         }
         (icon, desc, dur, bgc)
     }
+    /// Renders non-chain-specific parts of a command.
     fn render(&self, ti: &TreeIter, v: &CommandDescriptor, uu: Uuid) -> (String, String) {
         let (icon, desc, dur, bgc) = Self::get_render_data(v);
         let uu = format!("{}", uu);
@@ -276,6 +277,7 @@ impl ListController {
         ].deref());
         (icon, desc)
     }
+    /// Called when a CommandDescriptor is changed or added.
     pub fn update_desc(selfish: Rc<RefCell<Self>>, uu: Uuid, desc: CommandDescriptor) {
         let mut selfish = selfish.borrow_mut();
         selfish.commands.insert(uu, desc.clone());
@@ -283,6 +285,7 @@ impl ListController {
             selfish.render(&ti, &desc, uu);
         }
     }
+    /// Called when a CommandDescriptor is deleted.
     pub fn delete(selfish: Rc<RefCell<Self>>, uu: Uuid) {
         let mut selfish = selfish.borrow_mut();
         selfish.commands.remove(&uu);
@@ -291,6 +294,7 @@ impl ListController {
             selfish.redraw();
         }
     }
+    /// Called when a chain is changed or added.
     pub fn update_chain(selfish: Rc<RefCell<Self>>, ct: ChainType, chain: Option<Chain>) {
         let mut selfish = selfish.borrow_mut();
         if let Some(chn) = chain {
@@ -301,6 +305,7 @@ impl ListController {
         }
         selfish.redraw();
     }
+    /// Called when a chain's fallthrough data is changed or added.
     pub fn update_chain_fallthru(selfish: Rc<RefCell<Self>>, ct: ChainType, chain: HashMap<Uuid, bool>) {
         let mut selfish = selfish.borrow_mut();
         let _: Option<()> = selfish.run_for_each(|ti, ts| {
@@ -323,9 +328,25 @@ impl ListController {
         });
         selfish.chains.get_mut(&ct).unwrap().fallthru = chain;
     }
+    /// Called when the list of named identifiers is updated.
     pub fn update_identifiers(selfish: Rc<RefCell<Self>>, idents: HashMap<String, Uuid>) {
         let mut selfish = selfish.borrow_mut();
         selfish.identifiers = idents;
         selfish.update_completions();
+    }
+    /// Helper function for getting senders and the current selected command.
+    pub fn get_sender_and_sel(selfish: Rc<RefCell<Self>>) -> Option<(UISender, BackendSender, Uuid)> {
+        let selfish = selfish.borrow();
+        if let Some((_, iter)) = selfish.sel.get_selected() {
+            if let Some(uu) = extract_uuid(&selfish.store, &iter, 5) {
+                Some((selfish.sender.clone(), selfish.tx.clone(), uu))
+            }
+            else {
+                None
+            }
+        }
+        else {
+            None
+        }
     }
 }

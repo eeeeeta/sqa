@@ -149,7 +149,7 @@ impl Magister {
     }
 
 }
-
+/// Sink that routes audio to a PortAudio stream output.
 pub struct DeviceSink {
     pub stream: Rc<RefCell<pa::stream::Stream<pa::stream::NonBlocking, pa::stream::Output<f32>>>>,
     txrx: Arc<Mutex<(Producer<(usize, Option<Box<Source>>)>, Consumer<Option<Box<Source>>>)>>,
@@ -188,6 +188,9 @@ impl Sink for DeviceSink {
     }
 }
 impl DeviceSink {
+    /// Creates a new DeviceSink from a PortAudio context, device index.
+    ///
+    /// Will optionally use given vector of UUIDs as the sink UUIDs.
     pub fn from_device_chans(pa: &mut pa::PortAudio, dev: pa::DeviceIndex, uu: Vec<Uuid>) -> Result<Vec<Self>, pa::error::Error> {
         let dev_info = try!(pa.device_info(dev));
         let params: pa::StreamParameters<f32> = pa::StreamParameters::new(dev, dev_info.max_output_channels, false, dev_info.default_low_output_latency);
@@ -250,6 +253,7 @@ enum QCXRequest {
     PushClient(Box<Source>),
     GetClient(Uuid)
 }
+/// An intermediate channel that streams are automatically wired to - sink side.
 pub struct QChannelX {
     tx: Producer<QCXRequest>,
     rx: Consumer<Option<Box<Source>>>,
@@ -286,6 +290,7 @@ impl Sink for QChannelX {
         ret
     }
 }
+/// An intermediate channel that streams are automatically wired to - source side.
 pub struct QChannel {
     clients: Vec<Box<Source>>,
     rx: Consumer<QCXRequest>,

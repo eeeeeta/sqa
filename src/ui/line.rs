@@ -1,10 +1,12 @@
+//! Control of the command line, the widget at the bottom responsible for command creation and
+//! editing.
+
 use command::{HunkTypes, HunkState};
 use commands::CommandSpawner;
 use ui::UIState;
 use state::{CommandDescriptor, Message};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::mem;
 use gtk::prelude::*;
 use gtk::{Label, Image, Builder, ListStore};
 use gtk::Box as GtkBox;
@@ -12,23 +14,33 @@ use backend::BackendSender;
 use uuid::Uuid;
 use super::hunks::*;
 
+/// Fixed state machine for a hunk.
 pub enum HunkFSM {
+    /// The hunk contains errors reported by the backend.
     Err,
+    /// The hunk contains invalid input that has not been communicated to the backend.
     UIErr,
+    /// The hunk is correct, and contains no errors.
     Ok
 }
-
+/// Represents a hunk: its UI controller, and its state.
 pub struct HunkUI {
     ctl: Box<HunkUIController>,
     state: HunkFSM
 }
 
+/// Fixed state machine for the command line.
 #[derive(Clone)]
 pub enum CommandLineFSM {
+    /// No command is being edited.
     Idle,
+    /// We are waiting for a command to be created by the backend.
     AwaitingCreation(Uuid),
+    /// A command is being edited (the second field governs whether it is being merely edited, or
+    /// this is a new command that the command line created)
     Editing(CommandDescriptor, bool)
 }
+/// The command line itself.
 pub struct CommandLine {
     pub state: CommandLineFSM,
     pub tx: BackendSender,
@@ -41,6 +53,7 @@ pub struct CommandLine {
     uistate: UIState
 }
 impl HunkUI {
+    /// Creates a new hunk object from a `HunkState` (see the `command` module).
     pub fn from_state(hs: HunkState) -> Self {
         let ctl: Box<HunkUIController> = match &hs.val {
             &HunkTypes::FilePath(..) => Box::new(EntryUIController::new("document-open")),
@@ -56,6 +69,7 @@ impl HunkUI {
             state: HunkFSM::Err
         }
     }
+    /// Updates a hunk object with some new state.
     pub fn update(&mut self, state: HunkState) {
         let uierr = self.ctl.get_error();
         if state.err.is_some() {
@@ -102,6 +116,9 @@ impl CommandLine {
         }
         Self::update(selfish, None);
     }
+    /// Builds the command line, setting up hunks & preparing it for a new command.
+    ///
+    /// The `creation` argument controls whether the CommandLine created this command or not.
     fn build(selfish2: Rc<RefCell<Self>>, cd: CommandDescriptor, creation: bool) {
         {
             let mut selfish = selfish2.borrow_mut();
@@ -129,6 +146,7 @@ impl CommandLine {
         }
         Self::update(selfish2, None);
     }
+    /// Called by UI objects to adjust values of hunks.
     pub fn set_val(selfish: Rc<RefCell<Self>>, idx: usize, val: HunkTypes) {
         // FIXME: this check is required because some hunks' event handlers may fire on destruction.
         if let ::std::cell::BorrowState::Unused = selfish.borrow_state() {
@@ -169,6 +187,9 @@ impl CommandLine {
         }
         CommandLine::update(selfish, None);
     }
+    /// Updates the command line with a given CommandDescriptor.
+    ///
+    /// Called by the UIContext when changes happen that are relevant to the command line.
     pub fn update(selfish: Rc<RefCell<Self>>, input: Option<CommandDescriptor>) {
         let state = { selfish.borrow().state.clone() };
         if let CommandLineFSM::AwaitingCreation(uu) = state {
