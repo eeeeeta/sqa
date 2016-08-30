@@ -35,10 +35,12 @@ mod line;
 mod chooser;
 mod hunks;
 mod list;
+mod header;
 
 use self::chooser::CommandChooserController;
 use self::line::{CommandLine, CommandLineFSM};
 use self::list::ListController;
+use self::header::HeaderController;
 
 /// Glade source for the UI itself. Found in `sqa/src/ui/interface.glade`.
 pub static INTERFACE_SRC: &'static str = include_str!("interface.glade");
@@ -72,10 +74,6 @@ impl UISender {
         }
     }
     /// Sends a message.
-    ///
-    /// WARNING: This function will cause a borrow of all UI elements.
-    /// It thus stands that you should NOT call this in a UI element if you're borrowing it,
-    /// as this will cause a panic.
     pub fn send(&mut self, m: Message) {
         self.tx.send(m).unwrap();
         self.tn.notify();
@@ -87,7 +85,7 @@ pub struct UIState {
     /// Whether we are in Live mode (if false, then Blind)
     live: bool,
     /// What command is selected in the main TreeView (if any)
-    sel: Option<(ChainType, usize)>
+    sel: Option<(ChainType, Uuid)>
 }
 impl Default for UIState {
     fn default() -> Self {
@@ -104,10 +102,11 @@ impl Default for UIState {
 pub struct UIContext {
     pub chooser: Rc<RefCell<CommandChooserController>>,
     pub line: Rc<RefCell<CommandLine>>,
-    pub completions: ListStore,
     pub list: Rc<RefCell<ListController>>,
+    pub header: Rc<RefCell<HeaderController>>,
+    pub completions: ListStore,
     pub rx: Receiver<Message>,
-    pub uitx: Sender<Message>,
+    pub uitx: UISender,
     pub tx: BackendSender,
     pub state: UIState
 }
@@ -115,16 +114,17 @@ impl UIContext {
     /// Makes a new UIContext.
     pub fn init(sender: BackendSender, uisender: Sender<Message>, recvr: Receiver<Message>, tn: ThreadNotifier, win: Window, builder: &Builder)  -> Rc<RefCell<Self>> {
         let compl: ListStore = builder.get_object("command-identifiers-list").unwrap();
-        let line = CommandLine::new(sender.clone(), compl.clone(), Default::default(), &builder);
+        let line = CommandLine::new(sender.clone(), compl.clone(), Default::default(), UISender::new(uisender.clone(), tn.clone()), &builder);
         let ccc = CommandChooserController::new(line.clone(), Default::default(), UISender::new(uisender.clone(), tn.clone()), &builder);
         let uic = Rc::new(RefCell::new(UIContext {
             chooser: ccc,
             line: line,
             rx: recvr,
             list: ListController::new(UISender::new(uisender.clone(), tn.clone()), sender.clone(), compl.clone(), &builder),
+            header: HeaderController::new(UISender::new(uisender.clone(), tn.clone()), &builder),
             completions: compl,
             tx: sender,
-            uitx: uisender,
+            uitx: UISender::new(uisender.clone(), tn.clone()),
             state: Default::default()
         }));
         tn.register_handler(clone!(uic; || {
@@ -135,6 +135,22 @@ impl UIContext {
                 match ek.get_keyval() {
                     gkey::Return => {
                         CommandChooserController::toggle(uic.borrow().chooser.clone());
+                        Inhibit(true)
+                    },
+                    gkey::space => {
+                        let btn = {
+                            let uic = uic.borrow();
+                            let header = uic.header.borrow();
+                            if header.cur.is_some() {
+                                Some(header.go_btn.clone())
+                            }
+                            else {
+                                None
+                            }
+                        };
+                        if let Some(btn) = btn {
+                            btn.clicked();
+                        }
                         Inhibit(true)
                     },
                     _ => Inhibit(false)
@@ -197,8 +213,24 @@ impl UIContext {
                 CommandChooserController::set_ui_state(selfish.chooser.clone(), selfish.state.clone());
             },
             Message::UIChangeSel(sel) => {
-                selfish.state.sel = sel;
-                CommandChooserController::set_ui_state(selfish.chooser.clone(), selfish.state.clone());
+                if let Some(sel) = sel {
+                    let mut chain = ChainType::Unattached;
+                    for (ct, chn) in selfish.list.borrow().chains.iter() {
+                        if chn.commands.contains(&sel) {
+                            chain = ct.clone();
+                            break;
+                        }
+                    }
+                    selfish.state.sel = Some((chain, sel));
+                    ListController::update_sel(selfish.list.clone(), Some(sel));
+                    CommandChooserController::set_ui_state(selfish.chooser.clone(), selfish.state.clone());
+                }
+                else {
+                    selfish.state.sel = None;
+                    ListController::update_sel(selfish.list.clone(), None);
+                    CommandChooserController::set_ui_state(selfish.chooser.clone(), selfish.state.clone());
+                }
+                HeaderController::update_sel(selfish.header.clone(), selfish.state.sel.clone());
             },
             Message::UIBeginEditing(uu) => {
                 if let Some(desc) = selfish.list.borrow().commands.get(&uu) {
@@ -207,6 +239,20 @@ impl UIContext {
             },
             Message::UIToggleFallthru(uu) => {
                 selfish.tx.send(Message::SetFallthru(uu, !ListController::get_fallthru_state(selfish.list.clone(), uu))).unwrap();
+            },
+            Message::UIGo(ct) => {
+                selfish.tx.send(Message::Go(ct)).unwrap();
+                let mut new_sel = None;
+                if let ChainType::Q(mut num) = ct {
+                    let list = selfish.list.borrow();
+                    num += 1;
+                    if list.chains.get(&ChainType::Q(num)).is_some() {
+                        if let Some(uu) = list.chains.get(&ChainType::Q(num)).as_ref().unwrap().commands.get(0) {
+                            new_sel = Some(*uu);
+                        }
+                    }
+                }
+                selfish.uitx.send(Message::UIChangeSel(new_sel));
             },
             _ => unimplemented!()
         }

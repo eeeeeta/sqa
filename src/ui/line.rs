@@ -13,6 +13,7 @@ use gtk::Box as GtkBox;
 use backend::BackendSender;
 use uuid::Uuid;
 use super::hunks::*;
+use super::UISender;
 
 /// Fixed state machine for a hunk.
 pub enum HunkFSM {
@@ -50,7 +51,8 @@ pub struct CommandLine {
     pub h_image: Image,
     pub h_label: Label,
     pub completion: ListStore,
-    uistate: UIState
+    uistate: UIState,
+    uitx: UISender
 }
 impl HunkUI {
     /// Creates a new hunk object from a `HunkState` (see the `command` module).
@@ -94,7 +96,7 @@ impl HunkUI {
     }
 }
 impl CommandLine {
-    pub fn new(tx: BackendSender, ts: ListStore, state: UIState, b: &Builder) -> Rc<RefCell<Self>> {
+    pub fn new(tx: BackendSender, ts: ListStore, state: UIState, sender: UISender, b: &Builder) -> Rc<RefCell<Self>> {
         let line = CommandLine {
             state: CommandLineFSM::Idle,
             completion: ts,
@@ -104,7 +106,8 @@ impl CommandLine {
             line: b.get_object("command-line").unwrap(),
             h_image: b.get_object("line-hint-image").unwrap(),
             h_label: b.get_object("line-hint-label").unwrap(),
-            uistate: state
+            uistate: state,
+            uitx: sender
         };
         let line = Rc::new(RefCell::new(line));
         Self::update(line.clone(), None);
@@ -136,6 +139,7 @@ impl CommandLine {
                 hui.ctl.bind_completions(compl.clone());
                 hunks.push(hui);
             }
+            selfish.uitx.send(Message::UIChangeSel(Some(cd.uuid)));
 
             selfish.state = CommandLineFSM::Editing(cd, creation);
             selfish.line.show_all();
@@ -157,6 +161,9 @@ impl CommandLine {
                 selfish.h_label.set_text("Waiting for backend...");
             }
         }
+        else {
+            println!("dbg: line borrowed, set_val failed");
+        }
     }
     pub fn new_command(selfish: Rc<RefCell<Self>>, spawner: CommandSpawner) {
         CommandLine::reset(selfish.clone());
@@ -165,6 +172,9 @@ impl CommandLine {
             let uu = Uuid::new_v4();
             selfish.tx.send(Message::NewCmd(uu, spawner)).unwrap();
             selfish.state = CommandLineFSM::AwaitingCreation(uu);
+            if let Some((ct, _)) = selfish.uistate.sel {
+                selfish.tx.send(Message::Attach(uu, ct)).unwrap();
+            }
         }
         CommandLine::update(selfish, None);
     }
@@ -230,7 +240,8 @@ impl CommandLine {
         if let CommandLineFSM::Editing(mut cd, creation) = selfish.state.clone() {
             assert!(selfish.hunks.len() > 0);
             if let Some(c) = input {
-                cd = c;
+                cd = c.clone();
+                selfish.state = CommandLineFSM::Editing(c, creation);
             }
             let mut erred = 0;
             let mut hunk_states = cd.hunks.into_iter();

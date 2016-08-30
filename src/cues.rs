@@ -7,7 +7,7 @@ use mio::EventLoop;
 use uuid::Uuid;
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub enum ChainType {
     Unattached,
     Q(usize)

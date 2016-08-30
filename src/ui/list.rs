@@ -34,12 +34,13 @@ pub struct ListController {
     store: TreeStore,
     view: TreeView,
     sel: TreeSelection,
-    chains: BTreeMap<ChainType, Chain>,
+    pub chains: BTreeMap<ChainType, Chain>,
     pub commands: HashMap<Uuid, CommandDescriptor>,
     identifiers: HashMap<String, Uuid>,
     completions: ListStore,
     sender: UISender,
     tx: BackendSender,
+    sel_handler: Option<u64>
 }
 impl ListController {
     pub fn new(sender: UISender, tx: BackendSender, compl: ListStore, b: &Builder) -> Rc<RefCell<Self>> {
@@ -56,8 +57,27 @@ impl ListController {
             identifiers: HashMap::new(),
             sender: sender,
             completions: compl,
-            tx: tx
+            tx: tx,
+            sel_handler: None
         }));
+        let sel_handler = ret.borrow().sel.connect_changed(clone!(ret; |_s| {
+            let (mut sender, uu) = {
+                let selfish = ret.borrow();
+                if let Some((_, iter)) = selfish.sel.get_selected() {
+                    if let Some(uu) = extract_uuid(&selfish.store, &iter, 5) {
+                        (selfish.sender.clone(), Some(uu))
+                    }
+                    else {
+                        return;
+                    }
+                }
+                else {
+                    (selfish.sender.clone(), None)
+                }
+            };
+            sender.send(Message::UIChangeSel(uu));
+        }));
+        ret.borrow_mut().sel_handler = Some(sel_handler);
         ret.borrow().view.connect_key_press_event(clone!(ret; |_s, ek| {
             if !ek.get_state().contains(::gdk::CONTROL_MASK) {
                 match ek.get_keyval() {
@@ -140,6 +160,7 @@ impl ListController {
     }
     /// Redraws the entire TreeStore, preserving the user's selection if possible.
     fn redraw(&mut self) {
+        ::glib::signal_handler_block(&self.sel, self.sel_handler.unwrap());
         let prev_sel = if let Some((_, iter)) = self.sel.get_selected() {
             if let Some(uu) = extract_uuid(&self.store, &iter, 5) {
                 Some(uu)
@@ -164,7 +185,11 @@ impl ListController {
             if let Some(iter) = self.locate(ps) {
                 self.sel.select_iter(&iter);
             }
+            else {
+                self.sender.send(Message::UIChangeSel(None));
+            }
         }
+        ::glib::signal_handler_unblock(&self.sel, self.sel_handler.unwrap());
     }
     /// Updates the list of identifier completions.
     fn update_completions(&mut self) {
@@ -347,6 +372,25 @@ impl ListController {
         }
         else {
             None
+        }
+    }
+    /// Called when the currently selected command is changed.
+    pub fn update_sel(selfish: Rc<RefCell<Self>>, sel: Option<Uuid>) {
+        if let Some(sel) = sel {
+            if let Some((_, _, sel2)) = Self::get_sender_and_sel(selfish.clone()) {
+                if sel == sel2 {
+                    return;
+                }
+            }
+            let selfish = selfish.borrow();
+            if let Some(iter) = selfish.locate(sel) {
+                ::glib::signal_handler_block(&selfish.sel, selfish.sel_handler.unwrap());
+                selfish.sel.select_iter(&iter);
+                ::glib::signal_handler_unblock(&selfish.sel, selfish.sel_handler.unwrap());
+            }
+        }
+        else {
+            selfish.borrow().sel.unselect_all();
         }
     }
 }

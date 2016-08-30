@@ -52,6 +52,9 @@ impl HunkUIController for VolumeUIController {
     fn pack(&self, onto: &GtkBox) {
         self.entuic.pack(onto);
         let ref sa = self.entuic.pop.borrow().state_actions;
+        for ch in sa.get_children().into_iter() {
+            ch.destroy();
+        }
         sa.pack_start(&self.sc, false, false, 3);
     }
     fn set_help(&mut self, help: &'static str) {
@@ -86,9 +89,6 @@ impl HunkUIController for VolumeUIController {
             CommandLine::set_val(line.clone(), idx, HunkTypes::Volume(val));
         })));
         self.entuic.bind(line.clone(), idx, ht.clone());
-        for ch in self.entuic.pop.borrow().state_actions.get_children().into_iter() {
-            ch.destroy();
-        }
         ::glib::signal_handler_block(&self.entuic.ent, self.entuic.activate_handler.unwrap());
     }
     fn set_val(&mut self, val: &::std::any::Any) {

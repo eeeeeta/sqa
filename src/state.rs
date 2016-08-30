@@ -77,11 +77,13 @@ pub enum Message {
     /// UI objects -> UI: Change live/blind status (true = live)
     UIChangeLive(bool),
     /// UI objects -> UI: Change current focused command
-    UIChangeSel(Option<(ChainType, usize)>),
+    UIChangeSel(Option<Uuid>),
     /// UI objects -> UI: Start editing command on the command line.
     UIBeginEditing(Uuid),
     /// UI objects -> UI: Toggle fallthrough for given command.
-    UIToggleFallthru(Uuid)
+    UIToggleFallthru(Uuid),
+    /// UI objects -> UI: Trigger a go on the given cue.
+    UIGo(ChainType)
 }
 #[derive(Clone, Debug)]
 pub enum CommandState {
