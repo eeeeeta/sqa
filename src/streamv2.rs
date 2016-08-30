@@ -286,9 +286,10 @@ impl FileStreamSpooler {
                         if buf_tx.size() == buf_tx.capacity() {
                             self.filled = true;
                             self.pos += frame.duration;
-                            continue 'spooler;
                         }
-                        Self::send_buffers(buf_tx, bufs);
+                        else {
+                            Self::send_buffers(buf_tx, bufs);
+                        }
                     }
                     self.pos += frame.duration;
                 }
