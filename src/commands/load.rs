@@ -61,9 +61,15 @@ impl LoadCommand {
 impl Command for LoadCommand {
     fn name(&self) -> &'static str { "Load file" }
     fn desc(&self, _: &Context) -> String {
+        let stopped = if self.start {
+            format!("")
+        }
+        else {
+            format!(" <b>[stopped]</b>")
+        };
         match self.ident {
-            None => format!("Load file <b>{}</b>", describe_path(&self.file)),
-            Some(ref id) => format!("Load file <b>{}</b> as $<b>{}</b>", describe_path(&self.file), id)
+            None => format!("Load file <b>{}</b>{}", describe_path(&self.file), stopped),
+            Some(ref id) => format!("Load file <b>{}</b> as $<b>{}</b>{}", describe_path(&self.file), id, stopped)
         }
     }
     fn run_state(&self) -> Option<CommandState> {
@@ -197,12 +203,15 @@ impl Command for LoadCommand {
         if let Some(ref mut info) = self.streams.get_mut(0) {
             if self.start {
                 info.ctl.unpause();
+                Ok(false)
+            }
+            else {
+                Ok(true)
             }
         }
         else {
             panic!("woops");
         }
-        Ok(false)
     }
     fn sources(&self) -> Vec<Uuid> {
         self.streams.iter().map(|x| x.ctl.uuid()).collect()

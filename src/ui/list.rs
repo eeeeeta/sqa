@@ -40,6 +40,7 @@ pub struct ListController {
     completions: ListStore,
     sender: UISender,
     tx: BackendSender,
+    prev_sel: Option<Uuid>,
     sel_handler: Option<u64>
 }
 impl ListController {
@@ -58,6 +59,7 @@ impl ListController {
             sender: sender,
             completions: compl,
             tx: tx,
+            prev_sel: None,
             sel_handler: None
         }));
         let sel_handler = ret.borrow().sel.connect_changed(clone!(ret; |_s| {
@@ -161,14 +163,6 @@ impl ListController {
     /// Redraws the entire TreeStore, preserving the user's selection if possible.
     fn redraw(&mut self) {
         ::glib::signal_handler_block(&self.sel, self.sel_handler.unwrap());
-        let prev_sel = if let Some((_, iter)) = self.sel.get_selected() {
-            if let Some(uu) = extract_uuid(&self.store, &iter, 5) {
-                Some(uu)
-            }
-            else {
-                None
-            }
-        } else { None };
         self.store.clear();
         self.completions.clear();
         for (ref ct, ref chn) in &self.chains {
@@ -181,12 +175,9 @@ impl ListController {
                 }
             }
         }
-        if let Some(ps) = prev_sel {
+        if let Some(ps) = self.prev_sel {
             if let Some(iter) = self.locate(ps) {
                 self.sel.select_iter(&iter);
-            }
-            else {
-                self.sender.send(Message::UIChangeSel(None));
             }
         }
         ::glib::signal_handler_unblock(&self.sel, self.sel_handler.unwrap());
@@ -376,6 +367,7 @@ impl ListController {
     }
     /// Called when the currently selected command is changed.
     pub fn update_sel(selfish: Rc<RefCell<Self>>, sel: Option<Uuid>) {
+        selfish.borrow_mut().prev_sel = sel;
         if let Some(sel) = sel {
             if let Some((_, _, sel2)) = Self::get_sender_and_sel(selfish.clone()) {
                 if sel == sel2 {

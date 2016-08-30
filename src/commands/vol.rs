@@ -146,10 +146,9 @@ impl BackendTimeout for LinearFader {
             let ref mut streams = cmd.downcast_mut::<LoadCommand>().unwrap().streams;
             let lp = streams[0].lp;
             let fade_left = lp.vol - self.target;
-            if fade_left == 0.0 { return None };
             let pos = ((::time::precise_time_s() - self.ptn) * 1000.0).round() as u64;
             let units_left = (self.dur.saturating_sub(pos)) / 100;
-            if units_left == 0 {
+            if units_left == 0 || fade_left == 0.0 {
                 for si in streams {
                     si.ctl.set_vol(self.target);
                 }

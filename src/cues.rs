@@ -20,7 +20,7 @@ impl fmt::Display for ChainType {
         }
     }
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Chain {
     fsm: QFSM,
     pub commands: Vec<Uuid>,
@@ -28,7 +28,7 @@ pub struct Chain {
 }
 
 /// Fixed state machine for a cue runner.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum QFSM {
     /// Nothing happening
     Idle,

@@ -173,7 +173,9 @@ impl CommandLine {
             selfish.tx.send(Message::NewCmd(uu, spawner)).unwrap();
             selfish.state = CommandLineFSM::AwaitingCreation(uu);
             if let Some((ct, _)) = selfish.uistate.sel {
-                selfish.tx.send(Message::Attach(uu, ct)).unwrap();
+                if !selfish.uistate.live {
+                    selfish.tx.send(Message::Attach(uu, ct)).unwrap();
+                }
             }
         }
         CommandLine::update(selfish, None);

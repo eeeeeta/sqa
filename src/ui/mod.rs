@@ -194,6 +194,11 @@ impl UIContext {
                     CommandLine::update(selfish.line.clone(), None);
                     CommandChooserController::update(selfish.chooser.clone());
                 }
+                if let Some((_, u2)) = selfish.state.sel {
+                    if u2 == uu {
+                        selfish.uitx.send(Message::UIChangeSel(None));
+                    }
+                }
                 ListController::delete(selfish.list.clone(), uu);
             },
             Message::ChainDesc(ct, chn) => {
