@@ -32,7 +32,7 @@ use ui::UIContext;
 
 
 fn main() {
-    println!("SQA alpha 2, an eta thing");
+    println!("SQA beta 1, an eta thing");
     println!("[+] Initialising GTK & CSS contexts...");
     let _ = gtk::init().unwrap();
     let ui_src = ui::INTERFACE_SRC;

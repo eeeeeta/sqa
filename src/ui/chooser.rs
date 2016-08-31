@@ -28,7 +28,7 @@ pub struct CommandChooserController {
     prompt_handler: Box<Fn(&mut CommandChooserController, String) -> bool>,
     cl: Rc<RefCell<CommandLine>>,
     pos: Vec<usize>,
-    top: Vec<(&'static str, gkey::Key, GridNode)>
+    top: Vec<(&'static str, &'static str, gkey::Key, GridNode)>
 }
 
 impl CommandChooserController {
@@ -86,7 +86,7 @@ impl CommandChooserController {
             let mut wdgt: Option<::gtk::Widget> = None;
             {
                 let selfish = ret.borrow();
-                for (i, &(_, key, _)) in selfish.get_ptr().0.iter().rev().enumerate() {
+                for (i, &(_, _, key, _)) in selfish.get_ptr().0.iter().rev().enumerate() {
                     if ek.get_keyval() == key {
                         wdgt = Some(selfish.grid.get_children()[i].clone());
                         break;
@@ -136,12 +136,12 @@ impl CommandChooserController {
         }
         CommandLine::update(cl, None);
     }
-    fn get_ptr(&self) -> (&Vec<(&'static str, gkey::Key, GridNode)>, String) {
+    fn get_ptr(&self) -> (&Vec<(&'static str, &'static str, gkey::Key, GridNode)>, String) {
         let mut ptr = &self.top;
         let mut st = "🏠".to_string(); // U+1F3E0 HOUSE BUILDING
         if self.pos.len() > 0 {
             for i in &self.pos {
-                if let Some(&(ref disp, _, GridNode::Grid(ref vec))) = ptr.get(*i) {
+                if let Some(&(ref disp, _, _, GridNode::Grid(ref vec))) = ptr.get(*i) {
                     ptr = vec;
                     st.push_str(" → ");
                     st.push_str(disp);
@@ -172,10 +172,11 @@ impl CommandChooserController {
         for chld in selfish.grid.get_children() {
             chld.destroy();
         }
-        for (i, &(st, _, ref opt)) in ptr.iter().enumerate() {
+        for (i, &(st, tooltip, _, ref opt)) in ptr.iter().enumerate() {
             let lbl = Label::new(None);
             let btn = Button::new();
             lbl.set_markup(st);
+            lbl.set_tooltip_markup(Some(tooltip));
             match opt {
                 &GridNode::Choice(spawner) => {
                     let ref cl = selfish.cl;
@@ -208,9 +209,11 @@ impl CommandChooserController {
                     lbl.get_style_context().unwrap().add_class("gridnode");
                     if selfish.state.live {
                         lbl.set_markup(&format!("»Blind <b>O</b>"));
+                        lbl.set_tooltip_markup(Some(&format!("Switch to BLIND mode")));
                     }
                     else {
                         lbl.set_markup(&format!("»Live <b>O</b>"));
+                        lbl.set_tooltip_markup(Some(&format!("Switch to LIVE mode")));
                     }
                 },
                 &GridNode::Clear => {
@@ -317,9 +320,11 @@ followed by an optional position (eg: <i>X-1</i>, <i>Q1-4</i>)</small>"));
                     lbl.get_style_context().unwrap().add_class("gridnode");
                     if selfish.state.live {
                         lbl.set_markup(&format!("Execute <b>↵</b>"));
+                        lbl.set_tooltip_markup(Some(&format!("Execute this command now")));
                     }
                     else {
                         lbl.set_markup(&format!("Create <b>↵</b>"));
+                        lbl.set_tooltip_markup(Some(&format!("Create this command")));
                     }
                     if cl.borrow().ready {
                         btn.set_sensitive(true);
@@ -327,6 +332,7 @@ followed by an optional position (eg: <i>X-1</i>, <i>Q1-4</i>)</small>"));
                         if let CommandLineFSM::Editing(_, creation) = cl.borrow().state {
                             if !creation {
                                 lbl.set_markup(&format!("Finish <b>↵</b>"));
+                                lbl.set_tooltip_markup(Some(&format!("Finish editing this command")));
                             }
                         }
                     }

@@ -41,7 +41,7 @@ pub enum GridNode {
     /// A command choice.
     Choice(CommandSpawner),
     /// A submenu.
-    Grid(Vec<(&'static str, gkey, GridNode)>),
+    Grid(Vec<(&'static str, &'static str, gkey, GridNode)>),
     /// Clears the command line of commands.
     Clear,
     /// Toggles the "fallthru" state on the current command.
@@ -54,25 +54,25 @@ pub enum GridNode {
     Mode,
 }
 /// Returns the grid used by the `CommandChooserController`.
-pub fn get_chooser_grid() -> Vec<(&'static str, gkey, GridNode)> {
+pub fn get_chooser_grid() -> Vec<(&'static str, &'static str, gkey, GridNode)> {
     vec![
-        ("<b>Stream</b> <i>S</i>", gkeys::s, GridNode::Grid(vec![
-            ("<b>Load</b> <i>L</i>", gkeys::l, GridNode::Choice(CommandSpawner { cmd: Commands::Load })),
-            ("Stop <i>O</i>", gkeys::o, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::Stop) })),
-            ("Unpause <i>U</i>", gkeys::u, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::Unpause) })),
-            ("Pause <i>P</i>", gkeys::p, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::Pause) })),
-            ("Restart <i>R</i>", gkeys::r, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::ReStart) })),
-            ("Volume <i>V</i>", gkeys::v, GridNode::Choice(CommandSpawner { cmd: Commands::Vol }))
+        ("<b>Stream</b> <i>S</i>", "Menu for stream-related actions", gkeys::s, GridNode::Grid(vec![
+            ("<b>Load</b> <i>L</i>", "Creates a stream from a file", gkeys::l, GridNode::Choice(CommandSpawner { cmd: Commands::Load })),
+            ("Stop <i>O</i>", "Stops a stream", gkeys::o, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::Stop) })),
+            ("Unpause <i>U</i>", "Unpauses a stream that has been paused", gkeys::u, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::Unpause) })),
+            ("Pause <i>P</i>", "Pauses a stream", gkeys::p, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::Pause) })),
+            ("Restart <i>R</i>", "Starts playing a stream from the beginning", gkeys::r, GridNode::Choice(CommandSpawner { cmd: Commands::StopStart(stopstart::StopStartChoice::ReStart) })),
+            ("Volume <i>V</i>", "Sets or fades a stream's volume", gkeys::v, GridNode::Choice(CommandSpawner { cmd: Commands::Vol }))
         ])),
-        ("<b>Mixer</b> <i>M</i>", gkeys::m, GridNode::Grid(vec![
-            ("Output <i>O</i>", gkeys::o, GridNode::Choice(CommandSpawner { cmd: Commands::Output }))
+        ("<b>Mixer</b> <i>M</i>", "Menu for mixer-related actions", gkeys::m, GridNode::Grid(vec![
+            ("Output <i>O</i>", "Initialise the default sound output", gkeys::o, GridNode::Choice(CommandSpawner { cmd: Commands::Output }))
         ])),
         // Some of these commands have their text overwritten by the CommandChooserController
         // at runtime. It should be clear which ones they are.
-        ("my hands are typing words", gkeys::o, GridNode::Mode),
-        ("Clear <i>C</i>", gkeys::c, GridNode::Clear),
-        ("F'thru <i>F</i>", gkeys::f, GridNode::Fallthru),
-        ("Reorder <i>R</i>", gkeys::r, GridNode::Reorder),
-        ("here have code", gkeys::Return, GridNode::Execute),
+        ("my hands are typing words", "", gkeys::o, GridNode::Mode),
+        ("Clear <i>C</i>", "Clear the command currently on the command line", gkeys::c, GridNode::Clear),
+        ("F'thru <i>F</i>", "Toggle <i>fallthrough</i> state: whether the cue runner will immediately run the command after this one, or wait for this one to finish", gkeys::f, GridNode::Fallthru),
+        ("Reorder <i>R</i>", "Reposition this command, attaching it to a different cue or changing its position on a cue", gkeys::r, GridNode::Reorder),
+        ("here have code", "", gkeys::Return, GridNode::Execute),
     ]
 }
