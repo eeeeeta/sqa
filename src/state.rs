@@ -37,7 +37,7 @@ impl ThreadNotifier {
 }
 /// I'm pretty sure this is safe. Maybe.
 ///
-/// Seriously: glib::timeout_add() runs its handler _in the main thread_,
+/// Seriously: `glib::timeout_add()` runs its handler _in the main thread_,
 /// so we should be fine.
 unsafe impl Send for ThreadNotifier {}
 
@@ -175,9 +175,9 @@ impl<'a> Context<'a> {
     }
     pub fn execution_completed(&mut self, uu: Uuid, evl: &mut EventLoop<Context>) {
         let mut blocked = None;
-        for (k, chn) in self.chains.iter_mut() {
+        for (k, chn) in &mut self.chains {
             if chn.is_blocked_on(uu) {
-                blocked = Some((k.clone(), chn.clone()));
+                blocked = Some((*k, chn.clone()));
                 break;
             }
         }
@@ -187,7 +187,7 @@ impl<'a> Context<'a> {
         }
     }
     pub fn prettify_uuid(&self, uu: &Uuid) -> String {
-        for (ct, chn) in self.chains.iter() {
+        for (ct, chn) in &self.chains {
             for (i, v) in chn.commands.iter().enumerate() {
                 if v == uu { return format!("{}-{}", ct, i) }
             }
@@ -200,7 +200,7 @@ impl<'a> Context<'a> {
         }
         else {
             let mut todel = vec![];
-            for (k, v) in self.identifiers.iter() {
+            for (k, v) in &self.identifiers {
                 if *v == uu { todel.push(k.clone()); }
             }
             for k in todel {
@@ -229,7 +229,7 @@ impl<'a> Context<'a> {
         }
         if let Some(ct) = ct {
             {
-                let mut ent = self.chains.entry(ct.clone()).or_insert(Chain::new());
+                let mut ent = self.chains.entry(ct.clone()).or_insert_with(Chain::new);
                 if let Some(i) = idx {
                     ent.insert(cu, i);
                 }
@@ -243,7 +243,7 @@ impl<'a> Context<'a> {
     pub fn desc_cmd(&self, cu: Uuid) -> CommandDescriptor {
         let cmd = self.commands.get(&cu).unwrap();
         let errs: u32 = cmd.get_hunks().into_iter().map(|c| {
-            if let Some(..) = c.get_val(cmd.deref(), &self).err { 1 } else { 0 }
+            if let Some(..) = c.get_val(cmd.deref(), self).err { 1 } else { 0 }
         }).sum();
         let state = if let Some(st) = cmd.run_state() {
             st
@@ -258,7 +258,7 @@ impl<'a> Context<'a> {
             cmd.desc(self),
             cmd.name(),
             state,
-            cmd.get_hunks().into_iter().map(|c| c.get_val(cmd.deref(), &self)).collect(),
+            cmd.get_hunks().into_iter().map(|c| c.get_val(cmd.deref(), self)).collect(),
             cu)
     }
     pub fn update_cmd(&mut self, cu: Uuid) {

@@ -41,7 +41,7 @@ impl HunkUIController for EntryUIController {
     }
     /* FIXME: more clone()s for seemingly ø reason */
     fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
-        let ref pop = self.pop;
+        let pop = &self.pop;
         let entc = self.ent.clone();
 
         pop.borrow().bind_defaults(line.clone(), idx, ht.clone());
@@ -77,11 +77,11 @@ impl HunkUIController for EntryUIController {
     fn set_val(&mut self, val: &::std::any::Any) {
         let val = val.downcast_ref::<Option<String>>().unwrap();
         self.pop.borrow().val_exists(val.is_some());
-        match val {
-            &Some(ref txt) => {
+        match *val {
+            Some(ref txt) => {
                 self.ent.set_text(txt);
             },
-            &None => {
+            None => {
                 self.ent.set_text("");
             }
         }

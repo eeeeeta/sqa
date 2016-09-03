@@ -51,7 +51,7 @@ impl HunkUIController for VolumeUIController {
     }
     fn pack(&self, onto: &GtkBox) {
         self.entuic.pack(onto);
-        let ref sa = self.entuic.pop.borrow().state_actions;
+        let sa = &self.entuic.pop.borrow().state_actions;
         for ch in sa.get_children().into_iter() {
             ch.destroy();
         }
@@ -61,7 +61,7 @@ impl HunkUIController for VolumeUIController {
         self.entuic.set_help(help);
     }
     fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
-        let ref uierr = self.err;
+        let uierr = &self.err;
         self.entuic.ent.connect_key_release_event(move |ent, _| {
             ent.activate();
             Inhibit(false)
@@ -96,17 +96,16 @@ impl HunkUIController for VolumeUIController {
         ::glib::signal_handler_block(&self.sc, self.sc_handler.unwrap());
         self.sc.set_value(db_lin(val) as f64);
         ::glib::signal_handler_unblock(&self.sc, self.sc_handler.unwrap());
-        if {
-            if let Some(strn) = self.entuic.ent.get_text() {
-                if let Ok(flt) = str::parse::<f32>(&strn) {
-                    flt != val
-                }
-                else {
-                    true
-                }
+        let set_text = if let Some(strn) = self.entuic.ent.get_text() {
+            if let Ok(flt) = str::parse::<f32>(&strn) {
+                flt != val
             }
-            else { true }
-        } {
+            else {
+                true
+            }
+        }
+        else { true };
+        if set_text {
             self.entuic.ent.set_text(&format!("{:.02}", val));
         }
 
@@ -116,7 +115,7 @@ impl HunkUIController for VolumeUIController {
     }
     fn get_error(&self) -> Option<String> {
         if *self.err.borrow() {
-            Some(format!("Please enter or select a valid decibel value."))
+            Some("Please enter or select a valid decibel value.".into())
         }
         else {
             None

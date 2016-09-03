@@ -57,14 +57,14 @@ pub struct CommandLine {
 impl HunkUI {
     /// Creates a new hunk object from a `HunkState` (see the `command` module).
     pub fn from_state(hs: HunkState) -> Self {
-        let ctl: Box<HunkUIController> = match &hs.val {
-            &HunkTypes::FilePath(..) => Box::new(EntryUIController::new("document-open")),
-            &HunkTypes::Identifier(..) => Box::new(IdentUIController::new()),
-            &HunkTypes::String(..) => Box::new(EntryUIController::new("text-x-generic")),
-            &HunkTypes::Label(..) => Box::new(TextUIController::new()),
-            &HunkTypes::Volume(..) => Box::new(VolumeUIController::new()),
-            &HunkTypes::Time(..) => Box::new(TimeUIController::new()),
-            &HunkTypes::Checkbox(..) => Box::new(CheckboxUIController::new())
+        let ctl: Box<HunkUIController> = match hs.val {
+            HunkTypes::FilePath(..) => Box::new(EntryUIController::new("document-open")),
+            HunkTypes::Identifier(..) => Box::new(IdentUIController::new()),
+            HunkTypes::String(..) => Box::new(EntryUIController::new("text-x-generic")),
+            HunkTypes::Label(..) => Box::new(TextUIController::new()),
+            HunkTypes::Volume(..) => Box::new(VolumeUIController::new()),
+            HunkTypes::Time(..) => Box::new(TimeUIController::new()),
+            HunkTypes::Checkbox(..) => Box::new(CheckboxUIController::new())
         };
         HunkUI {
             ctl: ctl,
@@ -84,7 +84,7 @@ impl HunkUI {
         }
         else if state.val.is_none() && state.required {
             self.state = HunkFSM::Err;
-            self.ctl.set_error(Some(format!("This field is required, but contains nothing.")));
+            self.ctl.set_error(Some("This field is required, but contains nothing.".into()));
         }
         else {
             self.state = HunkFSM::Ok;
@@ -187,13 +187,10 @@ impl CommandLine {
     pub fn reset(selfish: Rc<RefCell<Self>>) {
         {
             let mut selfish = selfish.borrow_mut();
-            match selfish.state {
-                CommandLineFSM::Editing(ref cd, creation) => {
-                    if creation {
-                        selfish.tx.send(Message::Delete(cd.uuid)).unwrap();
-                    }
-                },
-                _ => {}
+            if let CommandLineFSM::Editing(ref cd, creation) = selfish.state {
+                if creation {
+                    selfish.tx.send(Message::Delete(cd.uuid)).unwrap();
+                }
             }
             selfish.state = CommandLineFSM::Idle;
         }
@@ -247,7 +244,7 @@ impl CommandLine {
             }
             let mut erred = 0;
             let mut hunk_states = cd.hunks.into_iter();
-            for (i, hunk) in selfish.hunks.iter_mut().enumerate() {
+            for hunk in &mut selfish.hunks {
                 hunk.update(hunk_states.next().unwrap());
                 match hunk.state {
                     HunkFSM::Err => erred += 1,

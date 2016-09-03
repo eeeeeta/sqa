@@ -36,7 +36,7 @@ impl Command for VolCommand {
     }
     fn run_state(&self) -> Option<CommandState> {
         if let Some(ref rt) = self.runtime {
-            Some(CommandState::Running(rt.clone()))
+            Some(CommandState::Running(*rt))
         }
         else {
             None
@@ -51,35 +51,30 @@ impl Command for VolCommand {
         };
         let vol_egetter = move |selfish: &Self, _: &Context| -> Option<String> {
             if selfish.vol.is_nan() {
-                Some(format!("Volume has to be a number! (not NaN)"))
+                Some("Volume has to be a number! (not NaN)".into())
             }
             else {
                 None
             }
         };
         let ident_getter = move |selfish: &Self| -> Option<Uuid> {
-            selfish.ident.as_ref().map(|x| x.clone())
+            selfish.ident
         };
         let ident_setter = move |selfish: &mut Self, val: Option<Uuid>| {
-            if let Some(val) = val {
-                selfish.ident = Some(val.clone());
-            }
-            else {
-                selfish.ident = None;
-            }
+            selfish.ident = val;
         };
         let ident_egetter = move |selfish: &Self, ctx: &Context| -> Option<String> {
             if let Some(ref ident) = selfish.ident {
-                if let Some(ref strm) = ctx.commands.get(ident) {
+                if let Some(strm) = ctx.commands.get(ident) {
                     if strm.is::<LoadCommand>() {
                         None
                     }
                     else {
-                        Some(format!("That command isn't a Load command."))
+                        Some("That command isn't a Load command.".into())
                     }
                 }
                 else {
-                    Some(format!("That UUID doesn't exist."))
+                    Some("That UUID doesn't exist.".into())
                 }
             }
             else {
@@ -102,16 +97,16 @@ impl Command for VolCommand {
         };
         vec![
             hunk!(Identifier, "Provide the identifier of a stream.", true, Keys::t, ident_getter, ident_setter, (ident_egetter)),
-            TextHunk::new(format!("<b>@</b>")),
+            TextHunk::new("<b>@</b>".into()),
             hunk!(Volume, "Provide a target volume.", true, Keys::at, (vol_getter), (vol_setter), (vol_egetter)),
-            TextHunk::new(format!("dB")),
-            TextHunk::new(format!("(<b>fade</b>")),
+            TextHunk::new("dB".into()),
+            TextHunk::new("(<b>fade</b>".into()),
             hunk!(Time, "Optionally provide a time (in milliseconds) to fade this change over.", false, Keys::f, (fade_getter), (fade_setter), (fade_egetter)),
-            TextHunk::new(format!("ms)"))
+            TextHunk::new("ms)".into())
         ]
     }
     fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, auuid: Uuid) -> Result<bool, String> {
-        let (ident, target) = (self.ident.clone().unwrap(), db_lin(self.vol));
+        let (ident, target) = (self.ident.unwrap(), db_lin(self.vol));
         let mut tgt = ctx.commands.get_mut(&ident).unwrap().downcast_mut::<LoadCommand>().unwrap();
         if let Some(fade_secs) = self.fade {
             LinearFader::register(evl, ident, fade_secs, target, auuid);
@@ -119,7 +114,7 @@ impl Command for VolCommand {
             Ok(false)
         }
         else {
-            for si in tgt.streams.iter_mut() {
+            for si in &mut tgt.streams {
                 si.ctl.set_vol(target);
             }
             Ok(true)
@@ -143,7 +138,7 @@ impl LinearFader {
 impl BackendTimeout for LinearFader {
     fn execute(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>) -> Option<u64> {
         if let Some(cmd) = ctx.commands.get_mut(&self.fsu) {
-            let ref mut streams = cmd.downcast_mut::<LoadCommand>().unwrap().streams;
+            let streams = &mut cmd.downcast_mut::<LoadCommand>().unwrap().streams;
             let lp = streams[0].lp;
             let fade_left = lp.vol - self.target;
             let pos = ((::time::precise_time_s() - self.ptn) * 1000.0).round() as u64;

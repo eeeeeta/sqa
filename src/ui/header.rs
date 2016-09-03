@@ -39,7 +39,7 @@ impl HeaderController {
     }
     pub fn go(selfish: Rc<RefCell<Self>>) {
         let mut selfish = selfish.borrow_mut();
-        if let Some(ct) = selfish.cur.clone() {
+        if let Some(ct) = selfish.cur {
             selfish.sender.send(Message::UIGo(ct));
         }
     }

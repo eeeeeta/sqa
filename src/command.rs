@@ -34,16 +34,16 @@ pub struct CommandArgs<'a> {
 /// Command thingy.
 pub trait Command: mopa::Any + Send + BoxClone + 'static {
     fn name(&self) -> &'static str;
-    fn desc(&self, ctx: &Context) -> String {
-        format!("{}", self.name())
+    fn desc(&self, _ctx: &Context) -> String {
+        self.name().into()
     }
 
     fn get_hunks(&self) -> Vec<Box<Hunk>>;
 
     fn run_state(&self) -> Option<CommandState> { None }
 
-    fn load(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) {}
-    fn unload(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) {}
+    fn load(&mut self, _ctx: &mut Context, _evl: &mut EventLoop<Context>, _uu: Uuid) {}
+    fn unload(&mut self, _ctx: &mut Context, _evl: &mut EventLoop<Context>, _uu: Uuid) {}
 
     fn execute(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) -> Result<bool, String>;
 
@@ -75,42 +75,42 @@ pub enum HunkTypes {
 }
 impl HunkTypes {
     pub fn is_none(&self) -> bool {
-        match self {
-            &HunkTypes::FilePath(ref opt) => opt.is_none(),
-            &HunkTypes::Identifier(ref opt) => opt.is_none(),
-            &HunkTypes::String(ref opt) => opt.is_none(),
-            &HunkTypes::Label(..) => false,
-            &HunkTypes::Volume(..) => false,
-            &HunkTypes::Checkbox(..) => false,
-            &HunkTypes::Time(ref opt) => opt.is_none()
+        match *self {
+            HunkTypes::FilePath(ref opt) => opt.is_none(),
+            HunkTypes::Identifier(ref opt) => opt.is_none(),
+            HunkTypes::String(ref opt) => opt.is_none(),
+            HunkTypes::Label(..)    |
+            HunkTypes::Volume(..)   |
+            HunkTypes::Checkbox(..) => false,
+            HunkTypes::Time(ref opt) => opt.is_none()
         }
     }
     pub fn unwrap_ref(&self) -> &Any {
-        match self {
-            &HunkTypes::FilePath(ref opt) => opt,
-            &HunkTypes::Identifier(ref opt) => opt,
-            &HunkTypes::String(ref opt) => opt,
-            &HunkTypes::Label(ref opt) => opt,
-            &HunkTypes::Volume(ref opt) => opt,
-            &HunkTypes::Time(ref opt) => opt,
-            &HunkTypes::Checkbox(ref opt) => opt,
+        match *self {
+            HunkTypes::FilePath(ref opt) => opt,
+            HunkTypes::Identifier(ref opt) => opt,
+            HunkTypes::String(ref opt) => opt,
+            HunkTypes::Label(ref opt) => opt,
+            HunkTypes::Volume(ref opt) => opt,
+            HunkTypes::Time(ref opt) => opt,
+            HunkTypes::Checkbox(ref opt) => opt,
         }
     }
     pub fn none_of(&self) -> HunkTypes {
-        match self {
-            &HunkTypes::FilePath(..) => HunkTypes::FilePath(None),
-            &HunkTypes::Identifier(..) => HunkTypes::Identifier(None),
-            &HunkTypes::String(..) => HunkTypes::String(None),
-            &HunkTypes::Label(..) => panic!("eta dun goofed"),
-            &HunkTypes::Volume(..) => HunkTypes::Volume(0.0),
-            &HunkTypes::Time(..) => HunkTypes::Time(None),
-            &HunkTypes::Checkbox(..) => HunkTypes::Checkbox(false),
+        match *self {
+            HunkTypes::FilePath(..) => HunkTypes::FilePath(None),
+            HunkTypes::Identifier(..) => HunkTypes::Identifier(None),
+            HunkTypes::String(..) => HunkTypes::String(None),
+            HunkTypes::Label(..) => panic!("eta dun goofed"),
+            HunkTypes::Volume(..) => HunkTypes::Volume(0.0),
+            HunkTypes::Time(..) => HunkTypes::Time(None),
+            HunkTypes::Checkbox(..) => HunkTypes::Checkbox(false),
         }
     }
     pub fn string_of(&self, st: Option<String>) -> HunkTypes {
-        match self {
-            &HunkTypes::FilePath(..) => HunkTypes::FilePath(st),
-            &HunkTypes::String(..) => HunkTypes::String(st),
+        match *self {
+            HunkTypes::FilePath(..) => HunkTypes::FilePath(st),
+            HunkTypes::String(..) => HunkTypes::String(st),
             _ => panic!("eta dun goofed"),
         }
     }
@@ -172,11 +172,11 @@ pub struct GenericHunk {
 }
 impl Hunk for GenericHunk {
     fn get_val(&self, cmd: &Command, ctx: &Context) -> HunkState {
-        let ref getter = self.get;
+        let getter = &self.get;
         getter(cmd, ctx)
     }
     fn set_val(&mut self, cmd: &mut Command, val: HunkTypes) {
-        let ref setter = self.set;
+        let setter = &self.set;
         setter(cmd, val)
     }
 }

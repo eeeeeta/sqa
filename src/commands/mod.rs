@@ -13,7 +13,7 @@ pub use self::output::OutputCommand;
 use self::prelude::Command;
 use gdk::enums::key::Key as gkey;
 use gdk::enums::key as gkeys;
-/// List of possible command types for a CommandSpawner.
+/// List of possible command types for a `CommandSpawner`.
 #[derive(Copy, Clone)]
 enum Commands {
     Load,

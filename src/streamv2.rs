@@ -16,8 +16,8 @@ use commands::LoadCommand;
 use std::time::Duration;
 use simplemad::{Decoder, Frame, SimplemadError};
 use std::fs::File;
-use std::io::{self, BufReader, ErrorKind};
-use std::path::{Path, PathBuf};
+use std::io::{self, ErrorKind};
+use std::path::Path;
 
 /* FIXME(for this entire file): give some notification on try_push failures */
 /// Converts a linear amplitude to decibels.
@@ -65,7 +65,7 @@ enum SpoolerCtl {
 }
 /// Controller struct for a `FileStream`.
 ///
-/// See the FileStream documentation for info about what these
+/// See the `FileStream` documentation for info about what these
 /// fields are.
 #[derive(Clone)]
 pub struct FileStreamX {
@@ -146,7 +146,7 @@ impl FileStreamSpooler {
         }
     }
     fn reset_self(&mut self) {
-        for &mut ChannelDescriptor { ref mut buf_tx, ref mut ctl_tx, ref mut bufs, .. }in self.chans.iter_mut() {
+        for &mut ChannelDescriptor { ref mut buf_tx, ref mut ctl_tx, ref mut bufs, .. }in &mut self.chans {
             let (new_tx, new_rx) = bounded_spsc_queue::make(250);
             *buf_tx = new_tx;
             *bufs = vec![(Duration::new(0, 0), Vec::with_capacity(FRAMES_PER_CALLBACK))];
@@ -164,12 +164,12 @@ impl FileStreamSpooler {
                 self.filled = false;
             },
             SpoolerCtl::SetActive(act) => {
-                for &mut ChannelDescriptor { ref mut ctl_tx, .. } in self.chans.iter_mut() {
+                for &mut ChannelDescriptor { ref mut ctl_tx, .. } in &mut self.chans {
                     ctl_tx.push(FileStreamRequest::SetActive(act));
                 }
             },
             SpoolerCtl::SetVol(vol) => {
-                for &mut ChannelDescriptor { ref mut ctl_tx, .. } in self.chans.iter_mut() {
+                for &mut ChannelDescriptor { ref mut ctl_tx, .. } in &mut self.chans {
                     ctl_tx.push(FileStreamRequest::SetVol(vol));
                 }
             }
@@ -215,7 +215,7 @@ impl FileStreamSpooler {
                 }
                 Self::send_buffers(buf_tx, bufs);
             }
-            if self.eof == true || self.filled == true {
+            if self.eof || self.filled {
                 self.cvar.1.wait(&mut self.cvar.0.lock());
                 continue 'spooler;
             }
@@ -229,7 +229,7 @@ impl FileStreamSpooler {
                     continue;
                 }
                 Err(SimplemadError::EOF) => {
-                    for &mut ChannelDescriptor { ref mut bufs, .. } in self.chans.iter_mut() {
+                    for &mut ChannelDescriptor { ref mut bufs, .. } in &mut self.chans {
                         while bufs[0].1.len() != bufs[0].1.capacity() {
                             bufs[0].1.push(0.0);
                         }
@@ -304,7 +304,7 @@ enum FileStreamRequest {
 }
 /// One-channel stream created from a multi-channel file that reads from the file as it plays.
 ///
-/// Multiple interlinked FileStreams will usually be created from the same file.
+/// Multiple interlinked `FileStream`s will usually be created from the same file.
 pub struct FileStream {
     status_tx: Producer<LiveParameters>,
     control_rx: Consumer<FileStreamRequest>,
@@ -329,7 +329,7 @@ impl FileStream {
                 SimplemadError::Mad(e) => io::Error::new(ErrorKind::Other,
                                                          format!("MP3 decoder error: {:?}", e)),
                 SimplemadError::EOF => io::Error::new(ErrorKind::UnexpectedEof,
-                                                      format!("Unexpected EOF"))
+                                                      "Unexpected EOF")
             }
         })?;
         let mut frame: Option<Frame> = None;
@@ -343,7 +343,7 @@ impl FileStream {
                 }
                 Err(SimplemadError::EOF) => {
                     return Err(io::Error::new(ErrorKind::UnexpectedEof,
-                                              format!("File ended before any useful data was decoded")));
+                                              "File ended before any useful data was decoded"));
                 },
                 Ok(fr) => {
                     frame = Some(fr);
@@ -354,7 +354,7 @@ impl FileStream {
         let frame = match frame {
             Some(fr) => fr,
             None => return Err(io::Error::new(ErrorKind::UnexpectedEof,
-                                              format!("File ended before any useful data was decoded")))
+                                              "File ended before any useful data was decoded"))
         };
 
         decoder.get_reader().seek(SeekFrom::Start(0))?;
@@ -399,20 +399,20 @@ impl FileStream {
                 status_tx: status_tx,
                 control_rx: control_rx,
                 buf: buf_rx,
-                lp: lp.clone(),
+                lp: lp,
                 sample_rate: info.sample_rate,
                 uuid: uu,
                 last_sec: 0,
                 cvar: cvar.clone()
             }, FileStreamX {
                 tx: spoolertx.clone(),
-                uuid: uu.clone(),
+                uuid: uu,
                 cvar: cvar.clone()
             }));
         }
         thread::spawn(move || {
-            let mut file = File::open(filename.as_path()).unwrap();
-            let mut decoder = Decoder::decode(file).unwrap();
+            let file = File::open(filename.as_path()).unwrap();
+            let decoder = Decoder::decode(file).unwrap();
 
             let mut spooler = FileStreamSpooler::new(decoder, (auuid, channel), spoolerrx, descriptors, cvar);
             spooler.spool();
@@ -433,15 +433,15 @@ impl mixer::Source for FileStream {
                 FileStreamRequest::SetActive(act) =>
                 {
                     self.lp.active = act;
-                    if act == true {
+                    if act {
                         self.lp.stopped = false;
                     }
                 }
             }
             self.cvar.1.notify_one();
-            self.status_tx.try_push(self.lp.clone());
+            self.status_tx.try_push(self.lp);
         }
-        if self.lp.active == false {
+        if !self.lp.active {
             mixer::fill_with_silence(buffer, zero);
             return;
         }
@@ -450,19 +450,19 @@ impl mixer::Source for FileStream {
                 if zero {
                     *out = 0.0;
                 }
-                *out = *out + (inp * self.lp.vol);
+                *out += inp * self.lp.vol;
             }
             self.lp.pos = pos;
             if pos >= self.lp.end {
                 self.lp.active = false;
                 self.lp.stopped = true;
                 self.lp.pos = Duration::new(0, 0);
-                self.status_tx.try_push(self.lp.clone());
+                self.status_tx.try_push(self.lp);
                 self.cvar.1.notify_one();
             }
             else if pos.as_secs() > self.last_sec {
                 self.last_sec = pos.as_secs();
-                self.status_tx.try_push(self.lp.clone());
+                self.status_tx.try_push(self.lp);
                 self.cvar.1.notify_one();
             }
         }
@@ -474,6 +474,6 @@ impl mixer::Source for FileStream {
         self.sample_rate as u64 /* FIXME */
     }
     fn uuid(&self) -> Uuid {
-        self.uuid.clone()
+        self.uuid
     }
 }

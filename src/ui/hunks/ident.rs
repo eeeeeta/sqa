@@ -33,14 +33,14 @@ impl HunkUIController for IdentUIController {
         self.entuic.set_help(help);
     }
     fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
-        let ref uierr = self.err;
+        let uierr = &self.err;
         self.entuic.ent.connect_activate(clone!(line; |ent| {
             if let Some(strn) = ent.get_text() {
                 if Uuid::parse_str(&strn).is_err() {
                     // FIXME: replace with try_borrow()
                     if let ::std::cell::BorrowState::Unused = line.borrow_state() {
                         let line = line.borrow();
-                        let mut ti = match line.completion.iter_children(None) {
+                        let ti = match line.completion.iter_children(None) {
                             Some(v) => v,
                             None => return
                         };
@@ -51,7 +51,7 @@ impl HunkUIController for IdentUIController {
                                     break;
                                 }
                             }
-                            if !line.completion.iter_next(&mut ti) {
+                            if !line.completion.iter_next(&ti) {
                                 break;
                             }
                         }
@@ -99,11 +99,11 @@ impl HunkUIController for IdentUIController {
         }
         let val = val.downcast_ref::<Option<Uuid>>().unwrap();
         self.entuic.pop.borrow().val_exists(val.is_some());
-        match val {
-            &Some(ref txt) => {
+        match *val {
+            Some(ref txt) => {
                 self.entuic.ent.set_text(&format!("{}", txt));
             },
-            &None => {
+            None => {
                 self.entuic.ent.set_text("");
             }
         }
@@ -113,7 +113,7 @@ impl HunkUIController for IdentUIController {
     }
     fn get_error(&self) -> Option<String> {
         if self.err.borrow().is_some() {
-            Some(format!("Please enter a valid identifier."))
+            Some("Please enter a valid identifier.".into())
         }
         else {
             None

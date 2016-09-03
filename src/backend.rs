@@ -33,7 +33,7 @@ impl<'a> Handler for Context<'a> {
             Message::SetHunk(uu, idx, val) => {
                 {
                     let mut cmd = self.commands.get_mut(&uu).unwrap();
-                    let ref mut hunk = cmd.get_hunks()[idx];
+                    let hunk = &mut cmd.get_hunks()[idx];
                     hunk.set_val(::std::ops::DerefMut::deref_mut(cmd), val);
                 }
                 if let CommandState::Ready = self.desc_cmd(uu).state {
@@ -45,10 +45,11 @@ impl<'a> Handler for Context<'a> {
                 self.exec_cmd(uu, evl);
             },
             Message::Update(uu, cu) => {
-                if {
+                let c = {
                     let mut cmd = self.commands.get_mut(&uu).unwrap();
                     cu(::std::ops::DerefMut::deref_mut(cmd))
-                } {
+                };
+                if c {
                     self.execution_completed(uu, evl);
                 }
                 update = Some(uu);
@@ -69,7 +70,7 @@ impl<'a> Handler for Context<'a> {
             },
             Message::Standby(ct) => {
                 for (k, mut chn) in self.chains.clone().into_iter() {
-                    if ct.is_some() && ct.clone().unwrap() == k {
+                    if ct.is_some() && ct.unwrap() == k {
                         chn.standby(self, evl);
                     }
                     else {
@@ -80,9 +81,9 @@ impl<'a> Handler for Context<'a> {
             },
             Message::SetFallthru(uu, state) => {
                 let mut msg = None;
-                for (k, chn) in self.chains.iter_mut() {
+                for (k, chn) in &mut self.chains {
                     if chn.set_fallthru(uu, state) {
-                        msg = Some(Message::ChainFallthru(k.clone(), chn.fallthru.clone()));
+                        msg = Some(Message::ChainFallthru(*k, chn.fallthru.clone()));
                         break;
                     }
                 }

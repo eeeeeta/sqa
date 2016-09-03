@@ -6,7 +6,7 @@
 //! The general layout of the UI code is as follows:
 //!
 //! - There is one central `UIContext`, which is responsible for handling `state::Message`s.
-//! - This UIContext owns all of the individual UI components, and lets them know of any messages
+//! - This `UIContext` owns all of the individual UI components, and lets them know of any messages
 //!   that require them to do something.
 //! - When these components wish to make a change, they either notify the backend directly or
 //!   use a `UISender` to notify the `UIContext`. From here, changes will be made, and communicated
@@ -45,10 +45,9 @@ use self::header::HeaderController;
 /// Glade source for the UI itself. Found in `sqa/src/ui/interface.glade`.
 pub static INTERFACE_SRC: &'static str = include_str!("interface.glade");
 
-use state::{CommandDescriptor, CommandState, Message, ThreadNotifier, ChainType, Chain};
+use state::{Message, ThreadNotifier, ChainType};
 use uuid::Uuid;
 use std::rc::Rc;
-use std::fmt;
 use std::cell::RefCell;
 use std::default::Default;
 use std::sync::mpsc::{Sender, Receiver};
@@ -57,10 +56,10 @@ use gtk::{Builder, ListStore, Window};
 use gtk::prelude::*;
 use gdk::enums::key as gkey;
 
-/// Communication channel from UI objects to the UIContext.
+/// Communication channel from UI objects to the `UIContext`.
 ///
 /// Essentially, this is just a clone of the mechanisms the backend uses
-/// to transmit messages to the UIContext.
+/// to transmit messages to the `UIContext`.
 #[derive(Clone)]
 pub struct UISender {
     tx: Sender<Message>,
@@ -114,14 +113,14 @@ impl UIContext {
     /// Makes a new UIContext.
     pub fn init(sender: BackendSender, uisender: Sender<Message>, recvr: Receiver<Message>, tn: ThreadNotifier, win: Window, builder: &Builder)  -> Rc<RefCell<Self>> {
         let compl: ListStore = builder.get_object("command-identifiers-list").unwrap();
-        let line = CommandLine::new(sender.clone(), compl.clone(), Default::default(), UISender::new(uisender.clone(), tn.clone()), &builder);
-        let ccc = CommandChooserController::new(line.clone(), Default::default(), UISender::new(uisender.clone(), tn.clone()), &builder);
+        let line = CommandLine::new(sender.clone(), compl.clone(), Default::default(), UISender::new(uisender.clone(), tn.clone()), builder);
+        let ccc = CommandChooserController::new(line.clone(), Default::default(), UISender::new(uisender.clone(), tn.clone()), builder);
         let uic = Rc::new(RefCell::new(UIContext {
             chooser: ccc,
             line: line,
             rx: recvr,
-            list: ListController::new(UISender::new(uisender.clone(), tn.clone()), sender.clone(), compl.clone(), &builder),
-            header: HeaderController::new(UISender::new(uisender.clone(), tn.clone()), &builder),
+            list: ListController::new(UISender::new(uisender.clone(), tn.clone()), sender.clone(), compl.clone(), builder),
+            header: HeaderController::new(UISender::new(uisender.clone(), tn.clone()), builder),
             completions: compl,
             tx: sender,
             uitx: UISender::new(uisender.clone(), tn.clone()),
@@ -220,9 +219,9 @@ impl UIContext {
             Message::UIChangeSel(sel) => {
                 if let Some(sel) = sel {
                     let mut chain = ChainType::Unattached;
-                    for (ct, chn) in selfish.list.borrow().chains.iter() {
+                    for (ct, chn) in &selfish.list.borrow().chains {
                         if chn.commands.contains(&sel) {
-                            chain = ct.clone();
+                            chain = *ct;
                             break;
                         }
                     }
@@ -235,7 +234,7 @@ impl UIContext {
                     ListController::update_sel(selfish.list.clone(), None);
                     CommandChooserController::set_ui_state(selfish.chooser.clone(), selfish.state.clone());
                 }
-                HeaderController::update_sel(selfish.header.clone(), selfish.state.sel.clone());
+                HeaderController::update_sel(selfish.header.clone(), selfish.state.sel);
             },
             Message::UIBeginEditing(uu) => {
                 if let Some(desc) = selfish.list.borrow().commands.get(&uu) {
