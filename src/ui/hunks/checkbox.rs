@@ -38,7 +38,7 @@ impl HunkUIController for CheckboxUIController {
         self.pop.borrow().set_help(help);
     }
     fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, _: HunkTypes) {
-        let ref pop = self.pop;
+        let pop = &self.pop;
 
         self.btn.connect_focus_in_event(clone!(pop; |_x, _y| {
             pop.borrow().visible(true);

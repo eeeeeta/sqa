@@ -27,16 +27,16 @@ impl<'a> StreamController for FileStreamController<'a> {
     }
 }
 fn describe_path(p: &Option<PathBuf>) -> String {
-    if let &Some(ref pb) = p {
+    if let Some(ref pb) = *p {
         if let Some(filename) = pb.as_path().file_name() {
-            format!("{}", filename.to_string_lossy())
+            filename.to_string_lossy().into_owned()
         }
         else {
             format!("{}", pb.to_string_lossy())
         }
     }
     else {
-        format!("[???]")
+        "[???]".into()
     }
 }
 #[derive(Clone)]
@@ -62,10 +62,10 @@ impl Command for LoadCommand {
     fn name(&self) -> &'static str { "Load file" }
     fn desc(&self, _: &Context) -> String {
         let stopped = if self.start {
-            format!("")
+            ""
         }
         else {
-            format!(" <b>[stopped]</b>")
+            " <b>[stopped]</b>"
         };
         match self.ident {
             None => format!("Load file <b>{}</b>{}", describe_path(&self.file), stopped),
@@ -73,8 +73,8 @@ impl Command for LoadCommand {
         }
     }
     fn run_state(&self) -> Option<CommandState> {
-        if let Some(ref info) = self.streams.get(0) {
-            Some(if info.lp.pos == Duration::new(0, 0) && info.lp.active == false {
+        if let Some(info) = self.streams.get(0) {
+            Some(if info.lp.pos == Duration::new(0, 0) && !info.lp.active {
                 CommandState::Loaded
             } else {
                 CommandState::Running(info.lp.pos)
@@ -111,28 +111,22 @@ impl Command for LoadCommand {
                     Some(format!("{}", e))
                 }
                 else if info.unwrap().sample_rate != 44_100 {
-                    Some(format!("SQA currently only supports files with a samplerate of 44.1kHz."))
+                    Some("SQA currently only supports files with a samplerate of 44.1kHz.".into())
                 }
                 else {
                     None
                 }
             }
             else {
-                Some(format!("A filename to open is required."))
+                Some("A filename to open is required.".into())
             }
         };
         let ident_getter = move |selfish: &Self| -> Option<String> {
-            selfish.ident.as_ref().map(|x| x.clone())
+            selfish.ident.as_ref().cloned()
         };
         let ident_setter = move |selfish: &mut Self, val: Option<String>| {
-            if let Some(val) = val {
-                selfish.ident = Some(val.clone());
-                selfish.ident_set = true;
-            }
-            else {
-                selfish.ident = None;
-                selfish.ident_set = false;
-            }
+            selfish.ident_set = val.is_some();
+            selfish.ident = val;
         };
         let ident_egetter = move |selfish: &Self, ctx: &Context| -> Option<String> {
             if let Some(ref ident) = selfish.ident {
@@ -161,11 +155,11 @@ impl Command for LoadCommand {
         };
         vec![
             hunk!(FilePath, "Provide the file path to an audio file.", true, Keys::p, file_getter, file_setter, file_egetter),
-            TextHunk::new(format!("as")),
+            TextHunk::new("as".into()),
             hunk!(String, "Provide an optional named identifier for the new stream.", false, Keys::a, ident_getter, ident_setter, ident_egetter),
-            TextHunk::new(format!("(started: ")),
+            TextHunk::new("(started: ".into()),
             hunk!(Checkbox, "Should the stream start playing when this command is executed?", false, Keys::r, start_getter, start_setter, start_egetter),
-            TextHunk::new(format!(")"))
+            TextHunk::new(")".into())
         ]
     }
     fn load(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>, uu: Uuid) {

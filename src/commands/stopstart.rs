@@ -1,5 +1,4 @@
 use super::prelude::*;
-use streamv2::FileStreamX;
 #[derive(Copy, Clone)]
 pub enum StopStartChoice {
     Stop,
@@ -39,28 +38,23 @@ impl Command for StopStartCommand {
     }
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
         let ident_getter = move |selfish: &Self| -> Option<Uuid> {
-            selfish.ident.as_ref().map(|x| x.clone())
+            selfish.ident
         };
         let ident_setter = move |selfish: &mut Self, val: Option<Uuid>| {
-            if let Some(val) = val {
-                selfish.ident = Some(val.clone());
-            }
-            else {
-                selfish.ident = None;
-            }
+            selfish.ident = val;
         };
         let ident_egetter = move |selfish: &Self, ctx: &Context| -> Option<String> {
             if let Some(ref ident) = selfish.ident {
-                if let Some(ref strm) = ctx.commands.get(ident) {
+                if let Some(strm) = ctx.commands.get(ident) {
                     if strm.can_ctl_stream() {
                         None
                     }
                     else {
-                        Some(format!("That command isn't a stream."))
+                        Some("That command isn't a stream.".into())
                     }
                 }
                 else {
-                    Some(format!("That UUID doesn't exist."))
+                    Some("That UUID doesn't exist.".into())
                 }
             }
             else {
@@ -75,11 +69,11 @@ impl Command for StopStartCommand {
         };
         vec![
             hunk!(Identifier, verbiage, false, ident_getter, ident_setter, ident_egetter),
-            TextHunk::new(format!("[leave blank for all]"))
+            TextHunk::new("[leave blank for all]".into())
         ]
     }
     fn execute(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>, _: Uuid) -> Result<bool, String> {
-        for (k, v) in ctx.commands.iter_mut() {
+        for (k, v) in &mut ctx.commands {
             if let Some(ident) = self.ident {
                 if ident != *k { continue }
             }

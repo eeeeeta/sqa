@@ -20,7 +20,7 @@ impl TextUIController {
 }
 
 impl HunkUIController for TextUIController {
-    fn bind(&mut self, _: Rc<RefCell<CommandLine>>, _: usize, ht: HunkTypes) {}
+    fn bind(&mut self, _: Rc<RefCell<CommandLine>>, _: usize, _ht: HunkTypes) {}
     fn pack(&self, onto: &GtkBox) {
         onto.pack_start(&self.lbl, false, false, 3);
     }

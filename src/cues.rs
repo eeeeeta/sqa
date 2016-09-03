@@ -1,7 +1,6 @@
 //! Cues (lists of commands).
 
-use state::{Context, Message};
-use backend::BackendSender;
+use state::Context;
 use std::collections::HashMap;
 use mio::EventLoop;
 use uuid::Uuid;
@@ -14,9 +13,9 @@ pub enum ChainType {
 }
 impl fmt::Display for ChainType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &ChainType::Unattached => write!(f, "X"),
-            &ChainType::Q(num) => write!(f, "Q{}", num),
+        match *self {
+            ChainType::Unattached => write!(f, "X"),
+            ChainType::Q(num) => write!(f, "Q{}", num),
         }
     }
 }
@@ -100,9 +99,9 @@ impl Chain {
         false
     }
     fn exec(&mut self, idx: usize, ctx: &mut Context, evl: &mut EventLoop<Context>) {
-        if let Some(now) = self.commands.get(idx).map(|x| *x) {
+        if let Some(now) = self.commands.get(idx).cloned() {
             self.fsm = QFSM::Blocked(now, idx);
-            if ctx.exec_cmd(now, evl) || self.fallthru.get(&now).map(|x| *x).unwrap_or(false) {
+            if ctx.exec_cmd(now, evl) || self.fallthru.get(&now).cloned().unwrap_or(false) {
                 self.on_exec_completed(now, ctx, evl);
             }
         }
@@ -115,7 +114,7 @@ impl Chain {
     }
     pub fn standby(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>) {
         if let QFSM::Idle = self.fsm {
-            for cmd in self.commands.iter() {
+            for cmd in &self.commands {
                 ctx.load_cmd(*cmd, evl);
             }
             self.fsm = QFSM::Standby;
@@ -123,7 +122,7 @@ impl Chain {
     }
     pub fn unstandby(&mut self, ctx: &mut Context, evl: &mut EventLoop<Context>) {
         if let QFSM::Standby = self.fsm {
-            for cmd in self.commands.iter() {
+            for cmd in &self.commands {
                 ctx.unload_cmd(*cmd, evl);
             }
             self.fsm = QFSM::Idle;

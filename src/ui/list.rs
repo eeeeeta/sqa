@@ -1,4 +1,4 @@
-//! Control of the main TreeView that lists commands.
+//! Control of the main `TreeView` that lists commands.
 use state::{CommandState, ChainType, Chain, CommandDescriptor, Message};
 use backend::BackendSender;
 use ui::UISender;
@@ -6,12 +6,11 @@ use std::collections::{BTreeMap, HashMap};
 use gtk::prelude::*;
 use gtk::{Builder, TreeStore, ListStore, TreeIter, TreeView, TreeSelection, SelectionMode};
 use uuid::Uuid;
-use std::ops::Deref;
 use std::rc::Rc;
 use std::cell::RefCell;
 use gdk::enums::key as gkey;
 
-/// Helper function to extract a UUID from a TreeStore item.
+/// Helper function to extract a UUID from a `TreeStore` item.
 fn extract_uuid(ts: &TreeStore, ti: &TreeIter, col: i32) -> Option<Uuid> {
     if let Some(v) = ts.get_value(ti, col).get::<String>() {
         if let Ok(uu) = Uuid::parse_str(&v) {
@@ -20,10 +19,10 @@ fn extract_uuid(ts: &TreeStore, ti: &TreeIter, col: i32) -> Option<Uuid> {
     }
     None
 }
-/// Helper function to extract fallthrough state from a TreeStore item.
+/// Helper function to extract fallthrough state from a `TreeStore` item.
 fn extract_ft(ts: &TreeStore, ti: &TreeIter, col: i32) -> bool {
     if let Some(v) = ts.get_value(ti, col).get::<String>() {
-        v.len() != 0
+        !v.is_empty()
     }
     else {
         false
@@ -123,7 +122,7 @@ impl ListController {
     ///
     /// Stops and returns the value if the closure returns Some.
     fn run_for_each<T, U>(&self, mut cls: T) -> Option<U> where T: FnMut(&TreeIter, &TreeStore) -> Option<U> {
-        let mut ti = match self.store.iter_children(None) {
+        let ti = match self.store.iter_children(None) {
             Some(v) => v,
             None => {
                 return None;
@@ -133,7 +132,7 @@ impl ListController {
             if let Some(t) = cls(&ti, &self.store) {
                 return Some(t);
             }
-            if !self.store.iter_next(&mut ti) {
+            if !self.store.iter_next(&ti) {
                 break;
             }
         }
@@ -165,7 +164,7 @@ impl ListController {
         ::glib::signal_handler_block(&self.sel, self.sel_handler.unwrap());
         self.store.clear();
         self.completions.clear();
-        for (ref ct, ref chn) in &self.chains {
+        for (ct, chn) in &self.chains {
             for (i, uu) in chn.commands.iter().enumerate() {
                 if let Some(v) = self.commands.get(uu) {
                     let iter = self.store.append(None);
@@ -186,10 +185,10 @@ impl ListController {
     /// Updates the list of identifier completions.
     fn update_completions(&mut self) {
         self.completions.clear();
-        for (ref ct, ref chn) in &self.chains {
+        for (ct, chn) in &self.chains {
             for (i, uu) in chn.commands.iter().enumerate() {
                 if let Some(v) = self.commands.get(uu) {
-                    let (icon, desc, _, _) = Self::get_render_data(&v);
+                    let (icon, desc, _, _) = Self::get_render_data(v);
                     self.completions_render(desc, icon, ct, i, *uu);
                 }
             }
@@ -197,30 +196,30 @@ impl ListController {
     }
     /// Renders a completion list item.
     fn completions_render(&self, desc: String, icon: String, ct: &ChainType, i: usize, uu: Uuid) {
-        self.completions.set(&self.completions.append(), &vec![
+        self.completions.set(&self.completions.append(), &[
             0, // identifier
             1, // uuid
             2, // description
             3, // icon
-        ], &vec![
+        ], &[
             &format!("{}-{}", ct, i) as &ToValue,
-            &format!("{}", uu) as &ToValue,
+            &uu.to_string() as &ToValue,
             &desc as &ToValue,
             &icon as &ToValue,
-        ].deref());
-        for (k, v) in self.identifiers.iter() {
+        ]);
+        for (k, v) in &self.identifiers {
             if uu == *v {
-                self.completions.set(&self.completions.append(), &vec![
+                self.completions.set(&self.completions.append(), &[
                     0, // identifier
                     1, // uuid
                     2, // description
                     3, // icon
-                ], &vec![
+                ], &[
                     &format!("${}", k) as &ToValue,
-                    &format!("{}", uu) as &ToValue,
+                    &uu.to_string() as &ToValue,
                     &desc as &ToValue,
                     &icon as &ToValue,
-                ].deref());
+                ]);
             }
         }
 
@@ -228,44 +227,39 @@ impl ListController {
     /// Renders the chain-specific information pertaining to a command.
     fn chain_render(&self, ti: &TreeIter, ct: &ChainType, cidx: usize, ft: bool) {
         let ident = format!("{}-{}", ct, cidx);
-        let ft = if ft {
-            format!("go-down")
-        }
-        else {
-            format!("")
-        };
-        self.store.set(ti, &vec![
+        let ft = if ft { "go-down" } else { "" };
+        self.store.set(ti, &[
             1, // identifier (looking glass column)
             6, // flags (preferences column)
-        ], &vec![
+        ], &[
             &ident as &ToValue,
             &ft as &ToValue,
-        ].deref());
+        ]);
     }
     /// Gets the (icon, description, duration, background colour) of a command for rendering.
     fn get_render_data(v: &CommandDescriptor)
                        -> (String, String, String, String) {
         let (mut icon, desc, mut dur, mut bgc) =
-            (format!("dialog-question"),
+            ("dialog-question".into(),
              v.desc.clone(),
-             format!(""),
-             format!("white"));
+             "".into(),
+             "white".into());
         match v.state {
             CommandState::Incomplete => {
-                icon = format!("dialog-error");
-                bgc = format!("lightpink");
+                icon = "dialog-error".into();
+                bgc = "lightpink".into();
             },
             CommandState::Ready => {
-                icon = format!("");
+                icon = "".into();
             },
             CommandState::Loaded => {
-                icon = format!("go-home");
-                bgc = format!("lemonchiffon");
+                icon = "go-home".into();
+                bgc = "lemonchiffon".into();
             },
             CommandState::Running(cd) => {
                 let cd = ::chrono::Duration::from_std(cd).unwrap();
-                icon = format!("media-seek-forward");
-                bgc = format!("powderblue");
+                icon = "media-seek-forward".into();
+                bgc = "powderblue".into();
                 dur = format!("{:02}:{:02}:{:02}",
                               cd.num_hours(),
                               cd.num_minutes() - (60 * cd.num_hours()),
@@ -279,19 +273,19 @@ impl ListController {
     fn render(&self, ti: &TreeIter, v: &CommandDescriptor, uu: Uuid) -> (String, String) {
         let (icon, desc, dur, bgc) = Self::get_render_data(v);
         let uu = format!("{}", uu);
-        self.store.set(ti, &vec![
+        self.store.set(ti, &[
             0, // icon
             2, // description
             3, // duration
             4, // background colour
             5, // UUID
-        ], &vec![
+        ], &[
             &icon as &ToValue,
             &desc as &ToValue,
             &dur as &ToValue,
             &bgc as &ToValue,
             &uu as &ToValue
-        ].deref());
+        ]);
         (icon, desc)
     }
     /// Called when a CommandDescriptor is changed or added.
@@ -315,7 +309,7 @@ impl ListController {
     pub fn update_chain(selfish: Rc<RefCell<Self>>, ct: ChainType, chain: Option<Chain>) {
         let mut selfish = selfish.borrow_mut();
         if let Some(chn) = chain {
-            selfish.chains.insert(ct.clone(), chn.clone());
+            selfish.chains.insert(ct, chn.clone());
         }
         else {
             selfish.chains.remove(&ct);
@@ -328,17 +322,12 @@ impl ListController {
         let _: Option<()> = selfish.run_for_each(|ti, ts| {
             if let Some(uu) = extract_uuid(ts, ti, 5) {
                 if let Some(b) = chain.get(&uu) {
-                    let ft = if *b {
-                        format!("go-down")
-                    }
-                    else {
-                        format!("")
-                    };
-                    ts.set(ti, &vec![
+                    let ft = if *b { "go-down" } else { "" };
+                    ts.set(ti, &[
                         6, // flags (preferences column)
-                    ], &vec![
+                    ], &[
                         &ft as &ToValue,
-                    ].deref());
+                    ]);
                 }
             }
             None

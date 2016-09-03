@@ -23,10 +23,9 @@ mod ui;
 mod backend;
 mod cues;
 
-use gtk::prelude::*;
 use gtk::{Builder, Window};
 use std::thread;
-use state::{ThreadNotifier, Message};
+use state::ThreadNotifier;
 use std::sync::mpsc::{channel};
 use ui::UIContext;
 
@@ -34,7 +33,7 @@ use ui::UIContext;
 fn main() {
     println!("SQA beta 1, an eta thing");
     println!("[+] Initialising GTK & CSS contexts...");
-    let _ = gtk::init().unwrap();
+    gtk::init().unwrap();
     let ui_src = ui::INTERFACE_SRC;
     let builder = Builder::new_from_string(ui_src);
 
@@ -56,7 +55,7 @@ fn main() {
     let sender = srx.recv().unwrap();
     println!("[+] Setting up window & GTK objects...");
     let win: Window = builder.get_object("SQA Main Window").unwrap();
-    let uic = UIContext::init(sender, uitx, rx, tn, win, &builder);
+    let _uic = UIContext::init(sender, uitx, rx, tn, win, &builder);
     println!("[+] Initialisation complete!");
     gtk::main();
 }

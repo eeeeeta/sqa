@@ -23,7 +23,7 @@ impl Command for OutputCommand {
         }
     }
     fn get_hunks(&self) -> Vec<Box<Hunk>> {
-        vec![TextHunk::new(format!("[TODO]"))]
+        vec![TextHunk::new("[TODO]".into())]
     }
     fn load(&mut self, ctx: &mut Context, _: &mut EventLoop<Context>, _: Uuid) {
         let idx = ctx.pa.default_output_device().unwrap();

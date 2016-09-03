@@ -30,7 +30,7 @@ impl HunkUIController for TimeUIController {
         self.entuic.set_help(help);
     }
     fn bind(&mut self, line: Rc<RefCell<CommandLine>>, idx: usize, ht: HunkTypes) {
-        let ref uierr = self.err;
+        let uierr = &self.err;
         self.entuic.ent.connect_activate(clone!(line, uierr; |ent| {
             *uierr.borrow_mut() = None;
             if let Some(strn) = ent.get_text() {
@@ -59,11 +59,11 @@ impl HunkUIController for TimeUIController {
         }
         let val = val.downcast_ref::<Option<u64>>().unwrap();
         self.entuic.pop.borrow().val_exists(val.is_some());
-        match val {
-            &Some(ref txt) => {
-                self.entuic.ent.set_text(&format!("{}", txt));
+        match *val {
+            Some(ref txt) => {
+                self.entuic.ent.set_text(&txt.to_string());
             },
-            &None => {
+            None => {
                 self.entuic.ent.set_text("");
             }
         }
@@ -73,7 +73,7 @@ impl HunkUIController for TimeUIController {
     }
     fn get_error(&self) -> Option<String> {
         if self.err.borrow().is_some() {
-            Some(format!("Please enter a valid whole number of milliseconds (or unset this value)."))
+            Some("Please enter a valid whole number of milliseconds (or unset this value).".into())
         }
         else {
             None

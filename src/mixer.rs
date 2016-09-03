@@ -105,7 +105,7 @@ impl Magister {
     pub fn locate_source(&mut self, from: Uuid) -> Option<Box<Source>> {
         let mut source: Option<Box<Source>> = self.sources.remove(&from);
         if source.is_none() {
-            for (_, val) in self.sinks.iter_mut() {
+            for (_, val) in &mut self.sinks {
                 if let Some(src) = val.unwire(from) {
                     source = Some(src);
                     break;
@@ -149,7 +149,7 @@ impl Magister {
     }
 
 }
-/// Sink that routes audio to a PortAudio stream output.
+/// Sink that routes audio to a `PortAudio` stream output.
 pub struct DeviceSink {
     pub stream: Rc<RefCell<pa::stream::Stream<pa::stream::NonBlocking, pa::stream::Output<f32>>>>,
     txrx: Arc<Mutex<(Producer<(usize, Option<Box<Source>>)>, Consumer<Option<Box<Source>>>)>>,
@@ -181,10 +181,10 @@ impl Sink for DeviceSink {
         let mut lck = self.txrx.lock().unwrap();
         let &mut (ref mut tx, ref mut rx) = lck.deref_mut();
         tx.push((self.id, None));
-        rx.pop().map(|x| vec![x]).unwrap_or(vec![])
+        rx.pop().map_or(vec![], |x| vec![x])
     }
     fn uuid(&self) -> Uuid {
-        self.uuid.clone()
+        self.uuid
     }
 }
 impl DeviceSink {
@@ -222,7 +222,7 @@ impl DeviceSink {
             /* FIXME: rust-portaudio need to add support for interleaved buffers. Until they do this,
             this unsafe part has to stay. */
             unsafe {
-                let buffer: *mut *mut f32 = ::std::mem::transmute(buffer.get_unchecked_mut(0));
+                let buffer: *mut *mut f32 = buffer.get_unchecked_mut(0) as *mut f32 as *mut *mut f32;
                 let buffer: &mut [*mut f32] = ::std::slice::from_raw_parts_mut(buffer, chans.len());
                 for (i, ch) in chans.iter_mut().enumerate() {
                     if ch.is_some() {
@@ -241,7 +241,7 @@ impl DeviceSink {
             rets.push(DeviceSink {
                 stream: stream.clone(),
                 txrx: ds_to_cb.clone(),
-                uuid: uu.get(i).map(|x| *x).unwrap_or(Uuid::new_v4()),
+                uuid: uu.get(i).cloned().unwrap_or_else(Uuid::new_v4),
                 last_uuid_wired: Uuid::new_v4(),
                 id: i
             })
@@ -262,7 +262,7 @@ pub struct QChannelX {
 }
 impl Sink for QChannelX {
     fn uuid(&self) -> Uuid {
-        self.uuid.clone()
+        self.uuid
     }
     fn wire(&mut self, cli: Box<Source>) -> Option<Box<Source>> {
         self.sent_uuids.push(cli.uuid());
@@ -281,7 +281,7 @@ impl Sink for QChannelX {
     }
     fn drop(&mut self) -> Vec<Box<Source>> {
         let mut ret = vec![];
-        for uu in self.sent_uuids.iter_mut() {
+        for uu in &mut self.sent_uuids {
             self.tx.push(QCXRequest::GetClient(*uu));
             if let Some(cli) = self.rx.pop() {
                 ret.push(cli);
@@ -347,6 +347,6 @@ impl Source for QChannel {
         self.sample_rate
     }
     fn uuid(&self) -> Uuid {
-        self.uuid.clone()
+        self.uuid
     }
 }
