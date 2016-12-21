@@ -1,7 +1,6 @@
 extern crate sqa_jack;
 
 use sqa_jack::{JackPort, JackConnection, JackCallbackContext, JackResult, JackPortType};
-use std::io::Write;
 use std::thread;
 struct Ports {
     inp: JackPort,
@@ -11,8 +10,8 @@ fn process(mut ctx: JackCallbackContext) -> i32 {
     if let Some(ports) = ctx.unstash_data::<Ports>() {
         let inp = ctx.get_port_buffer(&ports.inp).unwrap();
         let out = ctx.get_port_buffer(&ports.out).unwrap();
-        unsafe {
-            ::std::ptr::copy_nonoverlapping(inp as *mut [f32] as *mut f32, out as *mut [f32] as *mut f32, out.len());
+        for (out, inp) in out.iter_mut().zip(inp.iter()) {
+            *out = *inp;
         }
     }
     0
