@@ -1,14 +1,17 @@
 use *;
 
+/// Context for some callbacks.
 pub struct JackCallbackContext {
     nframes: jack_nframes_t
 }
 
 impl JackCallbackContext {
+    /// Returns the number of frames that must be processed in this callback.
     #[inline(always)]
     pub fn nframes(&self) -> u32 {
         self.nframes
     }
+    /// Gets the buffer of a port, if the port is valid.
     pub fn get_port_buffer(&self, port: &JackPort) -> Option<&mut [f32]> {
         unsafe {
             let buf = jack_port_get_buffer(port.as_ptr(), self.nframes);
@@ -22,9 +25,12 @@ impl JackCallbackContext {
     }
 }
 
+/// Return type of callback functions.
 #[derive(Copy, Clone, Debug)]
 pub enum JackControl {
+    /// Continue processing.
     Continue = 0,
+    /// Stop processing.
     Stop = -1
 }
 pub trait JackHandler: Send {

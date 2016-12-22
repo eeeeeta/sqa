@@ -38,7 +38,7 @@ fn run() -> JackResult<()> {
         Ok(nc) => nc,
         Err((_, err)) => return Err(err)
     };
-    let ports = conn.get_ports(Some(PORT_IS_INPUT | PORT_IS_PHYSICAL))?;
+    let ports = conn.get_ports(None, None, Some(PORT_IS_INPUT | PORT_IS_PHYSICAL))?;
     if ports.len() >= 2 {
         conn.connect_ports(&out1, &ports[0])?;
         conn.connect_ports(&out2, &ports[1])?;

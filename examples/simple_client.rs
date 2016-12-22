@@ -29,12 +29,12 @@ fn run() -> JackResult<()> {
         Ok(nc) => nc,
         Err((_, err)) => return Err(err)
     };
-    let ports = conn.get_ports(Some(PORT_IS_INPUT | PORT_IS_PHYSICAL))?;
+    let ports = conn.get_ports(None, None, Some(PORT_IS_INPUT | PORT_IS_PHYSICAL))?;
     if ports.len() >= 1 {
         conn.connect_ports(&out, &ports[0])?;
         println!("Connected output port to {}", ports[0].get_name(false)?);
     }
-    let ports = conn.get_ports(Some(PORT_IS_OUTPUT | PORT_IS_PHYSICAL))?;
+    let ports = conn.get_ports(None, None, Some(PORT_IS_OUTPUT | PORT_IS_PHYSICAL))?;
     if ports.len() >= 1 {
         conn.connect_ports(&ports[0], &inp)?;
         println!("Connected input port to {}", ports[0].get_name(false)?);

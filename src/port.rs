@@ -1,5 +1,13 @@
 use *;
 
+/// An object used for moving data of any type in or out of the client.
+///
+/// Ports may be connected in various ways.
+///
+/// Each port has a short name. The port's full name contains the name of the client
+/// concatenated with a colon (:) followed by its short name. The jack_port_name_size()
+/// is the maximum length of this full name. Exceeding that will cause port
+/// registration to fail and return `ProgrammerError`.
 #[derive(Copy, Clone, Debug)]
 pub struct JackPort {
     ptr: *mut jack_port_t,
@@ -15,6 +23,11 @@ impl JackPort {
             ptr: ptr
         }
     }
+    /// Modify a port's short name. May be called at any time.
+    ///
+    /// If the resulting full name
+    /// (including the "client_name:" prefix) is longer than jack_port_name_size(), it will
+    /// be truncated.
     pub fn set_short_name(&mut self, name: &str) -> JackResult<()> {
         let code = unsafe {
             let name = str_to_cstr(name)?;
@@ -27,12 +40,14 @@ impl JackPort {
             Ok(())
         }
     }
+    /// Get the name of a port (short or long, determined by the `short` argument).
     pub fn get_name(&self, short: bool) -> JackResult<Cow<str>> {
         unsafe {
             let ptr = self.get_name_raw(short)?;
             Ok(CStr::from_ptr(ptr).to_string_lossy())
         }
     }
+    /// Get the type string of a port.
     pub fn get_type(&self) -> JackResult<Cow<str>> {
         unsafe {
             let ptr = jack_port_type(self.ptr);
@@ -42,6 +57,11 @@ impl JackPort {
             Ok(CStr::from_ptr(ptr).to_string_lossy())
         }
     }
+    /// Get the raw pointer to the name of a port.
+    ///
+    /// # Safety
+    ///
+    /// This function is **not** intended for external consumption.
     pub unsafe fn get_name_raw(&self, short: bool) -> JackResult<*const libc::c_char> {
         let ptr = if short {
             jack_port_short_name(self.ptr)
@@ -56,6 +76,7 @@ impl JackPort {
             Ok(ptr)
         }
     }
+    /// Get the JackPortFlags of the port.
     pub fn get_flags(&self) -> JackPortFlags {
         let flags = unsafe { jack_port_flags(self.ptr) };
         JackPortFlags::from_bits_truncate(flags as u64)

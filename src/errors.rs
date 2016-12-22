@@ -22,6 +22,9 @@ error_chain! {
             description("Unknown error code.")
                 display("Error code {} in {}", code, from)
         }
+        PortRegistrationFailed {
+            description("Could not register port (see docs for more details)")
+        }
         InvalidPortFlags {
             description("Invalid port passed to function: `from` must be output, `to` must be input")
         }
