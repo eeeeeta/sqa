@@ -22,9 +22,11 @@ error_chain! {
             description("Unknown error code.")
                 display("Error code {} in {}", code, from)
         }
-        Activated {
-            description("You may not call this function whilst JACK is activated.")
-                display("deactivate() must be called before calling this function")
+        InvalidPortFlags {
+            description("Invalid port type passed to function: `from` must be output, `to` must be input")
+        }
+        InvalidPortType {
+            description("Invalid port type passed to function: the types of both ports must be equal")
         }
     }
 }

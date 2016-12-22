@@ -1,6 +1,6 @@
 extern crate sqa_jack;
 
-use sqa_jack::{JackPort, JackConnection, JackCallbackContext, JackResult, JackPortType};
+use sqa_jack::{JackPort, JackConnection, JackCallbackContext, JackResult, PORT_IS_INPUT, PORT_IS_OUTPUT, PORT_IS_PHYSICAL};
 use std::thread;
 struct Ports {
     inp: JackPort,
@@ -18,13 +18,28 @@ fn process(mut ctx: JackCallbackContext) -> i32 {
 }
 fn run() -> JackResult<()> {
     let mut conn = JackConnection::connect("simple_client")?;
+    let inp = conn.register_port("input", PORT_IS_INPUT)?;
+    let out = conn.register_port("output", PORT_IS_OUTPUT)?;
     let ports = Box::new(Ports {
-        inp: conn.register_port("input", JackPortType::Input)?,
-        out: conn.register_port("output", JackPortType::Output)?
+        inp: inp,
+        out: out
     });
     conn.stash_data(ports);
     conn.set_process_callback(process)?;
-    conn.activate()?;
+    let mut conn = match conn.activate() {
+        Ok(nc) => nc,
+        Err((_, err)) => return Err(err)
+    };
+    let ports = conn.get_ports(Some(PORT_IS_INPUT | PORT_IS_PHYSICAL))?;
+    if ports.len() >= 1 {
+        conn.connect_ports(&out, &ports[0])?;
+        println!("Connected output port to {}", ports[0].get_name(false)?);
+    }
+    let ports = conn.get_ports(Some(PORT_IS_OUTPUT | PORT_IS_PHYSICAL))?;
+    if ports.len() >= 1 {
+        conn.connect_ports(&ports[0], &inp)?;
+        println!("Connected input port to {}", ports[0].get_name(false)?);
+    }
     thread::sleep(::std::time::Duration::new(60 * 60, 0));
     Ok(())
 }
