@@ -1,0 +1,11 @@
+[package]
+name = "sqa-ng"
+version = "0.0.1"
+authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
+
+[dependencies]
+sqa-jack = { path = "../sqa-jack" }
+rsndfile = { path = "../rsndfile" }
+bounded-spsc-queue = "0.1"
+time = "0.1"
+arrayvec = "0.3"
