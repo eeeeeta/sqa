@@ -1,6 +1,6 @@
 extern crate sqa_jack;
 
-use sqa_jack::{JackPort, JackConnection, JackCallbackContext, JackResult, PORT_IS_OUTPUT, PORT_IS_INPUT, PORT_IS_PHYSICAL};
+use sqa_jack::{JackPort, JackConnection, JackCallbackContext, JackControl, JackHandler, JackResult, PORT_IS_OUTPUT, PORT_IS_INPUT, PORT_IS_PHYSICAL};
 use std::thread;
 struct Sawtooth {
     out1: JackPort,
@@ -8,33 +8,32 @@ struct Sawtooth {
     left_saw: f32,
     right_saw: f32
 }
-fn process(mut ctx: JackCallbackContext) -> i32 {
-    if let Some(data) = ctx.unstash_data::<Sawtooth>() {
-        let out1 = ctx.get_port_buffer(&data.out1).unwrap();
-        let out2 = ctx.get_port_buffer(&data.out2).unwrap();
+impl JackHandler for Sawtooth {
+    fn process(&mut self, ctx: JackCallbackContext) -> JackControl {
+        let out1 = ctx.get_port_buffer(&self.out1).unwrap();
+        let out2 = ctx.get_port_buffer(&self.out2).unwrap();
         for (out1, out2) in out1.iter_mut().zip(out2.iter_mut()) {
-            *out1 = data.left_saw * 0.2;
-            *out2 = data.right_saw * 0.2;
-            data.left_saw += 0.01;
-            if data.left_saw >= 1.0 { data.left_saw -= 2.0; }
-            data.right_saw += 0.03;
-            if data.right_saw >= 1.0 { data.right_saw -= 2.0; }
+            *out1 = self.left_saw * 0.2;
+            *out2 = self.right_saw * 0.2;
+            self.left_saw += 0.01;
+            if self.left_saw >= 1.0 { self.left_saw -= 2.0; }
+            self.right_saw += 0.03;
+            if self.right_saw >= 1.0 { self.right_saw -= 2.0; }
         }
+        JackControl::Continue
     }
-    0
 }
 fn run() -> JackResult<()> {
     let mut conn = JackConnection::connect("Very Annoying Sawtooth Generator")?;
     let out1 = conn.register_port("output_1", PORT_IS_OUTPUT)?;
     let out2 = conn.register_port("output_2", PORT_IS_OUTPUT)?;
-    let data = Box::new(Sawtooth {
+    let data = Sawtooth {
         out1: out1,
         out2: out2,
         left_saw: 0.0,
         right_saw: 0.0
-    });
-    conn.stash_data(data);
-    conn.set_process_callback(process)?;
+    };
+    conn.set_handler(data)?;
     let mut conn = match conn.activate() {
         Ok(nc) => nc,
         Err((_, err)) => return Err(err)

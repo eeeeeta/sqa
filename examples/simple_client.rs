@@ -1,31 +1,30 @@
 extern crate sqa_jack;
 
-use sqa_jack::{JackPort, JackConnection, JackCallbackContext, JackResult, PORT_IS_INPUT, PORT_IS_OUTPUT, PORT_IS_PHYSICAL};
+use sqa_jack::{JackPort, JackConnection, JackHandler, JackControl, JackCallbackContext, JackResult, PORT_IS_INPUT, PORT_IS_OUTPUT, PORT_IS_PHYSICAL};
 use std::thread;
 struct Ports {
     inp: JackPort,
     out: JackPort
 }
-fn process(mut ctx: JackCallbackContext) -> i32 {
-    if let Some(ports) = ctx.unstash_data::<Ports>() {
-        let inp = ctx.get_port_buffer(&ports.inp).unwrap();
-        let out = ctx.get_port_buffer(&ports.out).unwrap();
+impl JackHandler for Ports {
+    fn process(&mut self, ctx: JackCallbackContext) -> JackControl {
+        let inp = ctx.get_port_buffer(&self.inp).unwrap();
+        let out = ctx.get_port_buffer(&self.out).unwrap();
         for (out, inp) in out.iter_mut().zip(inp.iter()) {
             *out = *inp;
         }
+        JackControl::Continue
     }
-    0
 }
 fn run() -> JackResult<()> {
     let mut conn = JackConnection::connect("simple_client")?;
     let inp = conn.register_port("input", PORT_IS_INPUT)?;
     let out = conn.register_port("output", PORT_IS_OUTPUT)?;
-    let ports = Box::new(Ports {
+    let ports = Ports {
         inp: inp,
         out: out
-    });
-    conn.stash_data(ports);
-    conn.set_process_callback(process)?;
+    };
+    conn.set_handler(ports)?;
     let mut conn = match conn.activate() {
         Ok(nc) => nc,
         Err((_, err)) => return Err(err)

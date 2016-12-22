@@ -23,10 +23,10 @@ error_chain! {
                 display("Error code {} in {}", code, from)
         }
         InvalidPortFlags {
-            description("Invalid port type passed to function: `from` must be output, `to` must be input")
+            description("Invalid port passed to function: `from` must be output, `to` must be input")
         }
         InvalidPortType {
-            description("Invalid port type passed to function: the types of both ports must be equal")
+            description("Invalid port passed to function: the types of both ports must be equal")
         }
     }
 }

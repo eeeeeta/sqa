@@ -10,7 +10,6 @@ pub mod errors;
 
 use jack_sys::*;
 use std::ffi::{CString, CStr};
-use std::any::Any;
 use std::marker::PhantomData;
 use std::ptr;
 use std::borrow::Cow;
@@ -46,33 +45,60 @@ pub struct Activated;
 pub struct JackConnection<T> {
     handle: *mut jack_client_t,
     sample_rate: u32,
-    callbacks: Box<Callbacks>,
     _phantom: PhantomData<T>
 }
 pub struct JackCallbackContext {
-    userdata: *mut Option<Box<Any>>,
     nframes: jack_nframes_t
 }
 #[derive(Copy, Clone, Debug)]
 pub struct JackPort {
     ptr: *mut jack_port_t,
 }
-struct Callbacks {
-    process: Option<Box<FnMut(JackCallbackContext) -> i32>>,
-    userdata: Option<Box<Any>>
+unsafe impl Send for JackPort {}
+#[derive(Copy, Clone, Debug)]
+pub enum JackControl {
+    Continue = 0,
+    Stop = -1
 }
+pub trait JackHandler: Send {
+    /// This function is called by the engine any time there is work to be done.
+    /// Return `JackControl::Stop` to stop processing, otherwise return
+    /// `JackControl::Continue` to continue.
+    ///
+    /// # Realtime safety
+    ///
+    /// The code in the supplied function **MUST** be suitable for real-time execution.
+    /// That means that it cannot call functions that might block for a long time.
+    /// This includes all I/O functions (disk, TTY, network), malloc, free, printf,
+    /// pthread_mutex_lock, sleep, wait, poll, select, pthread_join, pthread_cond_wait, etc.
+    ///
+    /// Rust-specific things to **avoid** using: `std` MPSC channels (use
+    /// [bounded_spsc_queue](https://github.com/polyfractal/bounded-spsc-queue) instead, or
+    /// similar ringbuffer solution), mutexes, `RWLock`s, `Barrier`s, `String`s, `Vec`s (use
+    /// a **pre-allocated** [ArrayVec](https://github.com/bluss/arrayvec) instead), and
+    /// anything under `std::collections`.
+    fn process(&mut self, _ctx: JackCallbackContext) -> JackControl {
+        JackControl::Stop
+    }
+}
+
+impl<F> JackHandler for F where F: FnMut(JackCallbackContext) -> JackControl + Send + 'static {
+    fn process(&mut self, ctx: JackCallbackContext) -> JackControl {
+        self(ctx)
+    }
+}
+
 
 fn str_to_cstr(st: &str) -> JackResult<CString> {
     Ok(CString::new(st).chain_err(|| ErrorKind::NulError)?)
 }
-extern "C" fn process_callback(nframes: jack_nframes_t, user: *mut libc::c_void) -> i32 {
+extern "C" fn process_callback<T>(nframes: jack_nframes_t, user: *mut libc::c_void) -> i32 where T: JackHandler {
     unsafe {
-        let callbacks = &mut *(user as *mut Box<Callbacks>);
+        let callbacks = &mut *(user as *mut T);
         let ctx = JackCallbackContext {
-            userdata: &mut callbacks.userdata,
             nframes: nframes
         };
-        callbacks.process.as_mut().map(|f| f(ctx)).unwrap_or(-1)
+        callbacks.process(ctx) as i32
     }
 }
 
@@ -80,20 +106,6 @@ impl JackCallbackContext {
     #[inline(always)]
     pub fn nframes(&self) -> u32 {
         self.nframes
-    }
-    pub fn unstash_data<T>(&mut self) -> Option<&'static mut T> where T: 'static {
-        let userdata = unsafe { &mut (*self.userdata) };
-        if let Some(ref mut data) = *userdata {
-            if let Some(t) = data.downcast_mut::<T>() {
-                Some(t)
-            }
-            else {
-                None
-            }
-        }
-        else {
-            None
-        }
     }
     pub fn get_port_buffer(&self, port: &JackPort) -> Option<&mut [f32]> {
         unsafe {
@@ -259,10 +271,6 @@ impl JackConnection<Deactivated> {
         Ok(JackConnection {
             handle: client,
             sample_rate: sample_rate,
-            callbacks: Box::new(Callbacks {
-                process: None,
-                userdata: None
-            }),
             _phantom: PhantomData
         })
     }
@@ -288,14 +296,11 @@ impl JackConnection<Deactivated> {
             x @ _ => Err(ErrorKind::UnknownErrorCode("unregister_port()", x))?
         }
     }
-    pub fn stash_data(&mut self, data: Box<Any>) {
-        self.callbacks.userdata = Some(data);
-    }
-    pub fn set_process_callback<F>(&mut self, cb: F) -> JackResult<()> where F: FnMut(JackCallbackContext) -> i32 + 'static {
-        self.callbacks.process = Some(Box::new(cb));
-        let user_ptr = &mut self.callbacks as *mut Box<Callbacks> as *mut libc::c_void;
+    pub fn set_handler<F>(&mut self, handler: F) -> JackResult<()> where F: JackHandler {
+        let user_ptr = Box::into_raw(Box::new(handler));
+        let user_ptr = user_ptr as *mut libc::c_void;
         let code = unsafe {
-            jack_set_process_callback(self.handle, Some(process_callback), user_ptr)
+            jack_set_process_callback(self.handle, Some(process_callback::<F>), user_ptr)
         };
         if code != 0 {
             Err(ErrorKind::UnknownErrorCode("set_process_callback()", code))?
