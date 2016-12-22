@@ -7,6 +7,8 @@ extern crate error_chain;
 
 static JACK_DEFAULT_AUDIO_TYPE: &'static [u8] = b"32 bit float mono audio\0";
 pub mod errors;
+pub mod handler;
+pub mod port;
 
 use jack_sys::*;
 use std::ffi::{CString, CStr};
@@ -15,7 +17,8 @@ use std::ptr;
 use std::borrow::Cow;
 use errors::{ErrorKind, ChainErr};
 pub use errors::JackResult;
-
+pub use handler::{JackCallbackContext, JackControl, JackHandler};
+pub use port::JackPort;
 bitflags! {
     pub flags JackStatus: libc::c_uint {
         const STATUS_FAILURE = jack_sys::JackFailure,
@@ -47,128 +50,10 @@ pub struct JackConnection<T> {
     sample_rate: u32,
     _phantom: PhantomData<T>
 }
-pub struct JackCallbackContext {
-    nframes: jack_nframes_t
-}
-#[derive(Copy, Clone, Debug)]
-pub struct JackPort {
-    ptr: *mut jack_port_t,
-}
-unsafe impl Send for JackPort {}
-#[derive(Copy, Clone, Debug)]
-pub enum JackControl {
-    Continue = 0,
-    Stop = -1
-}
-pub trait JackHandler: Send {
-    /// This function is called by the engine any time there is work to be done.
-    /// Return `JackControl::Stop` to stop processing, otherwise return
-    /// `JackControl::Continue` to continue.
-    ///
-    /// # Realtime safety
-    ///
-    /// The code in the supplied function **MUST** be suitable for real-time execution.
-    /// That means that it cannot call functions that might block for a long time.
-    /// This includes all I/O functions (disk, TTY, network), malloc, free, printf,
-    /// pthread_mutex_lock, sleep, wait, poll, select, pthread_join, pthread_cond_wait, etc.
-    ///
-    /// Rust-specific things to **avoid** using: `std` MPSC channels (use
-    /// [bounded_spsc_queue](https://github.com/polyfractal/bounded-spsc-queue) instead, or
-    /// similar ringbuffer solution), mutexes, `RWLock`s, `Barrier`s, `String`s, `Vec`s (use
-    /// a **pre-allocated** [ArrayVec](https://github.com/bluss/arrayvec) instead), and
-    /// anything under `std::collections`.
-    fn process(&mut self, _ctx: &JackCallbackContext) -> JackControl {
-        JackControl::Stop
-    }
-}
-
-impl<F> JackHandler for F where F: FnMut(&JackCallbackContext) -> JackControl + Send + 'static {
-    fn process(&mut self, ctx: &JackCallbackContext) -> JackControl {
-        self(ctx)
-    }
-}
-
-
 fn str_to_cstr(st: &str) -> JackResult<CString> {
     Ok(CString::new(st).chain_err(|| ErrorKind::NulError)?)
 }
-extern "C" fn process_callback<T>(nframes: jack_nframes_t, user: *mut libc::c_void) -> i32 where T: JackHandler {
-    unsafe {
-        let callbacks = &mut *(user as *mut T);
-        let ctx = JackCallbackContext {
-            nframes: nframes
-        };
-        callbacks.process(&ctx) as i32
-    }
-}
 
-impl JackCallbackContext {
-    #[inline(always)]
-    pub fn nframes(&self) -> u32 {
-        self.nframes
-    }
-    pub fn get_port_buffer(&self, port: &JackPort) -> Option<&mut [f32]> {
-        unsafe {
-            let buf = jack_port_get_buffer(port.ptr, self.nframes);
-            if buf.is_null() {
-                None
-            }
-            else {
-                Some(::std::slice::from_raw_parts_mut(buf as *mut f32, self.nframes as usize))
-            }
-        }
-    }
-}
-impl JackPort {
-    pub fn as_ptr(&self) -> *const jack_port_t {
-        self.ptr
-    }
-    pub fn set_short_name(&mut self, name: &str) -> JackResult<()> {
-        let code = unsafe {
-            let name = str_to_cstr(name)?;
-            jack_port_set_name(self.ptr, name.as_ptr())
-        };
-        if code != 0 {
-            Err(ErrorKind::ProgrammerError)?
-        }
-        else {
-            Ok(())
-        }
-    }
-    pub fn get_name(&self, short: bool) -> JackResult<Cow<str>> {
-        unsafe {
-            let ptr = self.get_name_raw(short)?;
-            Ok(CStr::from_ptr(ptr).to_string_lossy())
-        }
-    }
-    pub fn get_type(&self) -> JackResult<Cow<str>> {
-        unsafe {
-            let ptr = jack_port_type(self.ptr);
-            if ptr.is_null() {
-                Err(ErrorKind::InvalidPort)?
-            }
-            Ok(CStr::from_ptr(ptr).to_string_lossy())
-        }
-    }
-    unsafe fn get_name_raw(&self, short: bool) -> JackResult<*const libc::c_char> {
-        let ptr = if short {
-            jack_port_short_name(self.ptr)
-        }
-        else {
-            jack_port_name(self.ptr)
-        };
-        if ptr.is_null() {
-            Err(ErrorKind::InvalidPort)?
-        }
-        else {
-            Ok(ptr)
-        }
-    }
-    pub fn get_flags(&self) -> JackPortFlags {
-        let flags = unsafe { jack_port_flags(self.ptr) };
-        JackPortFlags::from_bits_truncate(flags as u64)
-    }
-}
 impl<T> JackConnection<T> {
     pub fn as_ptr(&self) -> *const jack_client_t {
         self.handle
@@ -249,7 +134,9 @@ impl<T> JackConnection<T> {
                 jack_port_by_name(self.handle, st.as_ptr())
             };
             if !ptr.is_null() {
-                ret.push(JackPort { ptr: ptr });
+                unsafe {
+                    ret.push(JackPort::from_ptr(ptr));
+                }
             }
         }
         Ok(ret)
@@ -283,12 +170,20 @@ impl JackConnection<Deactivated> {
             Err(ErrorKind::ProgrammerError)?
         }
         else {
-            Ok(JackPort { ptr: ptr })
+            unsafe {
+                Ok(JackPort::from_ptr(ptr))
+            }
         }
     }
     pub fn unregister_port(&mut self, port: JackPort) -> JackResult<()> {
+        let mine = unsafe {
+            jack_port_is_mine(self.handle, port.as_ptr())
+        };
+        if mine != 0 {
+            Err(ErrorKind::PortNotMine)?
+        }
         let code = unsafe {
-            jack_port_unregister(self.handle, port.ptr)
+            jack_port_unregister(self.handle, port.as_ptr())
         };
         match code {
             0 => Ok(()),
@@ -297,17 +192,7 @@ impl JackConnection<Deactivated> {
         }
     }
     pub fn set_handler<F>(&mut self, handler: F) -> JackResult<()> where F: JackHandler {
-        let user_ptr = Box::into_raw(Box::new(handler));
-        let user_ptr = user_ptr as *mut libc::c_void;
-        let code = unsafe {
-            jack_set_process_callback(self.handle, Some(process_callback::<F>), user_ptr)
-        };
-        if code != 0 {
-            Err(ErrorKind::UnknownErrorCode("set_process_callback()", code))?
-        }
-        else {
-            Ok(())
-        }
+        handler::set_handler(self, handler)
     }
     pub fn activate(self) -> Result<JackConnection<Activated>, (Self, errors::Error)> {
         unsafe {

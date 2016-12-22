@@ -13,7 +13,7 @@ error_chain! {
         }
         ProgrammerError {
             description("Programmer error: this should never happen")
-                display("A programmer somewhere has made a mistake.")
+                display("A programmer somewhere has made a mistake")
         }
         InvalidPort {
             description("Invalid port passed to function")
@@ -27,6 +27,9 @@ error_chain! {
         }
         InvalidPortType {
             description("Invalid port passed to function: the types of both ports must be equal")
+        }
+        PortNotMine {
+            description("This action requires the port to be owned by the client")
         }
     }
 }
