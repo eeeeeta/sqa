@@ -77,13 +77,13 @@ pub trait JackHandler: Send {
     /// similar ringbuffer solution), mutexes, `RWLock`s, `Barrier`s, `String`s, `Vec`s (use
     /// a **pre-allocated** [ArrayVec](https://github.com/bluss/arrayvec) instead), and
     /// anything under `std::collections`.
-    fn process(&mut self, _ctx: JackCallbackContext) -> JackControl {
+    fn process(&mut self, _ctx: &JackCallbackContext) -> JackControl {
         JackControl::Stop
     }
 }
 
-impl<F> JackHandler for F where F: FnMut(JackCallbackContext) -> JackControl + Send + 'static {
-    fn process(&mut self, ctx: JackCallbackContext) -> JackControl {
+impl<F> JackHandler for F where F: FnMut(&JackCallbackContext) -> JackControl + Send + 'static {
+    fn process(&mut self, ctx: &JackCallbackContext) -> JackControl {
         self(ctx)
     }
 }
@@ -98,7 +98,7 @@ extern "C" fn process_callback<T>(nframes: jack_nframes_t, user: *mut libc::c_vo
         let ctx = JackCallbackContext {
             nframes: nframes
         };
-        callbacks.process(ctx) as i32
+        callbacks.process(&ctx) as i32
     }
 }
 

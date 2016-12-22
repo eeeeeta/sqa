@@ -7,7 +7,7 @@ struct Ports {
     out: JackPort
 }
 impl JackHandler for Ports {
-    fn process(&mut self, ctx: JackCallbackContext) -> JackControl {
+    fn process(&mut self, ctx: &JackCallbackContext) -> JackControl {
         let inp = ctx.get_port_buffer(&self.inp).unwrap();
         let out = ctx.get_port_buffer(&self.out).unwrap();
         for (out, inp) in out.iter_mut().zip(inp.iter()) {

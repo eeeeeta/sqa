@@ -9,7 +9,7 @@ struct Sawtooth {
     right_saw: f32
 }
 impl JackHandler for Sawtooth {
-    fn process(&mut self, ctx: JackCallbackContext) -> JackControl {
+    fn process(&mut self, ctx: &JackCallbackContext) -> JackControl {
         let out1 = ctx.get_port_buffer(&self.out1).unwrap();
         let out2 = ctx.get_port_buffer(&self.out2).unwrap();
         for (out1, out2) in out1.iter_mut().zip(out2.iter_mut()) {
