@@ -4,9 +4,8 @@ version = "0.0.1"
 authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 
 [dependencies]
-sqa-jack = { path = "../sqa-jack" }
-rsndfile = { path = "../rsndfile" }
-bounded-spsc-queue = "0.1"
+sqa-jack = "0.1"
+bounded-spsc-queue = { git = "https://github.com/eeeeeta/bounded-spsc-queue", rev = "542e581" }
 time = "0.1"
 arrayvec = "0.3"
 hound = "3.0"

@@ -3,10 +3,9 @@ name = "sqa-ng"
 version = "0.0.1"
 dependencies = [
  "arrayvec 0.3.20 (registry+https://github.com/rust-lang/crates.io-index)",
- "bounded-spsc-queue 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bounded-spsc-queue 0.2.0 (git+https://github.com/eeeeeta/bounded-spsc-queue?rev=542e581)",
  "hound 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rsndfile 0.1.0",
- "sqa-jack 0.1.0",
+ "sqa-jack 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -38,7 +37,7 @@ name = "backtrace-sys"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "gcc 0.3.40 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gcc 0.3.41 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -49,8 +48,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "bounded-spsc-queue"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "0.2.0"
+source = "git+https://github.com/eeeeeta/bounded-spsc-queue?rev=542e581#542e581db0f1b0f1a6fd1c35a7c9f9dc86211778"
 
 [[package]]
 name = "cfg-if"
@@ -68,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "error-chain"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "backtrace 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -76,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "gcc"
-version = "0.3.40"
+version = "0.3.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -86,7 +85,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "jack-sys"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "libc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -120,24 +119,18 @@ version = "0.2.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
-name = "rsndfile"
-version = "0.1.0"
-dependencies = [
- "libc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "rustc-demangle"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "sqa-jack"
-version = "0.1.0"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "error-chain 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "jack-sys 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "error-chain 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "jack-sys 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -166,18 +159,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum backtrace 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f551bc2ddd53aea015d453ef0b635af89444afa5ed2405dd0b2062ad5d600d80"
 "checksum backtrace-sys 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "3602e8d8c43336088a8505fa55cae2b3884a9be29440863a11528a42f46f6bb7"
 "checksum bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "aad18937a628ec6abcd26d1489012cc0e18c21798210f491af69ded9b881106d"
-"checksum bounded-spsc-queue 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "864e67f4f68b8a8f52342e247eb6f46368cc5e88cc9951e5aa62cacac0727772"
+"checksum bounded-spsc-queue 0.2.0 (git+https://github.com/eeeeeta/bounded-spsc-queue?rev=542e581)" = "<none>"
 "checksum cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "de1e760d7b6535af4241fca8bd8adf68e2e7edacc6b29f5d399050c5e48cf88c"
 "checksum dbghelp-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "97590ba53bcb8ac28279161ca943a924d1fd4a8fb3fa63302591647c4fc5b850"
-"checksum error-chain 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)" = "1cd681735364a04cd5d69f01a4f6768e70473941f8d86d8c224faf6955a75799"
-"checksum gcc 0.3.40 (registry+https://github.com/rust-lang/crates.io-index)" = "872db9e59486ef2b14f8e8c10e9ef02de2bccef6363d7f34835dedb386b3d950"
+"checksum error-chain 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)" = "318cb3c71ee4cdea69fdc9e15c173b245ed6063e1709029e8fd32525a881120f"
+"checksum gcc 0.3.41 (registry+https://github.com/rust-lang/crates.io-index)" = "3689e1982a563af74960ae3a4758aa632bb8fd984cfc3cc3b60ee6109477ab6e"
 "checksum hound 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "cbcce089471b4c7f51201675a3b85d932cffa2c6d3b913d35d20f3c7f3994530"
-"checksum jack-sys 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "b07af0ad2f914cc10cd62b06142357250d0d310951a72f5f7b4c109699bbf692"
+"checksum jack-sys 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "ab378485c0fa5dbd219dcaca940c0e0e98d354ba0965af12eb988c255724d087"
 "checksum kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d"
 "checksum libc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)" = "a51822fc847e7a8101514d1d44e354ba2ffa7d4c194dcab48870740e327cac70"
 "checksum nodrop 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)" = "0dbbadd3f4c98dea0bd3d9b4be4c0cdaf1ab57035cb2e41fce3983db5add7cc5"
 "checksum odds 0.2.25 (registry+https://github.com/rust-lang/crates.io-index)" = "c3df9b730298cea3a1c3faa90b7e2f9df3a9c400d0936d6015e6165734eefcba"
 "checksum rustc-demangle 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "1430d286cadb237c17c885e25447c982c97113926bb579f4379c0eca8d9586dc"
+"checksum sqa-jack 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "57b903602c2287da8355d2abe843ac845574f8a849f0bf8c9b328e55a7456014"
 "checksum time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)" = "3c7ec6d62a20df54e07ab3b78b9a3932972f4b7981de295563686849eb3989af"
 "checksum winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "167dc9d6949a9b857f3451275e911c3f44255842c1f7a76f33c55103a909087a"
 "checksum winapi-build 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "2d315eee3b34aca4797b2da6b13ed88266e6d612562a0c46390af8299fc699bc"

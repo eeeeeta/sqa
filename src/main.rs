@@ -1,7 +1,6 @@
 #![feature(integer_atomics, test)]
 
 extern crate sqa_jack;
-extern crate rsndfile;
 extern crate bounded_spsc_queue;
 extern crate time;
 extern crate arrayvec;
@@ -27,6 +26,7 @@ struct Sender<T> {
     alive: Arc<AtomicBool>,
     start_time: Arc<AtomicU64>,
     output_patch: Arc<AtomicUsize>,
+    sync: Arc<AtomicBool>,
     buf: T,
     sample_rate: u64,
     original: bool
@@ -39,6 +39,12 @@ impl<T> Sender<T> {
     }
     fn set_active(&mut self, active: bool) {
         self.active.store(active, Relaxed);
+    }
+    fn set_sync(&mut self, sync: bool) {
+        self.sync.store(sync, Relaxed);
+    }
+    fn sync(&self) -> bool {
+        self.sync.load(Relaxed)
     }
     fn active(&self) -> bool {
         self.active.load(Relaxed)
@@ -68,6 +74,7 @@ impl<T> Sender<T> {
             alive: self.alive.clone(),
             start_time: self.start_time.clone(),
             output_patch: self.output_patch.clone(),
+            sync: self.sync.clone(),
             buf: (),
             sample_rate: self.sample_rate,
             original: false
@@ -89,7 +96,8 @@ struct Player {
     position: Arc<AtomicU64>,
     active: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
-    output_patch: Arc<AtomicUsize>
+    output_patch: Arc<AtomicUsize>,
+    sync: Arc<AtomicBool>
 }
 impl Drop for Player {
     fn drop(&mut self) {
@@ -155,14 +163,10 @@ impl JackHandler for DeviceContext {
             }
             let sample_delta = (time - start_time) * self.sample_rate / ONE_SECOND_IN_NANOSECONDS;
             let mut pos = player.position.load(Relaxed);
-            while pos+1 < sample_delta {
-                if player.buf.try_pop().is_none() {
-                    player.position.store(pos, Relaxed);
-                    continue 'outer;
-                }
-                pos += 1;
+            if pos < sample_delta {
+                pos += player.buf.skip_n((sample_delta - pos) as usize) as u64;
             }
-            if player.buf.size() < out.nframes() as usize {
+            if pos < sample_delta || player.buf.size() < out.nframes() as usize {
                 player.position.store(pos, Relaxed);
                 continue;
             }
@@ -247,6 +251,7 @@ impl EngineContext {
         let (p, c) = bounded_spsc_queue::make(STREAM_BUFFER_SIZE);
         let active = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicBool::new(false));
+        let sync = Arc::new(AtomicBool::new(false));
         let position = Arc::new(AtomicU64::new(0));
         let start_time = Arc::new(AtomicU64::new(0));
         let output_patch = Arc::new(AtomicUsize::new(MAX_CHANS));
@@ -258,6 +263,7 @@ impl EngineContext {
             position: position.clone(),
             active: active.clone(),
             alive: alive.clone(),
+            sync: sync.clone(),
             output_patch: output_patch.clone()
         }));
 
@@ -268,6 +274,7 @@ impl EngineContext {
             alive: alive,
             output_patch: output_patch,
             start_time: start_time,
+            sync: sync,
             sample_rate: sample_rate,
             original: true
         }
