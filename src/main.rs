@@ -8,7 +8,7 @@ extern crate arrayvec;
 extern crate hound;
 extern crate test;
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64, AtomicPtr};
+use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64};
 use std::sync::atomic::Ordering::*;
 use bounded_spsc_queue::{Consumer, Producer};
 use arrayvec::ArrayVec;
@@ -16,7 +16,8 @@ use std::sync::Arc;
 use time::Duration;
 use sqa_jack::*;
 
-const PLAYERS_PER_STREAM: usize = 256;
+const MAX_PLAYERS: usize = 256;
+const MAX_CHANS: usize = 64;
 const STREAM_BUFFER_SIZE: usize = 50_000;
 const ONE_SECOND_IN_NANOSECONDS: u64 = 1_000_000_000;
 
@@ -25,7 +26,7 @@ struct Sender<T> {
     active: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
     start_time: Arc<AtomicU64>,
-    output_patch: Arc<AtomicPtr<jack_port_t>>,
+    output_patch: Arc<AtomicUsize>,
     buf: T,
     sample_rate: u64,
     original: bool
@@ -49,13 +50,13 @@ impl<T> Sender<T> {
         self.position.load(Relaxed)
     }
     fn position(&self) -> Duration {
-        Duration::nanoseconds((self.position.load(Relaxed) / (self.sample_rate * ONE_SECOND_IN_NANOSECONDS)) as i64)
+        Duration::milliseconds(((self.position.load(Relaxed) as f64 / self.sample_rate as f64) * 1000.0)as i64)
     }
-    fn output_patch(&self) -> JackPort {
-        unsafe { JackPort::from_ptr(self.output_patch.load(Relaxed)) }
+    fn output_patch(&self) -> usize {
+        self.output_patch.load(Relaxed)
     }
-    fn set_output_patch(&mut self, patch: &JackPort) {
-        self.output_patch.store(patch.as_ptr(), Relaxed);
+    fn set_output_patch(&mut self, patch: usize) {
+        self.output_patch.store(patch, Relaxed);
     }
     fn set_start_time(&mut self, st: u64) {
         self.start_time.store(st, Relaxed);
@@ -88,7 +89,7 @@ struct Player {
     position: Arc<AtomicU64>,
     active: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
-    output_patch: Arc<AtomicPtr<jack_port_t>>
+    output_patch: Arc<AtomicUsize>
 }
 impl Drop for Player {
     fn drop(&mut self) {
@@ -96,8 +97,13 @@ impl Drop for Player {
         self.alive.store(false, Relaxed);
     }
 }
+struct DeviceChannel {
+    port: JackPort,
+    written_t: u64
+}
 struct DeviceContext {
-    players: ArrayVec<[Player; PLAYERS_PER_STREAM]>,
+    players: ArrayVec<[Player; MAX_PLAYERS]>,
+    chans: ArrayVec<[DeviceChannel; MAX_CHANS]>,
     control: Consumer<AudioThreadCommand>,
     length: Arc<AtomicUsize>,
     sample_rate: u64
@@ -112,6 +118,9 @@ impl DeviceContext {
                     self.length.store(len + 1, Release);
                     self.players[self.players.len()-1].alive.store(true, Release);
                 }
+            },
+            AudioThreadCommand::AddChannel(p) => {
+                self.chans.push(DeviceChannel { port: p, written_t: 0 });
             }
         }
     }
@@ -135,7 +144,7 @@ impl JackHandler for DeviceContext {
                 continue;
             }
             let outpatch = player.output_patch.load(Relaxed);
-            if outpatch.is_null() {
+            if outpatch >= self.chans.len() {
                 player.active.store(false, Relaxed);
                 continue;
             }
@@ -144,22 +153,32 @@ impl JackHandler for DeviceContext {
                 player.position.store(0, Relaxed);
                 continue;
             }
-            let sample_delta = (time - start_time) / (self.sample_rate * ONE_SECOND_IN_NANOSECONDS);
+            let sample_delta = (time - start_time) * self.sample_rate / ONE_SECOND_IN_NANOSECONDS;
             let mut pos = player.position.load(Relaxed);
             while pos+1 < sample_delta {
                 if player.buf.try_pop().is_none() {
+                    player.position.store(pos, Relaxed);
                     continue 'outer;
                 }
                 pos += 1;
             }
             if player.buf.size() < out.nframes() as usize {
+                player.position.store(pos, Relaxed);
                 continue;
             }
-            let port = unsafe { JackPort::from_ptr(outpatch) };
-            if let Some(buf) = out.get_port_buffer(&port) {
+            if let Some(buf) = out.get_port_buffer(&self.chans[outpatch].port) {
+                let written = time == self.chans[outpatch].written_t;
+                if !written {
+                    self.chans[outpatch].written_t = time;
+                }
                 for x in buf.iter_mut() {
                     if let Some(data) = player.buf.try_pop() {
-                        *x = data;
+                        if written {
+                            *x += data;
+                        }
+                        else {
+                            *x = data;
+                        }
                         pos += 1;
                     }
                 }
@@ -170,11 +189,21 @@ impl JackHandler for DeviceContext {
             self.players.swap_remove(x);
             self.length.store(self.length.load(Relaxed) - 1, Relaxed);
         }
+        for ch in self.chans.iter_mut() {
+            if ch.written_t != time {
+                if let Some(buf) = out.get_port_buffer(&ch.port) {
+                    for x in buf.iter_mut() {
+                        *x = 0.0;
+                    }
+                }
+            }
+        }
         JackControl::Continue
     }
 }
 struct EngineContext {
     pub conn: JackConnection<Activated>,
+    pub chans: ArrayVec<[JackPort; MAX_CHANS]>,
     length: Arc<AtomicUsize>,
     control: Producer<AudioThreadCommand>,
 }
@@ -185,6 +214,7 @@ impl EngineContext {
         let mut conn = JackConnection::connect(name)?;
         let dctx = DeviceContext {
             players: ArrayVec::new(),
+            chans: ArrayVec::new(),
             control: c,
             length: len.clone(),
             sample_rate: conn.sample_rate() as u64
@@ -196,6 +226,7 @@ impl EngineContext {
         };
         Ok(EngineContext {
             conn: conn,
+            chans: ArrayVec::new(),
             length: len,
             control: p
         })
@@ -203,13 +234,22 @@ impl EngineContext {
     fn num_senders(&self) -> usize {
         self.length.load(Relaxed)
     }
+    fn new_channel(&mut self, name: &str) -> JackResult<usize> {
+        let port = self.conn.register_port(name, PORT_IS_OUTPUT | PORT_IS_TERMINAL)?;
+        if self.chans.len() == self.chans.capacity() {
+            panic!("too many chans"); // FIXME FIXME FIXME: proper error handling
+        }
+        self.control.push(AudioThreadCommand::AddChannel(port.clone()));
+        self.chans.push(port);
+        Ok(self.chans.len()-1)
+    }
     fn new_sender(&mut self, sample_rate: u64) -> UsefulSender {
         let (p, c) = bounded_spsc_queue::make(STREAM_BUFFER_SIZE);
         let active = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicBool::new(false));
         let position = Arc::new(AtomicU64::new(0));
         let start_time = Arc::new(AtomicU64::new(0));
-        let output_patch = Arc::new(AtomicPtr::new(::std::ptr::null_mut()));
+        let output_patch = Arc::new(AtomicUsize::new(MAX_CHANS));
 
         self.control.push(AudioThreadCommand::AddPlayer(Player {
             buf: c,
@@ -234,7 +274,8 @@ impl EngineContext {
     }
 }
 enum AudioThreadCommand {
-    AddPlayer(Player)
+    AddPlayer(Player),
+    AddChannel(JackPort),
 }
 
 use std::thread;
@@ -246,22 +287,29 @@ fn main() {
     let mut ctls = vec![];
     for ch in 0..reader.spec().channels {
         let st = format!("channel {}", ch);
-        let p = ec.conn.register_port(&st, PORT_IS_OUTPUT).unwrap();
+        let p = ec.new_channel(&st).unwrap();
         let mut send = ec.new_sender(reader.spec().sample_rate as u64);
-        send.set_output_patch(&p);
+        send.set_output_patch(p);
         ctls.push(send.make_plain());
         chans.push((p, send));
     }
     for (i, port) in ec.conn.get_ports(None, None, Some(PORT_IS_INPUT | PORT_IS_PHYSICAL)).unwrap().into_iter().enumerate() {
         if let Some(ch) = chans.get(i) {
-            ec.conn.connect_ports(&ch.0, &port).unwrap();
+            ec.conn.connect_ports(&ec.chans[ch.0], &port).unwrap();
         }
     }
     let thr = thread::spawn(move || {
         let mut idx = 0;
+        let mut cnt = 0;
         for samp in reader.samples::<f32>() {
             chans[idx].1.buf().push(samp.unwrap());
             idx += 1;
+            cnt += 1;
+            if cnt == 500_000 {
+                println!("Haha, random buffering fail for 5 seconds!!!");
+                ::std::thread::sleep(::std::time::Duration::new(5, 0));
+                println!("Alright, panic over.");
+            }
             if idx >= chans.len() {
                 idx = 0;
             }
@@ -270,10 +318,23 @@ fn main() {
     println!("*** Press Enter to begin playback!");
     io::stdin().read(&mut [0u8]).unwrap();
     let time = time::precise_time_ns();
-    for mut ch in ctls {
+    for ch in ctls.iter_mut() {
         ch.set_start_time(time);
         ch.set_active(true);
     }
-    thread::sleep(::std::time::Duration::new(1000, 0));
+    let mut secs = 0;
+    loop {
+        thread::sleep(::std::time::Duration::new(1, 0));
+        secs += 1;
+        println!("{}: {} samples", ctls[0].position(), ctls[0].position_samples());
+        if secs == 20 {
+            println!("Haha, some sadist set ch0's active to false for 5 seconds!!!");
+            ctls[0].set_active(false);
+        }
+        if secs == 25 {
+            ctls[0].set_active(true);
+            println!("Alright, panic over.");
+        }
+    }
     thr.join().unwrap();
 }
