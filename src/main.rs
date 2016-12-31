@@ -20,17 +20,20 @@ const PLAYERS_PER_STREAM: usize = 256;
 const STREAM_BUFFER_SIZE: usize = 50_000;
 const ONE_SECOND_IN_NANOSECONDS: u64 = 1_000_000_000;
 
-struct Sender {
+struct Sender<T> {
     position: Arc<AtomicU64>,
     active: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
     start_time: Arc<AtomicU64>,
     output_patch: Arc<AtomicPtr<jack_port_t>>,
-    buf: Producer<f32>,
-    sample_rate: u64
+    buf: T,
+    sample_rate: u64,
+    original: bool
 }
-impl Sender {
-    fn buf(&mut self) -> &mut Producer<f32> {
+type UsefulSender = Sender<Producer<f32>>;
+type PlainSender = Sender<()>;
+impl<T> Sender<T> {
+    fn buf(&mut self) -> &mut T {
         &mut self.buf
     }
     fn set_active(&mut self, active: bool) {
@@ -57,11 +60,25 @@ impl Sender {
     fn set_start_time(&mut self, st: u64) {
         self.start_time.store(st, Relaxed);
     }
+    fn make_plain(&self) -> PlainSender {
+        Sender {
+            position: self.position.clone(),
+            active: self.active.clone(),
+            alive: self.alive.clone(),
+            start_time: self.start_time.clone(),
+            output_patch: self.output_patch.clone(),
+            buf: (),
+            sample_rate: self.sample_rate,
+            original: false
+        }
+    }
 }
-impl Drop for Sender {
+impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
+        if self.original {
         self.active.store(false, Relaxed);
-        self.alive.store(false, Relaxed);
+            self.alive.store(false, Relaxed);
+        }
     }
 }
 struct Player {
@@ -153,7 +170,6 @@ impl JackHandler for DeviceContext {
             self.players.swap_remove(x);
             self.length.store(self.length.load(Relaxed) - 1, Relaxed);
         }
-        let time2 = time::precise_time_ns();
         JackControl::Continue
     }
 }
@@ -187,7 +203,7 @@ impl EngineContext {
     fn num_senders(&self) -> usize {
         self.length.load(Relaxed)
     }
-    fn new_sender(&mut self, sample_rate: u64) -> Sender {
+    fn new_sender(&mut self, sample_rate: u64) -> UsefulSender {
         let (p, c) = bounded_spsc_queue::make(STREAM_BUFFER_SIZE);
         let active = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicBool::new(false));
@@ -212,7 +228,8 @@ impl EngineContext {
             alive: alive,
             output_patch: output_patch,
             start_time: start_time,
-            sample_rate: sample_rate
+            sample_rate: sample_rate,
+            original: true
         }
     }
 }
@@ -221,15 +238,18 @@ enum AudioThreadCommand {
 }
 
 use std::thread;
+use std::io::{self, Read};
 fn main() {
     let mut ec = EngineContext::new("SQA Engine beta0").unwrap();
     let mut reader = hound::WavReader::open("test.wav").unwrap();
     let mut chans = vec![];
+    let mut ctls = vec![];
     for ch in 0..reader.spec().channels {
         let st = format!("channel {}", ch);
         let p = ec.conn.register_port(&st, PORT_IS_OUTPUT).unwrap();
         let mut send = ec.new_sender(reader.spec().sample_rate as u64);
         send.set_output_patch(&p);
+        ctls.push(send.make_plain());
         chans.push((p, send));
     }
     for (i, port) in ec.conn.get_ports(None, None, Some(PORT_IS_INPUT | PORT_IS_PHYSICAL)).unwrap().into_iter().enumerate() {
@@ -239,23 +259,21 @@ fn main() {
     }
     let thr = thread::spawn(move || {
         let mut idx = 0;
-        let mut act = false;
         for samp in reader.samples::<f32>() {
             chans[idx].1.buf().push(samp.unwrap());
             idx += 1;
             if idx >= chans.len() {
-                if !act {
-                    act = true;
-                    let time = time::precise_time_ns();
-                    for ch in chans.iter_mut() {
-                        ch.1.set_start_time(time);
-                        ch.1.set_active(true);
-                    }
-                }
                 idx = 0;
             }
         }
     });
+    println!("*** Press Enter to begin playback!");
+    io::stdin().read(&mut [0u8]).unwrap();
+    let time = time::precise_time_ns();
+    for mut ch in ctls {
+        ch.set_start_time(time);
+        ch.set_active(true);
+    }
     thread::sleep(::std::time::Duration::new(1000, 0));
     thr.join().unwrap();
 }
