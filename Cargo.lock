@@ -4,6 +4,7 @@ version = "0.0.1"
 dependencies = [
  "arrayvec 0.3.20 (registry+https://github.com/rust-lang/crates.io-index)",
  "bounded-spsc-queue 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hound 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rsndfile 0.1.0",
  "sqa-jack 0.1.0",
  "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -76,6 +77,11 @@ dependencies = [
 [[package]]
 name = "gcc"
 version = "0.3.40"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "hound"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -165,6 +171,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum dbghelp-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "97590ba53bcb8ac28279161ca943a924d1fd4a8fb3fa63302591647c4fc5b850"
 "checksum error-chain 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)" = "1cd681735364a04cd5d69f01a4f6768e70473941f8d86d8c224faf6955a75799"
 "checksum gcc 0.3.40 (registry+https://github.com/rust-lang/crates.io-index)" = "872db9e59486ef2b14f8e8c10e9ef02de2bccef6363d7f34835dedb386b3d950"
+"checksum hound 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "cbcce089471b4c7f51201675a3b85d932cffa2c6d3b913d35d20f3c7f3994530"
 "checksum jack-sys 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "b07af0ad2f914cc10cd62b06142357250d0d310951a72f5f7b4c109699bbf692"
 "checksum kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d"
 "checksum libc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)" = "a51822fc847e7a8101514d1d44e354ba2ffa7d4c194dcab48870740e327cac70"

@@ -9,3 +9,4 @@ rsndfile = { path = "../rsndfile" }
 bounded-spsc-queue = "0.1"
 time = "0.1"
 arrayvec = "0.3"
+hound = "3.0"

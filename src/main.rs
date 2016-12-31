@@ -1,19 +1,20 @@
 #![feature(integer_atomics, test)]
 
-extern crate rsoundio;
+extern crate sqa_jack;
 extern crate rsndfile;
 extern crate bounded_spsc_queue;
 extern crate time;
 extern crate arrayvec;
+extern crate hound;
 extern crate test;
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64, AtomicPtr};
 use std::sync::atomic::Ordering::*;
 use bounded_spsc_queue::{Consumer, Producer};
 use arrayvec::ArrayVec;
 use std::sync::Arc;
-use rsoundio::{SioFormat, SoundIo, OutStream, SioBackend, SioResult, Device};
 use time::Duration;
+use sqa_jack::*;
 
 const PLAYERS_PER_STREAM: usize = 256;
 const STREAM_BUFFER_SIZE: usize = 50_000;
@@ -24,7 +25,7 @@ struct Sender {
     active: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
     start_time: Arc<AtomicU64>,
-    output_patch: Arc<AtomicUsize>,
+    output_patch: Arc<AtomicPtr<jack_port_t>>,
     buf: Producer<f32>,
     sample_rate: u64
 }
@@ -47,11 +48,14 @@ impl Sender {
     fn position(&self) -> Duration {
         Duration::nanoseconds((self.position.load(Relaxed) / (self.sample_rate * ONE_SECOND_IN_NANOSECONDS)) as i64)
     }
-    fn output_patch(&self) -> usize {
-        self.output_patch.load(Relaxed)
+    fn output_patch(&self) -> JackPort {
+        unsafe { JackPort::from_ptr(self.output_patch.load(Relaxed)) }
     }
-    fn set_output_patch(&mut self, patch: usize) {
-        self.output_patch.store(patch, Relaxed);
+    fn set_output_patch(&mut self, patch: &JackPort) {
+        self.output_patch.store(patch.as_ptr(), Relaxed);
+    }
+    fn set_start_time(&mut self, st: u64) {
+        self.start_time.store(st, Relaxed);
     }
 }
 impl Drop for Sender {
@@ -67,7 +71,7 @@ struct Player {
     position: Arc<AtomicU64>,
     active: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
-    output_patch: Arc<AtomicUsize>
+    output_patch: Arc<AtomicPtr<jack_port_t>>
 }
 impl Drop for Player {
     fn drop(&mut self) {
@@ -79,7 +83,6 @@ struct DeviceContext {
     players: ArrayVec<[Player; PLAYERS_PER_STREAM]>,
     control: Consumer<AudioThreadCommand>,
     length: Arc<AtomicUsize>,
-    frames_per_cb: u32,
     sample_rate: u64
 }
 impl DeviceContext {
@@ -95,25 +98,16 @@ impl DeviceContext {
             }
         }
     }
+}
+impl JackHandler for DeviceContext {
     #[inline(always)]
-    fn callback(&mut self, mut out: OutStream, min_frames: u32, max_frames: u32) -> SioResult<()> {
+    fn process(&mut self, out: &JackCallbackContext) -> JackControl {
         let time = time::precise_time_ns();
         if let Some(cmd) = self.control.try_pop() {
             self.handle(cmd);
         }
-        let frames_to_write = if min_frames == 0 {
-            if max_frames > self.frames_per_cb {
-                self.frames_per_cb
-            }
-            else {
-                max_frames
-            }
-        } else {
-            min_frames
-        };
-        let mut siter = out.write_stream_f32(frames_to_write as i32)?;
         let mut to_remove = None;
-        'outer: for (idx, player) in self.players.iter_mut().rev().enumerate() {
+        'outer: for (idx, player) in self.players.iter_mut().enumerate() {
             if !player.alive.load(Relaxed) {
                 if to_remove.is_none() {
                     to_remove = Some(idx);
@@ -121,6 +115,11 @@ impl DeviceContext {
                 continue;
             }
             if !player.active.load(Relaxed) {
+                continue;
+            }
+            let outpatch = player.output_patch.load(Relaxed);
+            if outpatch.is_null() {
+                player.active.store(false, Relaxed);
                 continue;
             }
             let start_time = player.start_time.load(Relaxed);
@@ -136,14 +135,14 @@ impl DeviceContext {
                 }
                 pos += 1;
             }
-            if player.buf.size() < frames_to_write as usize {
+            if player.buf.size() < out.nframes() as usize {
                 continue;
             }
-            let outpatch = player.output_patch.load(Relaxed);
-            if siter.channel(outpatch) {
-                for x in &mut siter {
+            let port = unsafe { JackPort::from_ptr(outpatch) };
+            if let Some(buf) = out.get_port_buffer(&port) {
+                for x in buf.iter_mut() {
                     if let Some(data) = player.buf.try_pop() {
-                        *x += data;
+                        *x = data;
                         pos += 1;
                     }
                 }
@@ -154,32 +153,51 @@ impl DeviceContext {
             self.players.swap_remove(x);
             self.length.store(self.length.load(Relaxed) - 1, Relaxed);
         }
-        Ok(())
+        let time2 = time::precise_time_ns();
+        JackControl::Continue
     }
 }
-struct EngineDevice {
-    out: OutStream,
-    dev: Device,
+struct EngineContext {
+    pub conn: JackConnection<Activated>,
     length: Arc<AtomicUsize>,
-    sample_rate: u64,
-    control: Producer<AudioThreadCommand>
+    control: Producer<AudioThreadCommand>,
 }
-
-impl EngineDevice {
+impl EngineContext {
+    fn new(name: &str) -> JackResult<Self> {
+        let len = Arc::new(AtomicUsize::new(0));
+        let (p, c) = bounded_spsc_queue::make(128);
+        let mut conn = JackConnection::connect(name)?;
+        let dctx = DeviceContext {
+            players: ArrayVec::new(),
+            control: c,
+            length: len.clone(),
+            sample_rate: conn.sample_rate() as u64
+        };
+        conn.set_handler(dctx)?;
+        let conn = match conn.activate() {
+            Ok(c) => c,
+            Err((_, err)) => return Err(err)
+        };
+        Ok(EngineContext {
+            conn: conn,
+            length: len,
+            control: p
+        })
+    }
     fn num_senders(&self) -> usize {
         self.length.load(Relaxed)
     }
-    fn new_sender(&mut self) -> Sender {
+    fn new_sender(&mut self, sample_rate: u64) -> Sender {
         let (p, c) = bounded_spsc_queue::make(STREAM_BUFFER_SIZE);
         let active = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicBool::new(false));
         let position = Arc::new(AtomicU64::new(0));
         let start_time = Arc::new(AtomicU64::new(0));
-        let output_patch = Arc::new(AtomicUsize::new(0));
+        let output_patch = Arc::new(AtomicPtr::new(::std::ptr::null_mut()));
 
         self.control.push(AudioThreadCommand::AddPlayer(Player {
             buf: c,
-            sample_rate: self.sample_rate,
+            sample_rate: sample_rate,
             start_time: start_time.clone(),
             position: position.clone(),
             active: active.clone(),
@@ -194,120 +212,50 @@ impl EngineDevice {
             alive: alive,
             output_patch: output_patch,
             start_time: start_time,
-            sample_rate: self.sample_rate
+            sample_rate: sample_rate
         }
-    }
-}
-struct EngineContext {
-    sio: SoundIo,
-    frames_per_cb: u32
-}
-impl EngineContext {
-    fn new(frames_per_cb: u32) -> Self {
-        EngineContext {
-            sio: SoundIo::new("SQA Engine beta1"),
-            frames_per_cb: frames_per_cb
-        }
-    }
-    fn available_backends(&self) -> Vec<SioBackend> {
-        let mut ret = vec![];
-        for idx in 0..self.sio.backend_count() {
-            if let Some(bk) = self.sio.backend(idx) {
-                ret.push(bk);
-            }
-        }
-        ret
-    }
-    fn available_devices(&self) -> (usize, Vec<Device>) {
-        self.sio.flush_events();
-        let mut ret = vec![];
-        for idx in 0..self.sio.output_device_count().unwrap_or(0) {
-            if let Some(bk) = self.sio.output_device(idx) {
-                ret.push(bk);
-            }
-        }
-        (self.sio.default_output_device_index().unwrap() as usize, ret)
-    }
-    fn connect_backend(&mut self, backend: SioBackend) -> SioResult<()> {
-        self.sio.connect_backend(backend)
-    }
-    fn connect_auto(&mut self) -> SioResult<()> {
-        self.sio.connect()
-    }
-    fn open_device(&mut self, dev: Device) -> SioResult<EngineDevice> {
-        let sample_rate = dev.nearest_sample_rate(44_100);
-        let mut out = dev.create_outstream()?;
-
-        if cfg!(target_endian = "big") {
-            out.set_format(SioFormat::Float32BE)?;
-        }
-        else {
-            out.set_format(SioFormat::Float32LE)?;
-        }
-        out.set_sample_rate(sample_rate);
-        out.set_name("SQA Engine beta1")?;
-        let (p, c) = bounded_spsc_queue::make(128);
-        let len1 = Arc::new(AtomicUsize::new(0));
-        let len2 = len1.clone();
-        out.register_write_callback(move |mut os: OutStream, min_frames: u32, max_frames: u32| {
-            unsafe {
-                if let Some(ctx) = os.unstash_data::<DeviceContext>() {
-                    // FIXME: some sort of error atomic bool?
-                    let _ = ctx.callback(os, min_frames, max_frames);
-                }
-            }
-        });
-        out.open()?;
-        let dc = Box::new(DeviceContext {
-            players: ArrayVec::new(),
-            control: c,
-            length: len1,
-            frames_per_cb: self.frames_per_cb,
-            sample_rate: out.sample_rate() as u64
-        });
-        out.stash_data(dc);
-        out.set_latency(out.sample_rate() as f64 / self.frames_per_cb as f64);
-        out.start()?;
-        let sr = out.sample_rate() as u64;
-        Ok(EngineDevice {
-            out: out,
-            sample_rate: sr,
-            dev: dev,
-            length: len2,
-            control: p,
-        })
     }
 }
 enum AudioThreadCommand {
     AddPlayer(Player)
 }
 
-const TABLE_SIZE: usize = 200;
-use std::f32::consts::PI as PI32;
 use std::thread;
 fn main() {
-    let mut ec = EngineContext::new(512);
-    ec.connect_auto().unwrap();
-    let (idx, devs) = ec.available_devices();
-    let mut ed = ec.open_device(devs.into_iter().nth(idx).unwrap()).unwrap();
-    let mut sender = ed.new_sender();
-    thread::spawn(move || {
-       const LEN: usize = 500 / 16;
-        let mut pos = 0;
-        loop {
-            const F: f32 = 440.0;
-            const W: f32 = 2.0 * F * PI32 / 48_000.0;
-            const A: f32 = 0.6;
-            const CYCLE: usize = (48_000f32 / F) as usize;
-
-            let samples: Vec<f32> = (0..LEN)
-                                        .map(|i| (W * (i + pos) as f32).sin() * A)
-                .collect();
-            for n in samples {
-                sender.buf().push(n);
-            }
-            sender.set_active(true);
-            pos = (pos + LEN) % CYCLE;
+    let mut ec = EngineContext::new("SQA Engine beta0").unwrap();
+    let mut reader = hound::WavReader::open("test.wav").unwrap();
+    let mut chans = vec![];
+    for ch in 0..reader.spec().channels {
+        let st = format!("channel {}", ch);
+        let p = ec.conn.register_port(&st, PORT_IS_OUTPUT).unwrap();
+        let mut send = ec.new_sender(reader.spec().sample_rate as u64);
+        send.set_output_patch(&p);
+        chans.push((p, send));
+    }
+    for (i, port) in ec.conn.get_ports(None, None, Some(PORT_IS_INPUT | PORT_IS_PHYSICAL)).unwrap().into_iter().enumerate() {
+        if let Some(ch) = chans.get(i) {
+            ec.conn.connect_ports(&ch.0, &port).unwrap();
         }
-    }).join().unwrap();
+    }
+    let thr = thread::spawn(move || {
+        let mut idx = 0;
+        let mut act = false;
+        for samp in reader.samples::<f32>() {
+            chans[idx].1.buf().push(samp.unwrap());
+            idx += 1;
+            if idx >= chans.len() {
+                if !act {
+                    act = true;
+                    let time = time::precise_time_ns();
+                    for ch in chans.iter_mut() {
+                        ch.1.set_start_time(time);
+                        ch.1.set_active(true);
+                    }
+                }
+                idx = 0;
+            }
+        }
+    });
+    thread::sleep(::std::time::Duration::new(1000, 0));
+    thr.join().unwrap();
 }
