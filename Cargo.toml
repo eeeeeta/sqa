@@ -1,6 +1,6 @@
 [package]
 name = "sqa-jack"
-version = "0.1.0"
+version = "0.1.1"
 description = "JACK bindings for Rust (part of the SQA project)"
 documentation = "https://docs.rs/sqa-jack"
 repository = "https://github.com/eeeeeta/sqa-jack"

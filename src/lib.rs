@@ -18,6 +18,7 @@ use errors::{ErrorKind, ChainErr};
 pub use errors::JackResult;
 pub use handler::{JackCallbackContext, JackControl, JackHandler};
 pub use port::JackPort;
+pub use jack_sys::jack_port_t;
 bitflags! {
     /// Status of an operation.
     ///
@@ -250,37 +251,6 @@ impl<T> JackConnection<T> {
         }
         Ok(ret)
     }
-}
-impl JackConnection<Deactivated> {
-    /// Open an external client session with a JACK server.
-    ///
-    /// # TODO
-    ///
-    /// - This will expose more options in the future!
-    ///
-    /// # Errors
-    ///
-    /// - `JackOpenFailed(status)`: if the connection could not be opened. Contains a
-    /// `JackStatus` detailing what went wrong.
-    /// - `NulError`: if any `&str` argument contains a NUL byte (`\0`).
-    pub fn connect(client_name: &str) -> JackResult<Self> {
-        let mut status = 0;
-        let client = unsafe {
-            let name = str_to_cstr(client_name)?;
-            jack_client_open(name.as_ptr(), JackNullOption, &mut status)
-        };
-        if client.is_null() {
-            Err(ErrorKind::JackOpenFailed(
-                JackStatus::from_bits_truncate(status)
-            ))?;
-        }
-        let sample_rate = unsafe { jack_get_sample_rate(client) };
-        Ok(JackConnection {
-            handle: client,
-            sample_rate: sample_rate,
-            _phantom: PhantomData
-        })
-    }
     /// Create a new port for the client.
     ///
     /// This is an object used for moving data of any type in or out of the client.
@@ -302,7 +272,7 @@ impl JackConnection<Deactivated> {
     /// # Errors
     ///
     /// - `NulError`: if any `&str` argument contains a NUL byte (`\0`).
-    /// - `ProgrammerError`: if I've made a mistake, or your program is utterly degenerate
+    /// - `PortRegistrationFailed`: if port registration failed (TODO: why could this happen?)
     pub fn register_port(&mut self, name: &str, ty: JackPortFlags) -> JackResult<JackPort> {
         let ptr = unsafe {
             let name = str_to_cstr(name)?;
@@ -339,6 +309,37 @@ impl JackConnection<Deactivated> {
             -1 => Err(ErrorKind::InvalidPort)?,
             x @ _ => Err(ErrorKind::UnknownErrorCode("unregister_port()", x))?
         }
+    }
+}
+impl JackConnection<Deactivated> {
+    /// Open an external client session with a JACK server.
+    ///
+    /// # TODO
+    ///
+    /// - This will expose more options in the future!
+    ///
+    /// # Errors
+    ///
+    /// - `JackOpenFailed(status)`: if the connection could not be opened. Contains a
+    /// `JackStatus` detailing what went wrong.
+    /// - `NulError`: if any `&str` argument contains a NUL byte (`\0`).
+    pub fn connect(client_name: &str) -> JackResult<Self> {
+        let mut status = 0;
+        let client = unsafe {
+            let name = str_to_cstr(client_name)?;
+            jack_client_open(name.as_ptr(), JackNullOption, &mut status)
+        };
+        if client.is_null() {
+            Err(ErrorKind::JackOpenFailed(
+                JackStatus::from_bits_truncate(status)
+            ))?;
+        }
+        let sample_rate = unsafe { jack_get_sample_rate(client) };
+        Ok(JackConnection {
+            handle: client,
+            sample_rate: sample_rate,
+            _phantom: PhantomData
+        })
     }
     /// Register a handler (a struct that implements `JackHandler`).
     ///
