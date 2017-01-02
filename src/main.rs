@@ -1,4 +1,4 @@
-#![feature(integer_atomics, test)]
+#![feature(integer_atomics, test, step_by)]
 
 extern crate sqa_jack;
 extern crate bounded_spsc_queue;
@@ -7,11 +7,12 @@ extern crate arrayvec;
 extern crate hound;
 extern crate test;
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64, AtomicU32};
 use std::sync::atomic::Ordering::*;
 use bounded_spsc_queue::{Consumer, Producer};
 use arrayvec::ArrayVec;
 use std::sync::Arc;
+use std::mem;
 use time::Duration;
 use sqa_jack::*;
 
@@ -27,6 +28,7 @@ struct Sender<T> {
     start_time: Arc<AtomicU64>,
     output_patch: Arc<AtomicUsize>,
     sync: Arc<AtomicBool>,
+    volume: Arc<AtomicU32>,
     buf: T,
     sample_rate: u64,
     original: bool
@@ -45,6 +47,18 @@ impl<T> Sender<T> {
     }
     fn sync(&self) -> bool {
         self.sync.load(Relaxed)
+    }
+    fn set_volume(&mut self, vol: f32) {
+        let val = unsafe {
+            mem::transmute::<f32, u32>(vol)
+        };
+        self.volume.store(val, Relaxed);
+    }
+    fn volume(&self) -> f32 {
+        let val = self.volume.load(Relaxed);
+        unsafe {
+            mem::transmute::<u32, f32>(val)
+        }
     }
     fn active(&self) -> bool {
         self.active.load(Relaxed)
@@ -75,6 +89,7 @@ impl<T> Sender<T> {
             start_time: self.start_time.clone(),
             output_patch: self.output_patch.clone(),
             sync: self.sync.clone(),
+            volume: self.volume.clone(),
             buf: (),
             sample_rate: self.sample_rate,
             original: false
@@ -97,7 +112,8 @@ struct Player {
     active: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
     output_patch: Arc<AtomicUsize>,
-    sync: Arc<AtomicBool>
+    sync: Arc<AtomicBool>,
+    volume: Arc<AtomicU32>
 }
 impl Drop for Player {
     fn drop(&mut self) {
@@ -170,6 +186,10 @@ impl JackHandler for DeviceContext {
                 player.position.store(pos, Relaxed);
                 continue;
             }
+            let vol = player.volume.load(Relaxed);
+            let vol = unsafe {
+                ::std::mem::transmute::<u32, f32>(vol)
+            };
             if let Some(buf) = out.get_port_buffer(&self.chans[outpatch].port) {
                 let written = time == self.chans[outpatch].written_t;
                 if !written {
@@ -178,10 +198,10 @@ impl JackHandler for DeviceContext {
                 for x in buf.iter_mut() {
                     if let Some(data) = player.buf.try_pop() {
                         if written {
-                            *x += data;
+                            *x += data * vol;
                         }
                         else {
-                            *x = data;
+                            *x = data * vol;
                         }
                         pos += 1;
                     }
@@ -254,6 +274,10 @@ impl EngineContext {
         let sync = Arc::new(AtomicBool::new(false));
         let position = Arc::new(AtomicU64::new(0));
         let start_time = Arc::new(AtomicU64::new(0));
+        let one_f32_in_u32 = unsafe {
+            mem::transmute::<f32, u32>(1.0)
+        };
+        let volume = Arc::new(AtomicU32::new(one_f32_in_u32));
         let output_patch = Arc::new(AtomicUsize::new(MAX_CHANS));
 
         self.control.push(AudioThreadCommand::AddPlayer(Player {
@@ -264,7 +288,8 @@ impl EngineContext {
             active: active.clone(),
             alive: alive.clone(),
             sync: sync.clone(),
-            output_patch: output_patch.clone()
+            output_patch: output_patch.clone(),
+            volume: volume.clone()
         }));
 
         Sender {
@@ -276,6 +301,7 @@ impl EngineContext {
             start_time: start_time,
             sync: sync,
             sample_rate: sample_rate,
+            volume: volume.clone(),
             original: true
         }
     }
@@ -292,7 +318,7 @@ fn main() {
     let mut reader = hound::WavReader::open("test.wav").unwrap();
     let mut chans = vec![];
     let mut ctls = vec![];
-    for ch in 0..reader.spec().channels {
+    for ch in 0..reader.spec().channels*16 {
         let st = format!("channel {}", ch);
         let p = ec.new_channel(&st).unwrap();
         let mut send = ec.new_sender(reader.spec().sample_rate as u64);
@@ -301,15 +327,26 @@ fn main() {
         chans.push((p, send));
     }
     for (i, port) in ec.conn.get_ports(None, None, Some(PORT_IS_INPUT | PORT_IS_PHYSICAL)).unwrap().into_iter().enumerate() {
-        if let Some(ch) = chans.get(i) {
-            ec.conn.connect_ports(&ec.chans[ch.0], &port).unwrap();
+        if i % 2 == 0 {
+            for ch in (0..chans.len()).step_by(2) {
+                ec.conn.connect_ports(&ec.chans[chans[ch].0], &port).unwrap();
+            }
         }
+        else {
+            for ch in (1..chans.len()).step_by(2) {
+                ec.conn.connect_ports(&ec.chans[chans[ch].0], &port).unwrap();
+            }
+        }
+
     }
     let thr = thread::spawn(move || {
         let mut idx = 0;
         let mut cnt = 0;
         for samp in reader.samples::<f32>() {
-            chans[idx].1.buf().push(samp.unwrap());
+            let samp = samp.unwrap();
+            for ch in (idx..chans.len()).step_by(2) {
+                chans[ch].1.buf().push(samp * 0.1);
+            }
             idx += 1;
             cnt += 1;
             if cnt == 500_000 {
@@ -317,7 +354,7 @@ fn main() {
                 ::std::thread::sleep(::std::time::Duration::new(5, 0));
                 println!("Alright, panic over.");
             }
-            if idx >= chans.len() {
+            if idx >= 2 {
                 idx = 0;
             }
         }
@@ -333,7 +370,7 @@ fn main() {
     loop {
         thread::sleep(::std::time::Duration::new(1, 0));
         secs += 1;
-        println!("{}: {} samples", ctls[0].position(), ctls[0].position_samples());
+        println!("{}: {} samples - vol {}", ctls[0].position(), ctls[0].position_samples(), ctls[0].volume());
         if secs == 20 {
             println!("Haha, some sadist set ch0's active to false for 5 seconds!!!");
             ctls[0].set_active(false);
@@ -342,6 +379,10 @@ fn main() {
             ctls[0].set_active(true);
             println!("Alright, panic over.");
         }
+        if secs > 25 && secs < 36 {
+            ctls[0].set_volume((secs - 25) as f32 * 0.1);
+        }
+
     }
     thr.join().unwrap();
 }
