@@ -10,6 +10,9 @@ pub mod errors;
 pub mod handler;
 pub mod port;
 
+#[cfg(test)]
+mod tests;
+
 use jack_sys::*;
 use std::ffi::{CString, CStr};
 use std::marker::PhantomData;
@@ -23,7 +26,7 @@ bitflags! {
     /// Status of an operation.
     ///
     /// See `STATUS_*` constants for possible values.
-    pub flags JackStatus: libc::c_uint {
+    pub flags JackStatus: jack_status_t {
         /// Overall operation failed.
         const STATUS_FAILURE = jack_sys::JackFailure,
         /// The operation contained an invalid or unsupported option.
