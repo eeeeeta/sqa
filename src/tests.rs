@@ -77,6 +77,7 @@ fn sawtooth() {
             }
             JackControl::Continue
         }
+        #[cfg(feature="test-xruns")]
         fn xrun(&mut self) -> JackControl {
             self.xrun.store(true, Relaxed);
             JackControl::Continue
