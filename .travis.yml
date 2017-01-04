@@ -15,7 +15,3 @@ before_install:
   - jackd -r -ddummy -r44100 -p1024 &
 script:
   - travis-cargo test
-cache:
-  bundler: true
-  directories:
-- "$HOME/.cargo/"
