@@ -1,5 +1,10 @@
-use *;
-
+use libc;
+use errors::{ErrorKind, JackResult};
+use super::{JackPortFlags, JackPortPtr, str_to_cstr};
+use std::borrow::Cow;
+use std::ffi::CStr;
+use jack_sys::{jack_port_set_name, jack_port_type, jack_port_flags,
+jack_port_short_name, jack_port_name};
 /// An object used for moving data of any type in or out of the client.
 ///
 /// Ports may be connected in various ways.
@@ -10,15 +15,15 @@ use *;
 /// registration to fail and return `ProgrammerError`.
 #[derive(Copy, Clone, Debug)]
 pub struct JackPort {
-    ptr: *mut jack_port_t,
+    ptr: JackPortPtr,
 }
 unsafe impl Send for JackPort {}
 
 impl JackPort {
-    pub fn as_ptr(&self) -> *mut jack_port_t {
+    pub fn as_ptr(&self) -> JackPortPtr {
         self.ptr
     }
-    pub unsafe fn from_ptr(ptr: *mut jack_port_t) -> Self {
+    pub unsafe fn from_ptr(ptr: JackPortPtr) -> Self {
         JackPort {
             ptr: ptr
         }

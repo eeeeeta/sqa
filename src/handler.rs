@@ -1,9 +1,13 @@
-use *;
+use super::{JackNFrames, JackPort, JackStatus, JackConnection, Deactivated};
+use jack_sys::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::ffi::CStr;
+use libc;
+use errors::*;
 
 /// Context for some callbacks.
 pub struct JackCallbackContext {
-    nframes: jack_nframes_t
+    nframes: JackNFrames
 }
 
 impl JackCallbackContext {
@@ -61,13 +65,13 @@ pub trait JackHandler: Send {
     /// This is called whenever the size of the the buffer that will be passed to the
     /// `process()` function is about to change.
     /// Clients that depend on knowing the buffer size must implement this callback.
-    fn buffer_size(&mut self, _new_size: jack_nframes_t) -> JackControl { JackControl::Continue }
+    fn buffer_size(&mut self, _new_size: JackNFrames) -> JackControl { JackControl::Continue }
     /// Called whenever the system sample rate changes.
     ///
     /// Given that the JACK API exposes no way to change the sample rate, the library author
     /// would like you to know that this is a decidedly rare occurence. Still, it's worth
     /// being prepared ;)
-    fn sample_rate(&mut self, _new_rate: jack_nframes_t) -> JackControl { JackControl::Continue }
+    fn sample_rate(&mut self, _new_rate: JackNFrames) -> JackControl { JackControl::Continue }
     /// Called just once after the creation of the thread in which all other callbacks are
     /// handled.
     fn thread_init(&mut self) {  }
@@ -104,13 +108,13 @@ impl<F> JackHandler for F where F: FnMut(&JackCallbackContext) -> JackControl + 
         self(ctx)
     }
 }
-unsafe extern "C" fn buffer_size_callback<T>(frames: jack_nframes_t, user: *mut libc::c_void) -> libc::c_int where T: JackHandler {
+unsafe extern "C" fn buffer_size_callback<T>(frames: JackNFrames, user: *mut libc::c_void) -> libc::c_int where T: JackHandler {
     let callbacks = &mut *(user as *mut T);
     catch_unwind(AssertUnwindSafe(|| {
         callbacks.buffer_size(frames) as _
     })).unwrap_or(-1)
 }
-unsafe extern "C" fn sample_rate_callback<T>(frames: jack_nframes_t, user: *mut libc::c_void) -> libc::c_int where T: JackHandler {
+unsafe extern "C" fn sample_rate_callback<T>(frames: JackNFrames, user: *mut libc::c_void) -> libc::c_int where T: JackHandler {
     let callbacks = &mut *(user as *mut T);
     catch_unwind(AssertUnwindSafe(|| {
         callbacks.sample_rate(frames) as _
@@ -139,7 +143,7 @@ unsafe extern "C" fn thread_init_callback<T>(user: *mut libc::c_void) where T: J
         callbacks.thread_init()
     }));
 }
-unsafe extern "C" fn process_callback<T>(nframes: jack_nframes_t, user: *mut libc::c_void) -> libc::c_int where T: JackHandler {
+unsafe extern "C" fn process_callback<T>(nframes: JackNFrames, user: *mut libc::c_void) -> libc::c_int where T: JackHandler {
     let callbacks = &mut *(user as *mut T);
     let ctx = JackCallbackContext {
         nframes: nframes

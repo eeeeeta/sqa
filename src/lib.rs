@@ -13,15 +13,16 @@ pub mod port;
 #[cfg(test)]
 mod tests;
 
-use jack_sys::*;
 use std::ffi::{CString, CStr};
 use std::marker::PhantomData;
-use std::borrow::Cow;
 use errors::{ErrorKind, ChainErr};
 pub use errors::JackResult;
 pub use handler::{JackCallbackContext, JackControl, JackHandler};
 pub use port::JackPort;
-pub use jack_sys::{jack_nframes_t, jack_port_t};
+pub use jack_sys::*;
+
+pub type JackNFrames = jack_nframes_t;
+pub type JackPortPtr = *mut jack_port_t;
 bitflags! {
     /// Status of an operation.
     ///
