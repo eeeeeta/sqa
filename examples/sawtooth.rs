@@ -24,7 +24,7 @@ impl JackHandler for Sawtooth {
     }
 }
 fn run() -> JackResult<()> {
-    let mut conn = JackConnection::connect("Very Annoying Sawtooth Generator")?;
+    let mut conn = JackConnection::connect("Very Annoying Sawtooth Generator", None)?;
     let out1 = conn.register_port("output_1", PORT_IS_OUTPUT)?;
     let out2 = conn.register_port("output_2", PORT_IS_OUTPUT)?;
     let data = Sawtooth {

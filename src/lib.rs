@@ -18,7 +18,7 @@ use errors::{ErrorKind, ChainErr};
 pub use errors::JackResult;
 pub use handler::{JackCallbackContext, JackControl, JackHandler};
 pub use port::JackPort;
-pub use jack_sys::jack_port_t;
+pub use jack_sys::{jack_nframes_t, jack_port_t};
 bitflags! {
     /// Status of an operation.
     ///
@@ -88,6 +88,19 @@ bitflags! {
         const PORT_IS_TERMINAL = JackPortIsTerminal as libc::c_ulong
     }
 }
+bitflags! {
+    /// Options for opening a connection to JACK, formed by OR-ing together desired values
+    /// from the consts `OPEN_*`.
+    pub flags JackOpenOptions: libc::c_uint {
+        /// Do not automatically start the JACK server when it is not already running.
+        /// This option is always selected if $JACK_NO_START_SERVER is defined in the
+        /// calling process environment.
+        const OPEN_NO_START_SERVER = JackNoStartServer,
+        /// Use the exact client name requested. Otherwise, JACK automatically generates
+        /// a unique one, if needed.
+        const OPEN_USE_EXACT_NAME = JackUseExactName,
+    }
+}
 /// Type argument for deactivated connections.
 pub struct Deactivated;
 /// Type argument for activated connections.
@@ -113,8 +126,48 @@ impl<T> JackConnection<T> {
         self.handle
     }
     /// Get the sample rate of the JACK server.
-    pub fn sample_rate(&self) -> u32 {
+    pub fn sample_rate(&self) -> jack_nframes_t {
         self.sample_rate
+    }
+    /// Get the CPU load of the JACK server.
+    pub fn cpu_load(&self) -> libc::c_float {
+        unsafe {
+            jack_cpu_load(self.handle)
+        }
+    }
+    /// Get the buffer size passed to the `process()` callback.
+    pub fn buffer_size(&self) -> jack_nframes_t {
+        unsafe {
+            jack_get_buffer_size(self.handle)
+        }
+    }
+    /// Change the buffer size passed to the `process()` callback.
+    ///
+    /// This operation **stops the JACK engine process cycle**, then calls all registered
+    /// bufsize_callback functions before restarting the process cycle. This will cause a
+    /// gap in the audio flow, so it should only be done at appropriate stopping points.
+    ///
+    /// # Parameters
+    ///
+    /// - bufsize: new buffer size. Must be a power of two.
+    ///
+    /// # Errors
+    ///
+    /// - `NotPowerOfTwo`: if the new buffer size isn't a power of two
+    /// - `UnknownErrorCode`
+    pub fn set_buffer_size(&mut self, bufsize: jack_nframes_t) -> JackResult<()> {
+        if bufsize.next_power_of_two() != bufsize {
+            Err(ErrorKind::NotPowerOfTwo)?
+        }
+        let code = unsafe {
+            jack_set_buffer_size(self.handle, bufsize)
+        };
+        if code != 0 {
+            Err(ErrorKind::UnknownErrorCode("set_buffer_size()", code))?
+        }
+        else {
+            Ok(())
+        }
     }
     unsafe fn activate_or_deactivate<X>(self, activate: bool) -> Result<JackConnection<X>, (Self, errors::Error)> {
         let code = {
@@ -190,6 +243,24 @@ impl<T> JackConnection<T> {
     /// - `UnknownErrorCode`
     pub fn disconnect_ports(&mut self, from: &JackPort, to: &JackPort) -> JackResult<()> {
         self.connect_or_disconnect_ports(from, to, false)
+    }
+    /// Get a port from the JACK server by its name.
+    ///
+    /// # Errors
+    ///
+    /// - `PortNotFound`: if no port with that name was found
+    /// - `NulError`: if any `&str` argument contains a NUL byte (`\0`).
+    pub fn get_port_by_name(&self, name: &str) -> JackResult<JackPort> {
+        let name = str_to_cstr(name)?;
+        let ptr = unsafe {
+            jack_port_by_name(self.handle, name.as_ptr())
+        };
+        if ptr.is_null() {
+            Err(ErrorKind::PortNotFound)?
+        }
+        unsafe {
+            Ok((JackPort::from_ptr(ptr)))
+        }
     }
     /// Get all (or a selection of) ports available in the JACK server.
     ///
@@ -312,22 +383,20 @@ impl<T> JackConnection<T> {
     }
 }
 impl JackConnection<Deactivated> {
-    /// Open an external client session with a JACK server.
-    ///
-    /// # TODO
-    ///
-    /// - This will expose more options in the future!
+    /// Open an external client session with a JACK server, optionally specifying
+    /// a number of `JackOpenOptions`.
     ///
     /// # Errors
     ///
     /// - `JackOpenFailed(status)`: if the connection could not be opened. Contains a
     /// `JackStatus` detailing what went wrong.
     /// - `NulError`: if any `&str` argument contains a NUL byte (`\0`).
-    pub fn connect(client_name: &str) -> JackResult<Self> {
+    pub fn connect(client_name: &str, opts: Option<JackOpenOptions>) -> JackResult<Self> {
         let mut status = 0;
+        let opts = opts.map(|x| x.bits()).unwrap_or(JackNullOption);
         let client = unsafe {
             let name = str_to_cstr(client_name)?;
-            jack_client_open(name.as_ptr(), JackNullOption, &mut status)
+            jack_client_open(name.as_ptr(), opts, &mut status)
         };
         if client.is_null() {
             Err(ErrorKind::JackOpenFailed(
@@ -391,6 +460,7 @@ impl JackConnection<Activated> {
 impl<T> Drop for JackConnection<T> {
     fn drop(&mut self) {
         unsafe {
+            jack_deactivate(self.handle);
             jack_client_close(self.handle);
         }
     }

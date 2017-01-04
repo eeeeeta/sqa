@@ -17,7 +17,7 @@ impl JackHandler for Ports {
     }
 }
 fn run() -> JackResult<()> {
-    let mut conn = JackConnection::connect("simple_client")?;
+    let mut conn = JackConnection::connect("simple_client", None)?;
     let inp = conn.register_port("input", PORT_IS_INPUT)?;
     let out = conn.register_port("output", PORT_IS_OUTPUT)?;
     let ports = Ports {

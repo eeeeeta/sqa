@@ -18,6 +18,9 @@ error_chain! {
         InvalidPort {
             description("Invalid port passed to function")
         }
+        PortNotFound {
+            description("A port matching that name could not be found.")
+        }
         UnknownErrorCode(from: &'static str, code: i32) {
             description("Unknown error code.")
                 display("Error code {} in {}", code, from)
@@ -33,6 +36,9 @@ error_chain! {
         }
         PortNotMine {
             description("This action requires the port to be owned by the client")
+        }
+        NotPowerOfTwo {
+            description("The new buffer size was not a power of two.")
         }
     }
 }
