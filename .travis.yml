@@ -11,9 +11,9 @@ env:
 addons:
   apt:
     packages:
-      - jackd
-      - libjack-dev
-      - libjack0
+      - jackd2
+      - libjack-jackd2-dev
+      - libjack-jackd2-0
       - libcurl4-openssl-dev
       - libelf-dev
       - libdw-dev
@@ -23,11 +23,11 @@ before_script:
       pip install 'travis-cargo<0.2' --user &&
       export PATH=$HOME/.local/bin:$PATH
 before_install:
-  - jackd -r -ddummy -r44100 -p1024 &
+  - jackd -v -r -ddummy -r44100 -p1024 &
 script:
   - |
-      travis-cargo build &&
-      travis-cargo test
+      cargo build &&
+      cargo test
 after_success:
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then travis-cargo coveralls --no-sudo --verify; fi
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then ./kcov/build/src/kcov --verify --coveralls-id=$TRAVIS_JOB_ID --exclude-pattern=/.cargo target/kcov target/debug/sqa_jack-*; fi

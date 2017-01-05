@@ -1,10 +1,58 @@
+//! Callback-based JACK API functions (logging, processing).
+
 use super::{JackNFrames, JackPort, JackStatus, JackConnection, Deactivated};
 use jack_sys::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicPtr, Ordering};
 use std::ffi::CStr;
 use libc;
 use errors::*;
 
+/// An object that can receive info and error messages from JACK.
+pub trait JackLoggingHandler: Send {
+    /// Called when JACK displays an error message.
+    fn on_error(&mut self, msg: &str);
+    /// Called when JACK displays an info message.
+    fn on_info(&mut self, msg: &str);
+}
+
+lazy_static! {
+    static ref LOGGING_HANDLER: AtomicPtr<*mut JackLoggingHandler> = AtomicPtr::new(::std::ptr::null_mut());
+}
+unsafe extern "C" fn error_callback(msg: *const libc::c_char) {
+    let handler = LOGGING_HANDLER.load(Ordering::Relaxed);
+    if !handler.is_null() {
+        let f = &mut (**handler);
+        let msg = CStr::from_ptr(msg);
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            f.on_error(&msg.to_string_lossy());
+        }));
+    }
+}
+unsafe extern "C" fn info_callback(msg: *const libc::c_char) {
+    let handler = LOGGING_HANDLER.load(Ordering::Relaxed);
+    if !handler.is_null() {
+        let f = &mut (**handler);
+        let msg = CStr::from_ptr(msg);
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            f.on_info(&msg.to_string_lossy());
+        }));
+    }
+}
+/// Set the logging handler (a struct that implements `JackLoggingHandler`).
+///
+/// # Safety
+///
+/// **Warning:** Your handler will never be deallocated / `Drop`ped.
+pub fn set_logging_handler<F>(handler: F) where F: JackLoggingHandler + 'static {
+    unsafe {
+        let trait_object_ptr = Box::into_raw(Box::new(handler) as Box<JackLoggingHandler>);
+        let ptr_ception = Box::into_raw(Box::new(trait_object_ptr));
+        LOGGING_HANDLER.store(ptr_ception, Ordering::Relaxed);
+        jack_set_error_function(Some(error_callback));
+        jack_set_info_function(Some(info_callback));
+    }
+}
 /// Context for some callbacks.
 pub struct JackCallbackContext {
     nframes: JackNFrames

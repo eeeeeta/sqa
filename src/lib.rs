@@ -4,6 +4,8 @@ extern crate libc;
 extern crate jack_sys;
 #[macro_use]
 extern crate error_chain;
+#[macro_use]
+extern crate lazy_static;
 
 static JACK_DEFAULT_AUDIO_TYPE: &'static [u8] = b"32 bit float mono audio\0";
 pub mod errors;
@@ -17,7 +19,7 @@ use std::ffi::{CString, CStr};
 use std::marker::PhantomData;
 use errors::{ErrorKind, ChainErr};
 pub use errors::JackResult;
-pub use handler::{JackCallbackContext, JackControl, JackHandler};
+pub use handler::{JackCallbackContext, JackControl, JackHandler, JackLoggingHandler, set_logging_handler};
 pub use port::JackPort;
 pub use jack_sys::*;
 

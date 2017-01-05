@@ -6,6 +6,57 @@ use std::sync::atomic::Ordering::*;
 use std::sync::Arc;
 
 #[test]
+fn logging_handler() {
+    let atomic = Arc::new(AtomicBool::new(false));
+    struct Special(Arc<AtomicBool>);
+    impl JackLoggingHandler for Special {
+        fn on_error(&mut self, s: &str) {
+            println!("JACK ERROR: {}", s);
+            self.0.store(true, Relaxed)
+        }
+        fn on_info(&mut self, s: &str) {
+            println!("JACK INFO: {}", s);
+            self.0.store(true, Relaxed)
+        }
+    }
+    fn run() -> JackResult<JackNFrames> {
+        let conn = JackConnection::connect("Testing", None)?;
+        Ok(conn.sample_rate()) // do something with conn to avoid optimizer
+    }
+    set_logging_handler(Special(atomic.clone()));
+    run().unwrap();
+    assert_eq!(atomic.load(Relaxed), true);
+}
+#[test]
+fn logging_handler_update() {
+    ::std::thread::sleep(::std::time::Duration::new(2, 0));
+    logging_handler();
+}
+#[test]
+fn logging_handler_panicking() {
+    ::std::thread::sleep(::std::time::Duration::new(2, 0));
+    let atomic = Arc::new(AtomicBool::new(false));
+    struct Special(Arc<AtomicBool>);
+    impl JackLoggingHandler for Special {
+        // new logging handler: panics on every message!
+        fn on_error(&mut self, s: &str) {
+            self.0.store(true, Relaxed);
+            panic!("JACK ERROR: {}", s);
+        }
+        fn on_info(&mut self, s: &str) {
+            self.0.store(true, Relaxed);
+            panic!("JACK INFO: {}", s);
+        }
+    }
+    fn run() -> JackResult<JackNFrames> {
+        let conn = JackConnection::connect("Testing", None)?;
+        Ok(conn.sample_rate()) // do something with conn to avoid optimizer
+    }
+    set_logging_handler(Special(atomic.clone()));
+    run().unwrap();
+    assert_eq!(atomic.load(Relaxed), true);
+}
+#[test]
 fn panicking() {
     let i_witnessed_a_panic = Arc::new(AtomicBool::new(false));
     fn run(iwp: Arc<AtomicBool>) -> JackResult<()> {
