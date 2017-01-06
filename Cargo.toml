@@ -1,5 +1,11 @@
 [package]
 name = "sqa-engine"
+description = "High-performance realtime audio library"
+documentation = "https://docs.rs/sqa-engine"
+repository = "https://github.com/eeeeeta/sqa-engine"
+readme = "README.md"
+keywords = ["audio", "sqa"]
+license = "GPLv3"
 version = "0.0.1"
 authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 
