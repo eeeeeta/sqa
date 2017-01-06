@@ -5,7 +5,7 @@ authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 
 [dependencies]
 sqa-jack = "0.3"
-bounded-spsc-queue = { git = "https://github.com/eeeeeta/bounded-spsc-queue", rev = "542e581" }
+sqa-bounded-spsc-queue = "0.2"
 time = "0.1"
 arrayvec = "0.3"
 hound = "3.0"

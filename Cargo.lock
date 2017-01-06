@@ -3,10 +3,10 @@ name = "sqa-engine"
 version = "0.0.1"
 dependencies = [
  "arrayvec 0.3.20 (registry+https://github.com/rust-lang/crates.io-index)",
- "bounded-spsc-queue 0.2.0 (git+https://github.com/eeeeeta/bounded-spsc-queue?rev=542e581)",
  "error-chain 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "hound 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqa-bounded-spsc-queue 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sqa-jack 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
  "uuid 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -48,11 +48,6 @@ dependencies = [
 name = "bitflags"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-
-[[package]]
-name = "bounded-spsc-queue"
-version = "0.2.0"
-source = "git+https://github.com/eeeeeta/bounded-spsc-queue?rev=542e581#542e581db0f1b0f1a6fd1c35a7c9f9dc86211778"
 
 [[package]]
 name = "cfg-if"
@@ -166,6 +161,11 @@ version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "sqa-bounded-spsc-queue"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "sqa-jack"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -209,7 +209,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum backtrace 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f551bc2ddd53aea015d453ef0b635af89444afa5ed2405dd0b2062ad5d600d80"
 "checksum backtrace-sys 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "3602e8d8c43336088a8505fa55cae2b3884a9be29440863a11528a42f46f6bb7"
 "checksum bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "aad18937a628ec6abcd26d1489012cc0e18c21798210f491af69ded9b881106d"
-"checksum bounded-spsc-queue 0.2.0 (git+https://github.com/eeeeeta/bounded-spsc-queue?rev=542e581)" = "<none>"
 "checksum cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "de1e760d7b6535af4241fca8bd8adf68e2e7edacc6b29f5d399050c5e48cf88c"
 "checksum dbghelp-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "97590ba53bcb8ac28279161ca943a924d1fd4a8fb3fa63302591647c4fc5b850"
 "checksum error-chain 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)" = "318cb3c71ee4cdea69fdc9e15c173b245ed6063e1709029e8fd32525a881120f"
@@ -226,6 +225,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum rand 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)" = "022e0636ec2519ddae48154b028864bdce4eaf7d35226ab8e65c611be97b189d"
 "checksum rustc-demangle 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "1430d286cadb237c17c885e25447c982c97113926bb579f4379c0eca8d9586dc"
 "checksum smallvec 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)" = "fcc8d19212aacecf95e4a7a2179b26f7aeb9732a915cf01f05b0d3e044865410"
+"checksum sqa-bounded-spsc-queue 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c42858b2ea5bac5fcf6008c5b3e850b9f3c8266e60076eacf17853675903a04d"
 "checksum sqa-jack 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a740963f366a99979a08330aba9d198cf4cf2b11f76f10806c4724fbffd9223c"
 "checksum time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)" = "3c7ec6d62a20df54e07ab3b78b9a3932972f4b7981de295563686849eb3989af"
 "checksum uuid 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "1a9ff57156caf7e22f37baf3c9d8f6ce8194842c23419dafcb0716024514d162"
