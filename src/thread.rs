@@ -152,7 +152,7 @@ impl JackHandler for DeviceContext {
         }
         if let Some(x) = to_remove {
             if let Some(p) = self.players.swap_remove(x) {
-                ::std::mem::forget(p); // TODO why do we have to do this to not xrun?
+                self.sender.send(PlayerRemoved(p));
             }
             self.length.store(self.length.load(Relaxed) - 1, Relaxed);
         }

@@ -1,3 +1,12 @@
+//! The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL
+//! NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",  "MAY", and
+//! "OPTIONAL" in this document are to be interpreted as described in
+//! [RFC 2119](https://tools.ietf.org/html/rfc2119).
+//!
+//! The key words "MUST (BUT WE KNOW YOU WON'T)", "SHOULD CONSIDER",
+//! "REALLY SHOULD NOT", "OUGHT TO", "WOULD PROBABLY", "MAY WISH TO",
+//! "COULD", "POSSIBLE", and "MIGHT" in this document are to be
+//! interpreted as described in [RFC 6919](https://tools.ietf.org/html/rfc6919).
 #![feature(integer_atomics)]
 
 pub extern crate sqa_jack;
@@ -127,7 +136,7 @@ impl<T> Sender<T> {
     /// Get the stream's position in samples.
     ///
     /// This position starts at 0 when the stream starts, and is incremented every time the stream delivers samples.
-    /// It is compared to the `start_time`, meaning that you should not change one without changing the other (otherwise, the stream will
+    /// It is compared to the `start_time`, meaning that you MUST NOT change one without changing the other (otherwise, the stream will
     /// think it's out of sync). In fact, you can't!
     pub fn position_samples(&self) -> u64 {
         self.position.load(Relaxed)
@@ -225,6 +234,16 @@ impl EngineContext {
             rx: Some(rc)
         })
     }
+    /// Obtain a communication channel to receive messages from the audio thread.
+    /// Can only be called once - will return None after the first call.
+    ///
+    /// # Safety
+    ///
+    /// **WARNING:** In order to not leak memory, you MUST continually `recv()` from this handle
+    /// to avoid filling the message queue. If the message queue is filled, the audio thread will
+    /// leak any `Player`s that are removed or rejected, as it will not be able to send them through
+    /// the channel (and deallocation would block the audio thread). (BUT WE KNOW YOU WON'T, because
+    /// it requires spawning another thread)
     pub fn get_handle(&mut self) -> Option<sync::AudioThreadHandle> {
         self.rx.take()
     }
