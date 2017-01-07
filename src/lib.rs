@@ -42,7 +42,12 @@ pub const MAX_PLAYERS: usize = 256;
 #[cfg(feature = "512-players")]
 pub const MAX_PLAYERS: usize = 512;
 /// The maximum amount of channels that can be created.
+///
+/// Can be increased to 128 with the `128-channels` feature.
+#[cfg(not(feature = "128-channels"))]
 pub const MAX_CHANS: usize = 64;
+#[cfg(feature = "128-channels")]
+pub const MAX_CHANS: usize = 128;
 /// The size of a stream's buffer, in samples.
 pub const STREAM_BUFFER_SIZE: usize = 100_000;
 /// The size of the communication buffer between audio thread and main thread, in messages.

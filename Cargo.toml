@@ -18,3 +18,8 @@ hound = "3.0"
 error-chain = "0.7"
 parking_lot = "0.3"
 uuid = { version = "0.3", features = ["v4"] }
+
+[features]
+
+512-players = []
+128-channels = []
