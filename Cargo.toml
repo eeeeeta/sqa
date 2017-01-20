@@ -1,0 +1,11 @@
+[package]
+name = "sqa-ffmpeg"
+version = "0.1.0"
+authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
+
+[dependencies]
+ffmpeg-sys = "3.2"
+error-chain = "0.7"
+libc = "0.2.19"
+sample = "0.6.2"
+sqa-engine = { path = "../sqa-ng" }
