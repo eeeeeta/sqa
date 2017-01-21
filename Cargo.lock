@@ -6,7 +6,7 @@ dependencies = [
  "ffmpeg-sys 3.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "sample 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "sqa-engine 0.0.1",
+ "sqa-engine 0.0.1 (git+https://github.com/eeeeeta/sqa-engine)",
 ]
 
 [[package]]
@@ -192,6 +192,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "sqa-engine"
 version = "0.0.1"
+source = "git+https://github.com/eeeeeta/sqa-engine#0bf5773b1ffbdf2fc4aad6d977356ed58b8e2be2"
 dependencies = [
  "arrayvec 0.3.20 (registry+https://github.com/rust-lang/crates.io-index)",
  "error-chain 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -269,6 +270,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum sample 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)" = "80fb6a09c9909286e083dd666073427801c875452c6aada9e4f56bf98a10d76c"
 "checksum smallvec 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)" = "fcc8d19212aacecf95e4a7a2179b26f7aeb9732a915cf01f05b0d3e044865410"
 "checksum sqa-bounded-spsc-queue 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c42858b2ea5bac5fcf6008c5b3e850b9f3c8266e60076eacf17853675903a04d"
+"checksum sqa-engine 0.0.1 (git+https://github.com/eeeeeta/sqa-engine)" = "<none>"
 "checksum sqa-jack 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a740963f366a99979a08330aba9d198cf4cf2b11f76f10806c4724fbffd9223c"
 "checksum time 0.1.36 (registry+https://github.com/rust-lang/crates.io-index)" = "211b63c112206356ef1ff9b19355f43740fc3f85960c598a93d3a3d3ba7beade"
 "checksum uuid 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "1a9ff57156caf7e22f37baf3c9d8f6ce8194842c23419dafcb0716024514d162"

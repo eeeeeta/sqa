@@ -8,4 +8,6 @@ ffmpeg-sys = "3.2"
 error-chain = "0.7"
 libc = "0.2.19"
 sample = "0.6.2"
-sqa-engine = { path = "../sqa-ng" }
+
+[dev-dependencies]
+sqa-engine = { git = "https://github.com/eeeeeta/sqa-engine" }
