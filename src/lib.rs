@@ -173,7 +173,12 @@ impl MediaFile {
         Duration::microseconds(dur)
     }
     pub fn seek(&mut self, to: Duration) -> MediaResult<()> {
-        let to = to.num_microseconds().unwrap();
+        let to = if let Some(to) = to.num_microseconds() {
+            to
+        }
+        else {
+            bail!(ErrorKind::TooManySeconds);
+        };
         call!(av_seek_frame(self.format_ctx, -1, to, 0));
         unsafe {
             avcodec_flush_buffers(self.audio_ctx);
