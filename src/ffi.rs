@@ -5,7 +5,7 @@ macro_rules! call {
     ($name:ident($($arg:expr),*)) => {{
         #[allow(unused_unsafe)]
         let ret = unsafe {
-            $name($($arg),+)
+            $name($($arg),*)
         };
         if ret < 0 {
             use ErrorKind::*;

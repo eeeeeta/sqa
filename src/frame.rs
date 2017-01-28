@@ -2,6 +2,8 @@
 use ffmpeg_sys::*;
 use errors::{MediaResult, ErrorKind};
 use super::{SampleFormat, Sample};
+use chrono::Duration;
+use libc;
 #[derive(Debug)]
 pub struct Frame {
     ptr: *mut AVFrame,
@@ -9,6 +11,7 @@ pub struct Frame {
     cur_idx: usize,
     cap: usize,
     chans: usize,
+    pts: libc::c_double,
     format: SampleFormat
 }
 impl Drop for Frame {
@@ -19,7 +22,7 @@ impl Drop for Frame {
     }
 }
 impl Frame {
-    pub unsafe fn from_ptr(ptr: *mut AVFrame) -> MediaResult<Self> {
+    pub unsafe fn from_ptr(ptr: *mut AVFrame, time: AVRational) -> MediaResult<Self> {
         let format = (*ptr).format;
         let format = if let Some(x) = SampleFormat::from_ffi(format) { x }
         else {
@@ -30,11 +33,14 @@ impl Frame {
         if !format.is_planar() {
             cap *= chans;
         }
+        let pts = (*ptr).pts as libc::c_double;
+        let time = av_q2d(time);
         Ok(Frame {
             ptr: ptr,
             cur_chan: 0,
             cur_idx: 0,
             format: format,
+            pts: pts * time,
             cap: cap as usize,
             chans: chans as usize
         })
@@ -57,6 +63,9 @@ impl Frame {
             self.cur_idx = 0;
             true
         }
+    }
+    pub fn pts(&self) -> Duration {
+        Duration::nanoseconds((1_000_000_000f64 * self.pts) as _)
     }
 }
 impl<'a> Iterator for &'a mut Frame {

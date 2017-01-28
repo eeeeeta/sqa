@@ -33,6 +33,9 @@ error_chain! {
         UnsupportedFormat {
             description("The file's sample format is currently unsupported.")
         }
+        OnceOnly {
+            description("You may only call that function once.")
+        }
         BsfNotFound { }
         FfmpegBug { }
         BufferTooSmall { }

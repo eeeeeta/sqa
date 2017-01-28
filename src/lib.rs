@@ -4,6 +4,7 @@ extern crate ffmpeg_sys;
 extern crate error_chain;
 extern crate libc;
 extern crate sample;
+extern crate chrono;
 
 pub mod errors;
 pub mod frame;
@@ -12,6 +13,7 @@ mod ffi;
 
 pub use errors::{MediaResult, Error, ErrorKind};
 pub use frame::Frame;
+pub use chrono::Duration;
 use ffmpeg_sys::*;
 use std::ptr;
 use ffi::str_to_cstr;
@@ -72,24 +74,32 @@ impl SampleFormat {
 static mut INIT_ONCE: bool = false;
 /// FFmpeg context (for thread safety).
 pub struct MediaContext {
+    net: bool,
     _ptr: *mut () // for !Send and !Sync
 }
+impl MediaContext {
+    pub fn network_init(&mut self) -> MediaResult<()> {
+        if self.net {
+            bail!(ErrorKind::OnceOnly);
+        }
+        call!(avformat_network_init());
+        self.net = true;
+        Ok(())
+    }
+}
 /// Initialise FFmpeg.
-///
-/// # Panics
-///
-/// Cannot be called more than once. Panics if you do so.
-pub fn init() -> MediaContext {
+pub fn init() -> MediaResult<MediaContext> {
     unsafe {
         if INIT_ONCE {
-            panic!("sqa-ffmpeg: init() called twice!");
+            bail!(ErrorKind::OnceOnly);
         }
+        av_register_all();
         INIT_ONCE = true;
-        av_register_all()
     }
-    MediaContext {
+    Ok(MediaContext {
+        net: false,
         _ptr: ptr::null_mut()
-    }
+    })
 }
 /// A media file, from which you can obtain many `AVFrame`s.
 pub struct MediaFile {
@@ -100,7 +110,7 @@ unsafe impl Send for MediaFile { }
 impl MediaFile {
     /// Open a file from the given `url`, which is a [FFmpeg URL]
     /// (https://ffmpeg.org/ffmpeg-protocols.html).
-    pub fn new(_ctx: &MediaContext, url: &str) -> MediaResult<MediaFile> {
+    pub fn new(_ctx: &mut MediaContext, url: &str) -> MediaResult<MediaFile> {
         let url = str_to_cstr(url)?;
         let mut ctx: *mut AVFormatContext = ptr::null_mut();
         call!(avformat_open_input(&mut ctx, url.as_ptr(), ptr::null_mut(), ptr::null_mut()));
@@ -142,17 +152,30 @@ impl MediaFile {
         let ptr = unsafe {
             av_frame_alloc()
         };
+        let base = unsafe { (*self.audio_ctx).time_base };
         if ptr.is_null() {
             bail!(ErrorKind::AllocationFailed);
         }
         call!(avcodec_receive_frame(self.audio_ctx, ptr));
-        Ok(unsafe { Frame::from_ptr(ptr)? })
+        Ok(unsafe { Frame::from_ptr(ptr, base)? })
     }
     pub fn channels(&self) -> usize {
         (unsafe { (*self.audio_ctx).channels }) as usize
     }
     pub fn sample_rate(&self) -> usize {
         (unsafe { (*self.audio_ctx).sample_rate }) as usize
+    }
+    pub fn duration(&self) -> Duration {
+        let dur = unsafe { (*self.format_ctx).duration };
+        Duration::microseconds(dur)
+    }
+    pub fn seek(&mut self, to: Duration) -> MediaResult<()> {
+        let to = to.num_microseconds().unwrap();
+        call!(av_seek_frame(self.format_ctx, -1, to, 0));
+        unsafe {
+            avcodec_flush_buffers(self.audio_ctx);
+        }
+        Ok(())
     }
 }
 impl Iterator for MediaFile {

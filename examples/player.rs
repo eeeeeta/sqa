@@ -2,18 +2,20 @@ extern crate sqa_engine;
 extern crate sqa_ffmpeg;
 
 use sqa_engine::{EngineContext, jack, Sender};
-use sqa_ffmpeg::{MediaFile, init};
+use sqa_ffmpeg::{MediaFile, init, Duration};
 use std::io::{self, BufRead, Read};
 use std::thread;
+
 fn main() {
-    let mctx = init();
+    let mut mctx = init().unwrap();
+    mctx.network_init();
     println!("Provide a FFmpeg URL:");
 
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
     let mut buffer = String::new();
     stdin.read_line(&mut buffer).unwrap();
-    let file = MediaFile::new(&mctx, &buffer.trim()).unwrap();
+    let mut file = MediaFile::new(&mut mctx, &buffer.trim()).unwrap();
     let mut ec = EngineContext::new(None).unwrap();
     let mut chans = vec![];
     let mut ctls = vec![];
@@ -30,17 +32,23 @@ fn main() {
             ec.conn.connect_ports(&ch, &port).unwrap();
         }
     }
-    println!("Chans: {} Sample rate: {}", file.channels(), file.sample_rate());
+    println!("Chans: {} Sample rate: {} Duration: {}", file.channels(), file.sample_rate(), file.duration());
     let thr = ::std::thread::spawn(move || {
-        for x in file {
-            if let Ok(mut x) = x {
-                for (i, ch) in chans.iter_mut().enumerate() {
-                    x.set_chan(i);
-                    for smpl in &mut x {
-                       ch.1.buf.push(smpl.f32() * 0.5);
+        loop {
+            for x in &mut file {
+                if let Ok(mut x) = x {
+                    for (i, ch) in chans.iter_mut().enumerate() {
+                        x.set_chan(i);
+                        for smpl in &mut x {
+                            ch.1.buf.push(smpl.f32() * 0.5);
+                        }
+                    }
+                    if x.pts() > Duration::seconds(15) {
+                        break;
                     }
                 }
             }
+            file.seek(Duration::seconds(1)).unwrap();
         }
     });
     let time = Sender::<()>::precise_time_ns();
