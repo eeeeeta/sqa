@@ -165,6 +165,9 @@ impl MediaFile {
     pub fn sample_rate(&self) -> usize {
         (unsafe { (*self.audio_ctx).sample_rate }) as usize
     }
+    pub fn bitrate(&self) -> usize {
+        (unsafe { (*self.format_ctx).bit_rate }) as usize
+    }
     pub fn duration(&self) -> Duration {
         let dur = unsafe { (*self.format_ctx).duration };
         Duration::microseconds(dur)

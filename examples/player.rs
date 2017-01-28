@@ -32,7 +32,7 @@ fn main() {
             ec.conn.connect_ports(&ch, &port).unwrap();
         }
     }
-    println!("Chans: {} Sample rate: {} Duration: {}", file.channels(), file.sample_rate(), file.duration());
+    println!("Chans: {} Sample rate: {} Duration: {} Bitrate: {}", file.channels(), file.sample_rate(), file.duration(), file.bitrate());
     let thr = ::std::thread::spawn(move || {
         loop {
             for x in &mut file {
