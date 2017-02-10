@@ -1,0 +1,5 @@
+target
+*.wav
+*.m4a
+*.mp3
+callgrind*

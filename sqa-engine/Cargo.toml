@@ -1,0 +1,25 @@
+[package]
+name = "sqa-engine"
+description = "High-performance realtime audio library"
+documentation = "https://docs.rs/sqa-engine"
+repository = "https://github.com/eeeeeta/sqa-engine"
+readme = "README.md"
+keywords = ["audio", "sqa"]
+license = "GPLv3"
+version = "0.0.1"
+authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
+
+[dependencies]
+sqa-jack = "0.3"
+sqa-bounded-spsc-queue = "0.2"
+time = "0.1"
+arrayvec = "0.3"
+hound = "3.0"
+error-chain = "0.7"
+parking_lot = "0.3"
+uuid = { version = "0.3", features = ["v4"] }
+
+[features]
+
+512-players = []
+128-channels = []
