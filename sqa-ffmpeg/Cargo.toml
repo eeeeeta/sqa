@@ -1,0 +1,20 @@
+[package]
+name = "sqa-ffmpeg"
+version = "0.1.0"
+description = "FFmpeg bindings for Rust (part of the SQA project)"
+documentation = "https://docs.rs/sqa-jack"
+repository = "https://github.com/eeeeeta/sqa-jack"
+readme = "README.md"
+keywords = ["ffmpeg", "audio", "sqa"]
+license = "Unlicense"
+authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
+
+[dependencies]
+ffmpeg-sys = "3.2"
+error-chain = "0.7"
+libc = "0.2.19"
+sample = "0.6.2"
+chrono = "0.2"
+
+[dev-dependencies]
+sqa-engine = { git = "https://github.com/eeeeeta/sqa-engine" }
