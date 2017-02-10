@@ -1,0 +1,11 @@
+[package]
+name = "sqa-backend"
+version = "0.1.0"
+authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
+
+[dependencies]
+tokio-core = "0.1"
+futures = "0.1"
+serde = "0.9"
+rmp-serde = "0.12"
+serde_derive = "0.9"
