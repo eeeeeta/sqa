@@ -30,17 +30,21 @@ pub struct ServerData {
     pub internal_rx: Receiver<ServerMessage>,
     pub internal_tx: Sender<ServerMessage>,
     pub parties: Vec<Party>,
+    party_data: Option<(usize, u32)>
 }
 impl ServerData {
     pub fn send_raw(&mut self, msg: SendMessage) -> IoResult<()> {
         self.framed.start_send(msg)?;
         Ok(())
     }
-    pub fn reply(&mut self, id: usize, msg: Command) -> IoResult<bool> {
-        if let Some(party) = self.parties.get_mut(id) {
+    pub fn reply(&mut self, msg: Command) -> IoResult<bool> {
+        if let Some((pid, reply_to)) = self.party_data {
+            let party = self.parties.get_mut(pid)
+                .expect("ServerData::reply(): party data somehow changed. this is a bug!");
             party.our_id += 1;
             let pkt = Packet {
                 id: party.our_id,
+                reply_to: reply_to,
                 cmd: msg
             };
             self.framed.start_send(party.addr.pkt_to(pkt))?;
@@ -60,6 +64,7 @@ impl ServerData {
             party.our_id += 1;
             let pkt = Packet {
                 id: party.our_id,
+                reply_to: 0,
                 cmd: msg.clone()
             };
             self.framed.start_send(party.addr.pkt_to(pkt))?;
@@ -82,22 +87,21 @@ impl<H> Server<H> where H: ServerHandler {
                         idx = Some(i);
                         party.their_id += 1;
                         if pkt.id != party.their_id {
-                            self.data.framed.start_send(addr.pkt_to(Packet {
-                                id: 0,
-                                cmd: Command::MessageSkipped
-                            }))?;
+                            self.data.framed.start_send(addr.cmd_to(Command::MessageSkipped))?;
                             party.their_id = pkt.id;
                         }
                     }
                 }
                 match idx {
                     Some(i) => {
+                        self.data.party_data = Some((i, pkt.id));
                         if let Command::Ping = pkt.cmd {
-                            self.data.reply(i, Command::Pong)?;
+                            self.data.reply(Command::Pong)?;
                         }
                         else {
                             self.hdlr.registered(&mut self.data, i, pkt.cmd);
                         }
+                        self.data.party_data = None;
                     },
                     None => {
                         if let Command::Subscribe = pkt.cmd {
@@ -107,12 +111,9 @@ impl<H> Server<H> where H: ServerHandler {
                                 our_id: 0,
                                 their_id: 0
                             });
-                            self.data.framed.start_send(addr.pkt_to(Packet {
-                                id: 0,
-                                cmd: Command::HelloClient {
+                            self.data.framed.start_send(addr.cmd_to(Command::HelloClient {
                                     version: VERSION.to_string()
-                                }
-                            }))?;
+                                }))?;
                         }
                         else {
                             self.hdlr.oneshot(&mut self.data, addr, pkt)
@@ -122,10 +123,7 @@ impl<H> Server<H> where H: ServerHandler {
             },
             Err(e) => {
                 println!("Deserialisation error from {}: {:?}", addr, e);
-                self.data.framed.start_send(addr.pkt_to(Packet {
-                    id: 0,
-                    cmd: Command::DeserializationFailed
-                }))?;
+                self.data.framed.start_send(addr.cmd_to(Command::DeserializationFailed))?;
             }
         };
         Ok(())
@@ -167,7 +165,8 @@ impl<T> Server<T> where T: ServerHandler {
                 framed: framed,
                 internal_tx: tx,
                 internal_rx: rx,
-                parties: vec![]
+                parties: vec![],
+                party_data: None
             },
             hdlr: handler
         }

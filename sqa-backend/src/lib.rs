@@ -46,6 +46,7 @@ fn crappy_message_maker(dest: SocketAddr, cmd: Command) -> SendMessage {
         addr: dest,
         pkt: Packet {
             id: 0,
+            reply_to: 0,
             cmd: cmd
         }
     }
