@@ -1,0 +1,2 @@
+[workspace]
+members = ["./sqa-backend", "./sqa-jack", "./sqa-ffmpeg", "./sqa-engine"]
