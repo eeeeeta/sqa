@@ -17,4 +17,4 @@ sample = "0.6.2"
 chrono = "0.2"
 
 [dev-dependencies]
-sqa-engine = { git = "https://github.com/eeeeeta/sqa-engine" }
+sqa-engine = { path = "../sqa-engine" }
