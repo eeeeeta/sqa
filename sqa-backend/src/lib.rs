@@ -4,6 +4,10 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate rmp_serde;
+extern crate time;
+
+pub mod codec;
+pub mod handlers;
 
 use futures::{Future, Stream, Sink, Poll};
 use futures::stream::SplitSink;
@@ -11,45 +15,9 @@ use tokio_core::reactor::Core;
 use tokio_core::net::{UdpCodec, UdpFramed, UdpSocket};
 use std::io::Result as SIoResult;
 use std::net::SocketAddr;
-use serde::{Deserialize, Serialize};
-use rmp_serde::{Deserializer, Serializer};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Command {
-    HelloServer { name: String },
-    HelloClient { name: String, version: String },
-    UnknownClient,
-    Ping,
-    Pong,
-    DeserializationFailed,
-    QueryMessageSkipped,
-    MessageSkipped { id: u8 }
-}
-#[derive(Debug, Serialize, Deserialize)]
-struct Packet {
-    id: u32,
-    cmd: Command
-}
-struct Message {
-    addr: SocketAddr,
-    pkt: Packet
-}
-struct SqaWireCodec;
-impl UdpCodec for SqaWireCodec {
-    type In = Result<Message, rmp_serde::decode::Error>;
-    type Out = Message;
-    fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> SIoResult<Self::In> {
-        let mut decoder = Deserializer::new(buf);
-        Ok(Deserialize::deserialize(&mut decoder).map(|x| Message {
-            addr: src.clone(),
-            pkt: x
-        }))
-    }
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> SocketAddr {
-        let _ = msg.pkt.serialize(&mut Serializer::new(buf));
-        msg.addr
-    }
-}
+use codec::{Command, Packet, RecvMessage, SendMessage, SqaWireCodec};
+
 struct Context {
     tx: SplitSink<UdpFramed<SqaWireCodec>>
 }
@@ -66,14 +34,6 @@ pub fn main() {
         tx: snk
     };
     let server = src.for_each(|msg| {
-        match msg {
-            Ok(Message { addr, pkt }) => {
-                println!("From {}: {:?}", addr, pkt);
-            },
-            Err(err) => {
-                println!("Deserialisation error: {:?}", err);
-            }
-        }
         Ok(())
     });
     l.run(server).unwrap();
@@ -81,8 +41,8 @@ pub fn main() {
 struct Client {
     framed: UdpFramed<SqaWireCodec>
 }
-fn crappy_message_maker(dest: SocketAddr, cmd: Command) -> Message {
-    Message {
+fn crappy_message_maker(dest: SocketAddr, cmd: Command) -> SendMessage {
+    SendMessage {
         addr: dest,
         pkt: Packet {
             id: 0,
