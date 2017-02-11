@@ -13,7 +13,7 @@ authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 sqa-jack = "0.3"
 sqa-bounded-spsc-queue = "0.2"
 time = "0.1"
-arrayvec = "0.3"
+arrayvec = { version = "0.3", features = ["use_union"] }
 hound = "3.0"
 error-chain = "0.7"
 parking_lot = "0.3"
