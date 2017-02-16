@@ -5,6 +5,7 @@ use futures::{Poll, Async, Future};
 use futures::sync::oneshot;
 use futures::sync::mpsc::{self, Sender, Receiver};
 use tokio_core::net::{UdpFramed, UdpSocket};
+use tokio_core::reactor::Remote;
 use std::net::SocketAddr;
 use time::{Duration, SteadyTime};
 use std::io::Result as IoResult;
@@ -37,6 +38,7 @@ pub struct ConnData<M> {
     pub internal_rx: Receiver<M>,
     pub internal_tx: Sender<M>,
     pub parties: Vec<Party>,
+    pub remote: Remote,
     party_data: Option<(usize, u32)>
 }
 impl<M> ConnData<M> {
@@ -181,7 +183,7 @@ impl<H> Future for Connection<H> where H: ConnHandler {
     }
 }
 impl<H> Connection<H> where H: ConnHandler {
-    pub fn new(socket: UdpSocket, handler: H) -> Self {
+    pub fn new(socket: UdpSocket, remote: Remote, handler: H) -> Self {
         let framed = socket.framed(SqaWireCodec);
         let (tx, rx) = mpsc::channel::<H::Message>(INTERNAL_BUFFER_SIZE);
         Connection {
@@ -190,6 +192,7 @@ impl<H> Connection<H> where H: ConnHandler {
                 internal_tx: tx,
                 internal_rx: rx,
                 parties: vec![],
+                remote: remote,
                 party_data: None
             },
             hdlr: handler
