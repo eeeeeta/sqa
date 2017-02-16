@@ -23,46 +23,6 @@ struct Context {
 }
 use std::env;
 pub fn main() {
-    let addr = env::args().nth(1).unwrap_or("127.0.0.1:8080".to_string());
-    let addr = addr.parse::<SocketAddr>().unwrap();
-    let mut l = Core::new().unwrap();
-    let handle = l.handle();
-    let socket = UdpSocket::bind(&addr, &handle).unwrap();
-    let (snk, src) = socket.framed(SqaWireCodec).split();
-    println!("Listening on: {}", addr);
-    let server = Context {
-        tx: snk
-    };
-    let server = src.for_each(|msg| {
-        Ok(())
-    });
-    l.run(server).unwrap();
-}
-struct Client {
-    framed: UdpFramed<SqaWireCodec>
-}
-fn crappy_message_maker(dest: SocketAddr, cmd: Command) -> SendMessage {
-    SendMessage {
-        addr: dest,
-        pkt: Packet {
-            id: 0,
-            reply_to: 0,
-            cmd: cmd
-        }
-    }
 }
 pub fn client() {
-    let addr = env::args().nth(1).unwrap_or("127.0.0.1:8081".to_string());
-    let addr = addr.parse::<SocketAddr>().unwrap();
-    let dest = env::args().nth(1).unwrap_or("127.0.0.1:8080".to_string());
-    let dest = dest.parse::<SocketAddr>().unwrap();
-    let mut l = Core::new().unwrap();
-    let handle = l.handle();
-    println!("Binding to {}", addr);
-    let socket = UdpSocket::bind(&addr, &handle).unwrap();
-    let mut framed = socket.framed(SqaWireCodec);
-    println!("Bound to {}", addr);
-    println!("Attempting to communicate with {}", dest);
-    framed.start_send(crappy_message_maker(dest, Command::Ping));
-    l.run(framed.flush());
 }
