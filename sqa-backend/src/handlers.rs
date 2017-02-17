@@ -160,23 +160,25 @@ impl<H> Future for Connection<H> where H: ConnHandler {
     type Error = ::std::io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.data.internal_rx.poll() {
-            Ok(Async::Ready(msg)) => {
-                self.hdlr.internal(&mut self.data, msg.unwrap());
-            },
-            Ok(Async::NotReady) => {
-                match self.data.framed.poll() {
-                    Ok(Async::Ready(Some(RecvMessage { addr, pkt }))) => {
-                        if let Err(e) = self.on_external(addr, pkt) {
-                            println!("error in external handler: {:?}", e);
-                        }
-                    },
-                    Ok(Async::Ready(None)) => unreachable!(),
-                    Err(e) => return Err(e),
-                    _ => {}
-                }
-            },
-            Err(_) => {}
+        'outer: loop {
+            match self.data.internal_rx.poll() {
+                Ok(Async::Ready(msg)) => {
+                    self.hdlr.internal(&mut self.data, msg.unwrap());
+                },
+                Ok(Async::NotReady) => {
+                    match self.data.framed.poll() {
+                        Ok(Async::Ready(Some(RecvMessage { addr, pkt }))) => {
+                            if let Err(e) = self.on_external(addr, pkt) {
+                                println!("error in external handler: {:?}", e);
+                            }
+                        },
+                        Ok(Async::Ready(None)) => unreachable!(),
+                        Ok(Async::NotReady) => break 'outer,
+                        Err(e) => return Err(e)
+                    }
+                },
+                Err(_) => {}
+            }
         }
         self.data.framed.poll_complete()?;
         Ok(Async::NotReady)
