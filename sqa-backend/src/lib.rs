@@ -8,6 +8,7 @@ extern crate time;
 
 pub mod codec;
 pub mod handlers;
+pub mod actions;
 
 use futures::{Future, Stream, Sink, Poll};
 use futures::stream::SplitSink;
