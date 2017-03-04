@@ -5,6 +5,7 @@ extern crate serde;
 extern crate serde_derive;
 extern crate rmp_serde;
 extern crate time;
+extern crate uuid;
 
 pub mod codec;
 pub mod handlers;

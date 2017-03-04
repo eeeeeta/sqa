@@ -1,8 +1,11 @@
-use futures::Future;
+use futures::{future, Future};
 use std::error::Error;
 use std::path::PathBuf;
 use std::collections::HashMap;
 use std::any::Any;
+use std::io;
+use uuid::Uuid;
+use time::Duration;
 pub enum Value {
     Volume(f32),
     Path(PathBuf),
@@ -10,16 +13,9 @@ pub enum Value {
     U32(u32),
     I32(i32)
 }
-pub enum ActionError {
-    NowUnloaded(Box<Error>, UnloadedAction),
-    NowLoaded(Box<Error>, LoadedAction),
-}
 
-pub type ParameterMap = HashMap<&'static str, Parameter>;
-pub type LoaderFuture = Box<Future<Item=LoadedAction, Error=Box<Error>>>;
-pub type ExecuterFuture = Box<Future<Item=ExecutingAction, Error=ActionError>>;
-pub struct Parameter {
-    val: Value,
+pub struct Parameter<'a> {
+    val: Option<&'a Value>,
     desc: &'static str,
     name: &'static str
 }
@@ -27,24 +23,32 @@ pub struct ParameterError {
     name: &'static str,
     err: String
 }
+pub enum PlaybackState {
+    Inactive,
+    Unverified(Vec<ParameterError>),
+    Loaded,
+    Paused,
+    Active,
+    Errored(Box<Error>)
+}
 pub trait ActionController {
-    fn verify(&self, ula: &UnloadedAction) -> Vec<ParameterError>;
-    fn load(&self, ula: UnloadedAction) -> LoaderFuture;
-    fn execute(&self, la: LoadedAction) -> ExecuterFuture;
+    fn desc(&self) -> String;
+    fn get_params(&self) -> Vec<Parameter>;
+    fn set_param(&mut self, &'static str, Option<Value>) -> bool;
+    fn verify_params(&self) -> Vec<ParameterError>;
+    fn load(&mut self) -> Box<Future<Item=(), Error=Box<Error>>> {
+        Box::new(future::ok(()))
+    }
+    fn execute(&mut self) -> Box<Future<Item=(), Error=Box<Error>>>;
+    fn duration(&self) -> Option<Duration> {
+        None
+    }
+    fn accept_message(&mut self, Box<Any>) -> Result<(), Box<Error>> {
+        Err("this ActionController isn't expecting any messages!".into())
+    }
 }
-pub struct UnloadedAction {
-    params: ParameterMap
-}
-pub struct LoadedAction {
-    params: ParameterMap,
-    magic: Box<Any>
-}
-pub struct ExecutingAction {
-    params: ParameterMap,
-    magic: Box<Any>,
-}
-pub enum Action {
-    Unloaded(UnloadedAction, Box<ActionController>),
-    Loaded(LoadedAction, Box<ActionController>),
-    Executing(ExecutingAction, Box<ActionController>)
+pub struct Action {
+    ctl: Box<ActionController>,
+    state: PlaybackState,
+    uu: Uuid
 }
