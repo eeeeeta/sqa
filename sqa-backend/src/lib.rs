@@ -6,25 +6,27 @@ extern crate serde_derive;
 extern crate rmp_serde;
 extern crate time;
 extern crate uuid;
+extern crate sqa_engine;
+extern crate sqa_ffmpeg;
 
 pub mod codec;
 pub mod handlers;
 pub mod actions;
+pub mod state;
 
-use futures::{Future, Stream, Sink, Poll};
-use futures::stream::SplitSink;
+use handlers::Connection;
+use state::Context;
 use tokio_core::reactor::Core;
-use tokio_core::net::{UdpCodec, UdpFramed, UdpSocket};
-use std::io::Result as SIoResult;
-use std::net::SocketAddr;
-
-use codec::{Command, Packet, RecvMessage, SendMessage, SqaWireCodec};
-
-struct Context {
-    tx: SplitSink<UdpFramed<SqaWireCodec>>
-}
-use std::env;
+use tokio_core::net::UdpSocket;
 pub fn main() {
+    let mut core = Core::new().unwrap();
+    let ctx = Context::new(core.remote());
+    let hdl = core.handle();
+    let addr = "127.0.0.1:1234".parse().unwrap();
+    let sock = UdpSocket::bind(&addr, &hdl).unwrap();
+    let conn = Connection::new(sock, core.remote(), ctx);
+    println!("[+] SQA Backend is up & running!");
+    core.run(conn).unwrap();
 }
 pub fn client() {
 }

@@ -11,3 +11,5 @@ rmp-serde = "0.12"
 serde_derive = "0.9"
 time = "0.1"
 uuid = "0.4"
+sqa-engine = { path = "../sqa-engine" }
+sqa-ffmpeg = { path = "../sqa-ffmpeg" }
