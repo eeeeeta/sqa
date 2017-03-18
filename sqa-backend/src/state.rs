@@ -4,7 +4,7 @@ use tokio_core::reactor::Remote;
 use std::any::Any;
 use uuid::Uuid;
 use handlers::{ConnHandler, ConnData};
-use codec::{Command, Packet};
+use codec::{Command};
 use std::net::SocketAddr;
 use sqa_engine::EngineContext;
 use std::collections::HashMap;
@@ -46,13 +46,14 @@ impl ConnHandler for Context {
             }
         }
     }
-    fn external(&mut self, d: &mut CD, a: SocketAddr, p: Packet) {
-    }
-    fn registered(&mut self, d: &mut CD, id: usize, c: Command) {
-    }
-    fn skipped(&mut self, d: &mut CD, id: usize) {
-    }
-    fn deser_failed(&mut self, d: &mut CD, a: SocketAddr, e: ::rmp_serde::decode::Error) {
+    fn external(&mut self, d: &mut CD, c: Command) {
+        use self::Command::*;
+        match c {
+            Ping => {
+                d.respond("/pong".into());
+            },
+            _ => {}
+        }
     }
 }
 impl Context {

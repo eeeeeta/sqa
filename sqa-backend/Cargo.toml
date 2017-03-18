@@ -7,9 +7,11 @@ authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 tokio-core = "0.1"
 futures = "0.1"
 serde = "0.9"
-rmp-serde = "0.12"
 serde_derive = "0.9"
 time = "0.1"
 uuid = "0.4"
 sqa-engine = { path = "../sqa-engine" }
 sqa-ffmpeg = { path = "../sqa-ffmpeg" }
+rosc = { path = "../rosc" }
+serde_json = "0.9"
+error-chain = "0.10"

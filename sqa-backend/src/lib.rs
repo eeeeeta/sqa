@@ -1,18 +1,24 @@
+#![recursion_limit = "1024"]
+#![feature(slice_patterns)]
 extern crate futures;
 extern crate tokio_core;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate rmp_serde;
+extern crate serde_json;
 extern crate time;
 extern crate uuid;
 extern crate sqa_engine;
 extern crate sqa_ffmpeg;
+extern crate rosc;
+#[macro_use]
+extern crate error_chain;
 
 pub mod codec;
 pub mod handlers;
 pub mod actions;
 pub mod state;
+pub mod errors;
 
 use handlers::Connection;
 use state::Context;

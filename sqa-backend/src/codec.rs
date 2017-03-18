@@ -1,53 +1,49 @@
 use std::net::SocketAddr;
 use serde::{Deserialize, Serialize};
-use rmp_serde::{self, Deserializer, Serializer};
+use serde_json::{self, Deserializer, Serializer};
 use tokio_core::net::UdpCodec;
+use rosc::{decoder, encoder, OscMessage, OscPacket};
+use errors::*;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Command {
-    Subscribe,
-    HelloClient { version: String },
+    /// /ping
     Ping,
+    /// /pong
     Pong,
-    DeserializationFailed,
-    MessageSkipped
-}
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Packet {
-    pub id: u32,
-    pub reply_to: u32,
-    pub cmd: Command
 }
 #[derive(Debug)]
 pub struct RecvMessage {
     pub addr: SocketAddr,
-    pub pkt: Result<Packet, rmp_serde::decode::Error>
+    pub pkt: BackendResult<Command>
 }
 #[derive(Debug)]
 pub struct SendMessage {
     pub addr: SocketAddr,
-    pub pkt: Packet
+    pub pkt: OscMessage
 }
 pub trait SendMessageExt {
-    fn pkt_to(&self, m: Packet) -> SendMessage;
-    fn cmd_to(&self, c: Command) -> SendMessage;
+    fn msg_to(&self, c: OscMessage) -> SendMessage;
 }
 impl SendMessageExt for SocketAddr {
-    fn pkt_to(&self, m: Packet) -> SendMessage {
+    fn msg_to(&self, c: OscMessage) -> SendMessage {
+        let mut addr = self.clone();
+        addr.set_port(53001);
         SendMessage {
-            addr: self.clone(),
-            pkt: m
+            addr: addr,
+            pkt: c
         }
     }
-    fn cmd_to(&self, c: Command) -> SendMessage {
-        SendMessage {
-            addr: self.clone(),
-            pkt: Packet {
-                id: 0,
-                reply_to: 0,
-                cmd: c
-            }
-        }
+}
+fn parse_osc_message(m: OscMessage) -> BackendResult<Command> {
+    let OscMessage { addr, args } = m;
+    let path: Vec<&str> = (&addr).split("/").collect();
+    if path.len() < 2 {
+        bail!(BackendErrorKind::MalformedOSCPath);
+    }
+    match path[1] {
+        "ping" => Ok(Command::Ping),
+        _ => Err(BackendErrorKind::UnknownOSCPath.into())
     }
 }
 
@@ -56,14 +52,25 @@ impl UdpCodec for SqaWireCodec {
     type In = RecvMessage;
     type Out = SendMessage;
     fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> ::std::io::Result<Self::In> {
-        let mut decoder = Deserializer::new(buf);
+        let pkt = match decoder::decode(buf) {
+            Ok(pkt) => {
+                match pkt {
+                    OscPacket::Message(m) => parse_osc_message(m),
+                    _ => Err(BackendErrorKind::UnsupportedOSCBundle.into())
+                }
+            },
+            Err(e) => Err(e.into())
+        };
         Ok(RecvMessage {
             addr: src.clone(),
-            pkt: Deserialize::deserialize(&mut decoder)
+            pkt: pkt
         })
     }
     fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> SocketAddr {
-        let _ = msg.pkt.serialize(&mut Serializer::new(buf));
-        msg.addr
+        let SendMessage { pkt, addr } = msg;
+        if let Ok(b) = encoder::encode(&OscPacket::Message(pkt)) {
+            ::std::mem::replace(buf, b);
+        }
+        addr
     }
 }
