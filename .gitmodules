@@ -1,0 +1,3 @@
+[submodule "rosc"]
+	path = rosc
+	url = https://github.com/klingtnet/rosc
