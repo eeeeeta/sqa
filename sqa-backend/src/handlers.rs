@@ -8,7 +8,9 @@ use tokio_core::net::{UdpFramed, UdpSocket};
 use tokio_core::reactor::Remote;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use time::{Duration, SteadyTime};
-use rosc::OscMessage;
+use serde::Serialize;
+use serde_json;
+use rosc::{OscType, OscMessage};
 use errors::*;
 use std::io::Result as IoResult;
 
@@ -35,7 +37,8 @@ pub struct ConnData<M> {
     pub internal_tx: Sender<M>,
     pub parties: Vec<Party>,
     pub remote: Remote,
-    pub addr: SocketAddr
+    pub addr: SocketAddr,
+    pub path: String
 }
 impl<M> ConnData<M> {
     pub fn send_raw(&mut self, msg: SendMessage) -> IoResult<()> {
@@ -44,6 +47,16 @@ impl<M> ConnData<M> {
     }
     pub fn respond(&mut self, msg: OscMessage) -> IoResult<()> {
         self.framed.start_send(self.addr.msg_to(msg))?;
+        Ok(())
+    }
+    pub fn reply<T>(&mut self, data: T) -> IoResult<()> where T: Serialize {
+        let j = serde_json::to_string(&data).unwrap(); // FIXME FIXME FIXME
+        let mut path = String::from("/reply");
+        path.push_str(&self.path);
+        self.framed.start_send(self.addr.msg_to(OscMessage {
+            addr: path,
+            args: Some(vec![OscType::String(j)])
+        }))?;
         Ok(())
     }
 /*    pub fn register_interest(&mut self) -> IoResult<oneshot::Receiver<bool>> {
@@ -81,10 +94,11 @@ pub struct Connection<H> where H: ConnHandler {
     data: ConnData<H::Message>
 }
 impl<H> Connection<H> where H: ConnHandler {
-    fn on_external(&mut self, addr: SocketAddr, pkt: BackendResult<Command>) -> BackendResult<()> {
+    fn on_external(&mut self, addr: SocketAddr, pkt: BackendResult<(String, Command)>) -> BackendResult<()> {
         match pkt {
-            Ok(pkt) => {
+            Ok((path, pkt)) => {
                 self.data.addr = addr;
+                self.data.path = path;
                 self.hdlr.external(&mut self.data, pkt);
             },
             Err(e) => {
@@ -135,7 +149,8 @@ impl<H> Connection<H> where H: ConnHandler {
                 internal_rx: rx,
                 parties: vec![],
                 remote: remote,
-                addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)
+                addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+                path: String::new()
             },
             hdlr: handler
         }

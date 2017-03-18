@@ -10,6 +10,9 @@ error_chain! {
         OSC(t: String) {
             display("OSC error: {}", t)
         }
+        Uuid(t: String) {
+            display("Error parsing UUID: {}", t)
+        }
         UnsupportedOSCCommand(t: String) {
             description("Unsupported OSC command provided")
                 display("Unsupported OSC command: {}", t)
@@ -28,5 +31,10 @@ error_chain! {
 impl From<::rosc::OscError> for BackendError {
     fn from(e: ::rosc::OscError) -> BackendError {
         BackendErrorKind::OSC(format!("{:?}", e)).into()
+    }
+}
+impl From<::uuid::ParseError> for BackendError {
+    fn from(e: ::uuid::ParseError) -> BackendError {
+        BackendErrorKind::Uuid(format!("{:?}", e)).into()
     }
 }

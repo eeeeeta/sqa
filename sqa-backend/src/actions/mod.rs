@@ -1,4 +1,4 @@
-use futures::{future, Future};
+use futures::Future;
 use std::error::Error;
 use std::path::PathBuf;
 use std::any::Any;
@@ -7,52 +7,18 @@ use time::Duration;
 use std::borrow::Cow;
 use sqa_engine::sync::AudioThreadMessage;
 use state::Context;
-
+use rosc::OscType;
+use errors::*;
+use serde::{Serialize, Deserialize};
+use std::fmt::Debug;
 mod audio;
 
-#[derive(Serialize, Deserialize)]
-pub enum Value {
-    Volume(f32),
-    Path(PathBuf),
-    String(String),
-    U32(u32),
-    I32(i32),
-    PlaybackState(PlaybackState)
-}
-macro_rules! value_impl {
-    ($impl:ident, $variant:ident, $ty:ty) => {
-        impl Value {
-            fn $impl(self) -> Option<$ty> {
-                match self {
-                    Value::$variant(v) => Some(v),
-                    _ => None
-                }
-            }
-        }
-        impl From<$ty> for Value {
-            fn from(v: $ty) -> Self {
-                Value::$variant(v)
-            }
-        }
-    }
-}
-value_impl!(volume, Volume, f32);
-value_impl!(path, Path, PathBuf);
-value_impl!(string, String, String);
-value_impl!(u32, U32, u32);
-value_impl!(i32, I32, i32);
-value_impl!(playbackstate, PlaybackState, PlaybackState);
-#[derive(Serialize, Deserialize)]
-pub struct Parameter {
-    val: Option<Value>,
-    desc: Cow<'static, str>,
-    name: Cow<'static, str>
-}
 #[derive(Serialize, Deserialize)]
 pub struct ParameterError {
     name: Cow<'static, str>,
     err: String
 }
+
 #[derive(Serialize, Deserialize)]
 pub enum PlaybackState {
     Inactive,
@@ -64,12 +30,17 @@ pub enum PlaybackState {
 }
 pub type ActionFuture = Box<Future<Item=(), Error=Box<Error>>>;
 pub type LoadFuture = Box<Future<Item=Box<Any>, Error=Box<Error + Send>>>;
+pub trait OscEditable {
+    fn edit(&mut self, path: &str, args: Vec<OscType>) -> BackendResult<()>;
+}
 pub trait ActionController {
+    type Parameters: Serialize + Deserialize + Clone + Debug;
+
     fn desc(&self) -> String;
-    fn get_params(&self) -> Vec<Parameter>;
-    fn set_param(&mut self, &str, Option<Value>) -> bool;
+    fn get_params(&self) -> &Self::Parameters;
+    fn set_params(&mut self, Self::Parameters);
     fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError>;
-    fn load(&mut self, ctx: &mut Context) -> Result<Option<LoadFuture>, Box<Error>> {
+    fn load(&mut self, _ctx: &mut Context) -> Result<Option<LoadFuture>, Box<Error>> {
         Ok(None)
     }
     fn loaded(&mut self, &mut Context, Box<Any>) -> Result<(), Box<Error>> {
@@ -82,34 +53,36 @@ pub trait ActionController {
     fn accept_message(&mut self, Box<Any>) -> Result<(), Box<Error>> {
         Err("this ActionController isn't expecting any messages!".into())
     }
-    fn accept_audio_message(&mut self, msg: &mut AudioThreadMessage) -> bool {
+    fn accept_audio_message(&mut self, _msg: &mut AudioThreadMessage) -> bool {
         false
     }
 }
-#[derive(Serialize, Deserialize)]
 pub enum ActionType {
-    Audio,
-    NotAudio
+    Audio(audio::Controller),
 }
 pub struct Action {
-    ctl: Box<ActionController>,
     state: PlaybackState,
-    typ: ActionType,
+    ctl: ActionType,
     uu: Uuid
 }
 impl Action {
+    pub fn new_audio() -> Self {
+        Action {
+            state: PlaybackState::Inactive,
+            ctl: ActionType::Audio(audio::Controller::new()),
+            uu: Uuid::new_v4()
+        }
+    }
     pub fn accept_audio_message(&mut self, msg: &mut AudioThreadMessage) -> bool {
-        if let ActionType::Audio = self.typ {
-            self.ctl.accept_audio_message(msg)
-        }
-        else {
-            false
-        }
+        unimplemented!()
     }
     pub fn state_change(&mut self, ps: PlaybackState) {
         self.state = ps;
     }
     pub fn message(&mut self, msg: Box<Any>) -> Result<(), Box<Error>> {
-        self.ctl.accept_message(msg)
+        unimplemented!()
+    }
+    pub fn uuid(&self) -> Uuid {
+        self.uu
     }
 }

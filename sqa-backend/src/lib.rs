@@ -1,5 +1,5 @@
 #![recursion_limit = "1024"]
-#![feature(slice_patterns)]
+#![feature(slice_patterns, advanced_slice_patterns)]
 extern crate futures;
 extern crate tokio_core;
 extern crate serde;

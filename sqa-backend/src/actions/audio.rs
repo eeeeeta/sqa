@@ -2,7 +2,7 @@
 
 use sqa_engine::{PlainSender, Sender};
 use sqa_ffmpeg::MediaFile;
-use super::{Parameter, Value, ParameterError, ActionFuture, LoadFuture, ActionController};
+use super::{ParameterError, ActionFuture, LoadFuture, ActionController};
 use state::Context;
 use futures::future;
 use futures::Future;
@@ -12,37 +12,42 @@ use futures::sync::{mpsc, oneshot};
 use std::thread;
 use std::panic;
 pub struct Controller {
-    url: Option<String>,
+    params: AudioParams,
     senders: Vec<PlainSender>
 }
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AudioParams {
+    url: Option<String>
+}
+
 impl Controller {
     fn load(file: MediaFile) -> Result<Vec<PlainSender>, Box<Error + Send>> {
         unimplemented!()
     }
+    pub fn new() -> Self {
+        Controller {
+            params: AudioParams {
+                url: None
+            },
+            senders: vec![]
+        }
+    }
 }
 impl ActionController for Controller {
+    type Parameters = AudioParams;
+
     fn desc(&self) -> String {
-        format!("Play audio at {}", self.url.as_ref().map(|x| x as &str).unwrap_or("???"))
+        format!("Play audio at {}", self.params.url.as_ref().map(|x| x as &str).unwrap_or("???"))
     }
-    fn get_params(&self) -> Vec<Parameter> {
-        vec![
-            Parameter {
-                val: self.url.as_ref().map(|x| x.clone().into()),
-                desc: "URL to play".into(),
-                name: "url".into()
-            }
-        ]
+    fn get_params(&self) -> &AudioParams {
+        &self.params
     }
-    fn set_param(&mut self, id: &str, val: Option<Value>) -> bool {
-        match id {
-            "url" => self.url = val.map(|x| x.string().unwrap()),
-            _ => return false
-        }
-        true
+    fn set_params(&mut self, p: AudioParams) {
+        self.params = p;
     }
     fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError> {
         let mut ret = vec![];
-        if let Some(ref st) = self.url {
+        if let Some(ref st) = self.params.url {
             let mf = MediaFile::new(&mut ctx.media, &st);
             if let Err(e) = mf {
                 ret.push(ParameterError {
@@ -61,7 +66,7 @@ impl ActionController for Controller {
     }
     fn load(&mut self, ctx: &mut Context) -> Result<Option<LoadFuture>, Box<Error>> {
         let (tx, rx) = oneshot::channel();
-        let url = self.url.clone().unwrap();
+        let url = self.params.url.clone().unwrap();
         let mf = MediaFile::new(&mut ctx.media, &url)?;
         thread::spawn(move || {
             tx.complete(panic::catch_unwind(|| {

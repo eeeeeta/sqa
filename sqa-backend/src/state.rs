@@ -5,6 +5,7 @@ use std::any::Any;
 use uuid::Uuid;
 use handlers::{ConnHandler, ConnData};
 use codec::{Command};
+use rosc::OscMessage;
 use std::net::SocketAddr;
 use sqa_engine::EngineContext;
 use std::collections::HashMap;
@@ -51,6 +52,17 @@ impl ConnHandler for Context {
         match c {
             Ping => {
                 d.respond("/pong".into());
+            },
+            CreateAction { typ } => {
+                d.reply::<Result<Uuid, String>>(match &*typ {
+                    "audio" => {
+                        let act = Action::new_audio();
+                        let uu = act.uuid();
+                        self.actions.insert(uu, act);
+                        Ok(uu)
+                    },
+                    _ => Err("stuff you".into())
+                });
             },
             _ => {}
         }

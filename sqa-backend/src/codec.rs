@@ -2,20 +2,29 @@ use std::net::SocketAddr;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Deserializer, Serializer};
 use tokio_core::net::UdpCodec;
-use rosc::{decoder, encoder, OscMessage, OscPacket};
+use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
 use errors::*;
+use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub enum Command {
-    /// /ping
+    /// /ping -> /pong
     Ping,
     /// /pong
     Pong,
+    /// /create {type} -> /reply/create UUID
+    CreateAction { typ: String },
+    /// /action/{uuid} -> /reply/action/{uuid} {parameters}
+    ActionParams { uuid: Uuid },
+    /// /action/{uuid}/update {parameters} -> /reply/action/{uuid}/update
+    UpdateActionParams { uuid: Uuid, params: String },
+    /// /action/{uuid}/{method} {???} -> ???
+    ActionMethod { uuid: Uuid, path: Vec<String>, args: Vec<OscType> }
 }
 #[derive(Debug)]
 pub struct RecvMessage {
     pub addr: SocketAddr,
-    pub pkt: BackendResult<Command>
+    pub pkt: BackendResult<(String, Command)>
 }
 #[derive(Debug)]
 pub struct SendMessage {
@@ -35,14 +44,47 @@ impl SendMessageExt for SocketAddr {
         }
     }
 }
-fn parse_osc_message(m: OscMessage) -> BackendResult<Command> {
-    let OscMessage { addr, args } = m;
+fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Command> {
     let path: Vec<&str> = (&addr).split("/").collect();
+    let mut args = if let Some(a) = args { a } else { vec![] };
     if path.len() < 2 {
         bail!(BackendErrorKind::MalformedOSCPath);
     }
-    match path[1] {
-        "ping" => Ok(Command::Ping),
+    match &path[1..] {
+        &["ping"] => Ok(Command::Ping),
+        &["create"] => {
+            if args.len() != 1 {
+                bail!(BackendErrorKind::MalformedOSCPath);
+            }
+            if let Some(x) = args.remove(0).string() {
+                Ok(Command::CreateAction { typ: x })
+            }
+            else {
+                bail!(BackendErrorKind::MalformedOSCPath);
+            }
+        },
+        &["action", uuid] => {
+            let uuid = Uuid::parse_str(uuid)?;
+            Ok(Command::ActionParams { uuid: uuid })
+        },
+        &["action", uuid, cmd, ref a..] => {
+            let uuid = Uuid::parse_str(uuid)?;
+            match cmd {
+                "update" => {
+                    if let Some(x) = args.remove(0).string() {
+                        Ok(Command::UpdateActionParams { uuid: uuid, params: x })
+                    }
+                    else {
+                        bail!(BackendErrorKind::MalformedOSCPath);
+                    }
+                },
+                _ => {
+                    // hooray for iterators!
+                    let path = [cmd].iter().chain(a.iter()).map(|s| s.to_string()).collect();
+                    Ok(Command::ActionMethod { uuid: uuid, path: path, args: args })
+                }
+            }
+        },
         _ => Err(BackendErrorKind::UnknownOSCPath.into())
     }
 }
@@ -55,7 +97,13 @@ impl UdpCodec for SqaWireCodec {
         let pkt = match decoder::decode(buf) {
             Ok(pkt) => {
                 match pkt {
-                    OscPacket::Message(m) => parse_osc_message(m),
+                    OscPacket::Message(m) => {
+                        let OscMessage { addr, args } = m;
+                        match parse_osc_message(&addr, args) {
+                            Ok(r) => Ok((addr, r)),
+                            Err(e) => Err(e)
+                        }
+                    },
                     _ => Err(BackendErrorKind::UnsupportedOSCBundle.into())
                 }
             },

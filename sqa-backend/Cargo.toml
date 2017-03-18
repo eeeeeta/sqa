@@ -9,7 +9,7 @@ futures = "0.1"
 serde = "0.9"
 serde_derive = "0.9"
 time = "0.1"
-uuid = "0.4"
+uuid = { version = "0.4", features = ["v4", "serde"] }
 sqa-engine = { path = "../sqa-engine" }
 sqa-ffmpeg = { path = "../sqa-ffmpeg" }
 rosc = { path = "../rosc" }
