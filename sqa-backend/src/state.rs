@@ -61,8 +61,27 @@ impl ConnHandler for Context {
                         self.actions.insert(uu, act);
                         Ok(uu)
                     },
-                    _ => Err("stuff you".into())
+                    _ => Err("Unknown action type".into())
                 });
+            },
+            ActionParams { uuid } => {
+                d.reply::<Result<String, String>>(match self.actions.get(&uuid) {
+                    Some(a) => {
+                        a.get_params().map_err(|e| e.to_string())
+                    },
+                    _ => Err("No action found".into())
+                });
+            },
+            UpdateActionParams { uuid, params } => {
+                d.reply::<Result<(), String>>(match self.actions.get_mut(&uuid) {
+                    Some(a) => {
+                        a.set_params(&params).map_err(|e| e.to_string())
+                    },
+                    _ => Err("No action found".into())
+                });
+            },
+            DeleteAction { uuid } => {
+                d.reply::<bool>(self.actions.remove(&uuid).is_some());
             },
             _ => {}
         }

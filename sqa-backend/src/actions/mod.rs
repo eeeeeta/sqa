@@ -11,6 +11,7 @@ use rosc::OscType;
 use errors::*;
 use serde::{Serialize, Deserialize};
 use std::fmt::Debug;
+use serde_json;
 mod audio;
 
 #[derive(Serialize, Deserialize)]
@@ -78,6 +79,20 @@ impl Action {
     }
     pub fn state_change(&mut self, ps: PlaybackState) {
         self.state = ps;
+    }
+    pub fn get_params(&self) -> BackendResult<String> {
+        match self.ctl {
+            ActionType::Audio(ref a) => serde_json::to_string(a.get_params()).map_err(|e| e.into())
+        }
+    }
+    pub fn set_params(&mut self, data: &str) -> BackendResult<()> {
+        match self.ctl {
+            ActionType::Audio(ref mut a) => {
+                let data = serde_json::from_str(data)?;
+                a.set_params(data);
+                Ok(())
+            }
+        }
     }
     pub fn message(&mut self, msg: Box<Any>) -> Result<(), Box<Error>> {
         unimplemented!()

@@ -18,6 +18,8 @@ pub enum Command {
     ActionParams { uuid: Uuid },
     /// /action/{uuid}/update {parameters} -> /reply/action/{uuid}/update
     UpdateActionParams { uuid: Uuid, params: String },
+    /// /action/{uuid}/delete -> /reply/action/{uuid}/delete
+    DeleteAction { uuid: Uuid },
     /// /action/{uuid}/{method} {???} -> ???
     ActionMethod { uuid: Uuid, path: Vec<String>, args: Vec<OscType> }
 }
@@ -77,6 +79,9 @@ fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Co
                     else {
                         bail!(BackendErrorKind::MalformedOSCPath);
                     }
+                },
+                "delete" => {
+                    Ok(Command::DeleteAction { uuid: uuid })
                 },
                 _ => {
                     // hooray for iterators!
