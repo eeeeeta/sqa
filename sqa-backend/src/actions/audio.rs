@@ -1,9 +1,9 @@
 //! Plays back an audio file.
 
-use sqa_engine::{PlainSender, Sender};
+use sqa_engine::{PlainSender, BufferSender, Sender};
 use sqa_ffmpeg::MediaFile;
-use super::{ParameterError, ActionFuture, LoadFuture, ActionController};
-use state::Context;
+use super::{ParameterError, ControllerParams, ActionController};
+use state::{ServerMessage, ActionContext};
 use futures::future;
 use futures::Future;
 use std::error::Error;
@@ -11,6 +11,7 @@ use std::any::Any;
 use futures::sync::{mpsc, oneshot};
 use std::thread;
 use std::panic;
+use errors::*;
 pub struct Controller {
     params: AudioParams,
     senders: Vec<PlainSender>
@@ -21,9 +22,6 @@ pub struct AudioParams {
 }
 
 impl Controller {
-    fn load(file: MediaFile) -> Result<Vec<PlainSender>, Box<Error + Send>> {
-        unimplemented!()
-    }
     pub fn new() -> Self {
         Controller {
             params: AudioParams {
@@ -45,10 +43,10 @@ impl ActionController for Controller {
     fn set_params(&mut self, p: AudioParams) {
         self.params = p;
     }
-    fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError> {
+    fn verify_params(&self, ctx: ActionContext) -> Vec<ParameterError> {
         let mut ret = vec![];
         if let Some(ref st) = self.params.url {
-            let mf = MediaFile::new(&mut ctx.media, &st);
+            let mf = MediaFile::new(ctx.media, &st);
             if let Err(e) = mf {
                 ret.push(ParameterError {
                     name: "url".into(),
@@ -64,32 +62,40 @@ impl ActionController for Controller {
         }
         ret
     }
-    fn load(&mut self, ctx: &mut Context) -> Result<Option<LoadFuture>, Box<Error>> {
-        let (tx, rx) = oneshot::channel();
+    fn load(&mut self, params: ControllerParams) -> BackendResult<bool> {
         let url = self.params.url.clone().unwrap();
-        let mf = MediaFile::new(&mut ctx.media, &url)?;
+        let mut mf = MediaFile::new(params.ctx.media, &url)?;
+        let mut senders: Vec<BufferSender> = (0..mf.channels())
+            .map(|_| params.ctx.engine.new_sender(mf.sample_rate() as u64))
+            .collect();
+        for (i, s) in senders.iter_mut().enumerate() {
+            if params.ctx.engine.chans.get(i).is_some() {
+                s.set_output_patch(i);
+            }
+        }
+        let plains: Vec<PlainSender> = senders.iter()
+            .map(|s| s.make_plain())
+            .collect();
         thread::spawn(move || {
-            tx.complete(panic::catch_unwind(|| {
-                Controller::load(mf)
-            }));
-        });
-        let fut = rx.map_err(|c| {
-            panic!("wat")
-        }).and_then(|res| {
-            match res {
-                Ok(x) => match x {
-                    Ok(y) => Ok(Box::new(y) as _),
-                    Err(e) => Err(e)
-                },
-                Err(e) => Err(Box::new(::std::io::Error::new(::std::io::ErrorKind::Other, "failure")) as _)
+            for x in &mut mf {
+                if let Ok(mut x) = x {
+                    for (i, ch) in senders.iter_mut().enumerate() {
+                        x.set_chan(i);
+                        for smpl in &mut x {
+                            ch.buf.push(smpl.f32() * 0.5);
+                        }
+                    }
+                }
             }
         });
-        Ok(Some(Box::new(fut)))
+        self.senders = plains;
+        Ok(true)
     }
-    fn loaded(&mut self, ctx: &mut Context, a: Box<Any>) -> Result<(), Box<Error>> {
-        unimplemented!()
-    }
-    fn execute(&mut self, time: u64, ctx: &mut Context) -> ActionFuture {
-        unimplemented!()
+    fn execute(&mut self, time: u64, data: Option<Box<Any>>, ctx: ControllerParams) -> BackendResult<bool> {
+        for sender in self.senders.iter_mut() {
+            sender.set_start_time(time);
+            sender.set_active(true);
+        }
+        Ok(true)
     }
 }

@@ -21,7 +21,13 @@ pub enum Command {
     /// /action/{uuid}/delete -> /reply/action/{uuid}/delete
     DeleteAction { uuid: Uuid },
     /// /action/{uuid}/{method} {???} -> ???
-    ActionMethod { uuid: Uuid, path: Vec<String>, args: Vec<OscType> }
+    ActionMethod { uuid: Uuid, path: Vec<String>, args: Vec<OscType> },
+    /// /action/{uuid}/verify -> Vec<ParameterError>
+    VerifyAction { uuid: Uuid },
+    /// /action/{uuid}/load -> Result
+    LoadAction { uuid: Uuid },
+    /// /action/{uuid}/execute -> Result
+    ExecuteAction { uuid: Uuid }
 }
 #[derive(Debug)]
 pub struct RecvMessage {
@@ -73,6 +79,9 @@ fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Co
             let uuid = Uuid::parse_str(uuid)?;
             match cmd {
                 "update" => {
+                    if args.len() != 1 {
+                        bail!(BackendErrorKind::MalformedOSCPath);
+                    }
                     if let Some(x) = args.remove(0).string() {
                         Ok(Command::UpdateActionParams { uuid: uuid, params: x })
                     }
@@ -82,6 +91,15 @@ fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Co
                 },
                 "delete" => {
                     Ok(Command::DeleteAction { uuid: uuid })
+                },
+                "verify" => {
+                    Ok(Command::VerifyAction { uuid: uuid })
+                },
+                "load" => {
+                    Ok(Command::LoadAction { uuid: uuid })
+                },
+                "execute" => {
+                    Ok(Command::ExecuteAction { uuid: uuid })
                 },
                 _ => {
                     // hooray for iterators!

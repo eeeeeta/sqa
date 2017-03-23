@@ -2,6 +2,9 @@ error_chain! {
     types {
         BackendError, BackendErrorKind, ResultExt, BackendResult;
     }
+    links {
+        Ffmpeg(::sqa_ffmpeg::Error, ::sqa_ffmpeg::ErrorKind);
+    }
     foreign_links {
         Serde(::serde_json::Error);
         Io(::std::io::Error);

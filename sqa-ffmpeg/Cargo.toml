@@ -11,7 +11,7 @@ authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 
 [dependencies]
 ffmpeg-sys = "3.2"
-error-chain = "0.7"
+error-chain = "0.10"
 libc = "0.2.19"
 sample = "0.6.2"
 chrono = "0.2"
