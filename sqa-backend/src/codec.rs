@@ -1,9 +1,8 @@
 use std::net::SocketAddr;
-use serde::{Deserialize, Serialize};
-use serde_json::{self, Deserializer, Serializer};
 use tokio_core::net::UdpCodec;
 use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
 use errors::*;
+use errors::BackendErrorKind::*;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -56,20 +55,20 @@ fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Co
     let path: Vec<&str> = (&addr).split("/").collect();
     let mut args = if let Some(a) = args { a } else { vec![] };
     if path.len() < 2 {
-        bail!(BackendErrorKind::MalformedOSCPath);
+        bail!("Blank OSC path.");
     }
     match &path[1..] {
         &["ping"] => Ok(Command::Ping),
         &["subscribe"] => Ok(Command::Subscribe),
         &["create"] => {
             if args.len() != 1 {
-                bail!(BackendErrorKind::MalformedOSCPath);
+                bail!(OSCWrongArgs(args.len(), 1));
             }
             if let Some(x) = args.remove(0).string() {
                 Ok(Command::CreateAction { typ: x })
             }
             else {
-                bail!(BackendErrorKind::MalformedOSCPath);
+                bail!(OSCWrongType(0, "string"));
             }
         },
         &["action", uuid] => {
@@ -81,13 +80,13 @@ fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Co
             match cmd {
                 "update" => {
                     if args.len() != 1 {
-                        bail!(BackendErrorKind::MalformedOSCPath);
+                        bail!(OSCWrongArgs(args.len(), 1));
                     }
                     if let Some(x) = args.remove(0).string() {
                         Ok(Command::UpdateActionParams { uuid: uuid, params: x })
                     }
                     else {
-                        bail!(BackendErrorKind::MalformedOSCPath);
+                        bail!(OSCWrongType(0, "string"));
                     }
                 },
                 "delete" => {

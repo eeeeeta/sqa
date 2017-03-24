@@ -26,6 +26,12 @@ error_chain! {
         MalformedOSCPath {
             description("The OSC path provided was malformed.")
         }
+        OSCWrongArgs(p: usize, n: usize) {
+            display("Wrong number of arguments: {} provided, {} required", p, n)
+        }
+        OSCWrongType(n: usize, r: &'static str) {
+            display("Argument {} should be a {}", n, r)
+        }
         UnknownOSCPath {
             description("The OSC path provided was unknown.")
         }
