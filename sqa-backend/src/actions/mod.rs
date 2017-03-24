@@ -16,13 +16,13 @@ use std::fmt::Debug;
 use serde_json;
 mod audio;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ParameterError {
     name: Cow<'static, str>,
     err: String
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum PlaybackState {
     Inactive,
     Unverified(Vec<ParameterError>),
@@ -32,8 +32,8 @@ pub enum PlaybackState {
     Active,
     Errored(String)
 }
-pub struct ControllerParams<'a> {
-    ctx: ActionContext<'a>,
+pub struct ControllerParams<'a, 'b: 'a> {
+    ctx: &'a mut ActionContext<'b>,
     internal_tx: &'a IntSender,
     uuid: Uuid
 }
@@ -46,7 +46,7 @@ pub trait ActionController {
     fn desc(&self) -> String;
     fn get_params(&self) -> &Self::Parameters;
     fn set_params(&mut self, Self::Parameters);
-    fn verify_params(&self, ctx: ActionContext) -> Vec<ParameterError>;
+    fn verify_params(&self, ctx: &mut ActionContext) -> Vec<ParameterError>;
     fn load(&mut self, _ctx: ControllerParams) -> BackendResult<bool> {
         Ok(true)
     }
@@ -91,20 +91,40 @@ impl Action {
     pub fn accept_audio_message(&mut self, msg: &mut AudioThreadMessage) -> bool {
         unimplemented!()
     }
-    pub fn load(&mut self, ctx: ActionContext, sender: &IntSender) -> BackendResult<bool> {
-        action!(mut self.ctl).load(ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu })
+    pub fn load(&mut self, ctx: &mut ActionContext, sender: &IntSender) -> BackendResult<bool> {
+        let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
+        action!(mut self.ctl).load(cp)
     }
-    pub fn execute(&mut self, time: u64, ctx: ActionContext, sender: &IntSender) -> BackendResult<bool> {
+    pub fn execute(&mut self, time: u64, ctx: &mut ActionContext, sender: &IntSender) -> BackendResult<bool> {
         action!(mut self.ctl).execute(time, None, ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu })
     }
     pub fn state_change(&mut self, ps: PlaybackState) {
         self.state = ps;
     }
-    pub fn get_params(&self) -> BackendResult<String> {
-        serde_json::to_string(action!(self.ctl).get_params()).map_err(|e| e.into())
+    pub fn get_data(&mut self, ctx: &mut ActionContext) -> BackendResult<serde_json::Value> {
+        self.verify_params(ctx);
+        let state = serde_json::to_value(&self.state)?;
+        let params = serde_json::to_value(action!(self.ctl).get_params())?;
+        Ok(json!({
+            "state": state,
+            "params": params
+        }))
     }
-    pub fn verify_params(&self, ctx: ActionContext) -> Vec<ParameterError> {
-        action!(self.ctl).verify_params(ctx)
+    pub fn verify_params(&mut self, ctx: &mut ActionContext) {
+        use self::PlaybackState::*;
+        let mut new = None;
+        match self.state {
+            Unverified(..) | Inactive => new = Some(action!(self.ctl).verify_params(ctx)),
+            _ => {}
+        }
+        if let Some(vec) = new {
+            if vec.len() == 0 {
+                self.state = Inactive;
+            }
+            else {
+                self.state = Unverified(vec)
+            }
+        }
     }
     pub fn set_params(&mut self, data: &str) -> BackendResult<()> {
         match self.ctl {

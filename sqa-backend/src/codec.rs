@@ -10,12 +10,12 @@ use uuid::Uuid;
 pub enum Command {
     /// /ping -> /pong
     Ping,
-    /// /pong
-    Pong,
+    /// /subscribe -> /reply/subscribe
+    Subscribe,
     /// /create {type} -> /reply/create UUID
     CreateAction { typ: String },
-    /// /action/{uuid} -> /reply/action/{uuid} {parameters}
-    ActionParams { uuid: Uuid },
+    /// /action/{uuid} -> /reply/action/{uuid} {details}
+    ActionInfo { uuid: Uuid },
     /// /action/{uuid}/update {parameters} -> /reply/action/{uuid}/update
     UpdateActionParams { uuid: Uuid, params: String },
     /// /action/{uuid}/delete -> /reply/action/{uuid}/delete
@@ -60,6 +60,7 @@ fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Co
     }
     match &path[1..] {
         &["ping"] => Ok(Command::Ping),
+        &["subscribe"] => Ok(Command::Subscribe),
         &["create"] => {
             if args.len() != 1 {
                 bail!(BackendErrorKind::MalformedOSCPath);
@@ -73,7 +74,7 @@ fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Co
         },
         &["action", uuid] => {
             let uuid = Uuid::parse_str(uuid)?;
-            Ok(Command::ActionParams { uuid: uuid })
+            Ok(Command::ActionInfo { uuid: uuid })
         },
         &["action", uuid, cmd, ref a..] => {
             let uuid = Uuid::parse_str(uuid)?;

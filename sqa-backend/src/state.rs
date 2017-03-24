@@ -24,6 +24,21 @@ pub struct ActionContext<'a> {
     pub media: &'a mut MediaContext,
     pub remote: &'a mut Remote
 }
+macro_rules! do_with_ctx {
+    ($self:expr, $uu:expr, $clo:expr) => {{
+        match $self.actions.get_mut($uu) {
+            Some(a) => {
+                let ctx = ActionContext {
+                    engine: &mut $self.engine,
+                    media: &mut $self.media,
+                    remote: &mut $self.remote
+                };
+                $clo(a, ctx)
+            },
+            _ => Err("No action found".into())
+        }
+    }}
+}
 pub enum ServerMessage {
     Audio(AudioThreadMessage),
     ActionStateChange(Uuid, PlaybackState),
@@ -63,6 +78,10 @@ impl ConnHandler for Context {
             Ping => {
                 d.respond("/pong".into());
             },
+            Subscribe => {
+                d.subscribe();
+                d.respond("/reply/subscribe".into());
+            },
             CreateAction { typ } => {
                 d.reply::<Result<Uuid, String>>(match &*typ {
                     "audio" => {
@@ -74,67 +93,35 @@ impl ConnHandler for Context {
                     _ => Err("Unknown action type".into())
                 });
             },
-            ActionParams { uuid } => {
-                d.reply::<Result<String, String>>(match self.actions.get(&uuid) {
-                    Some(a) => {
-                        a.get_params().map_err(|e| e.to_string())
-                    },
-                    _ => Err("No action found".into())
-                });
+            ActionInfo { uuid } => {
+                d.reply::<Result<::serde_json::Value, String>>(
+                    do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
+                        a.get_data(&mut ctx).map_err(|e| e.to_string())
+                    })
+                );
             },
             UpdateActionParams { uuid, params } => {
-                d.reply::<Result<(), String>>(match self.actions.get_mut(&uuid) {
-                    Some(a) => {
-                        a.set_params(&params).map_err(|e| e.to_string())
-                    },
-                    _ => Err("No action found".into())
+                let x = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
+                    let ret = a.set_params(&params).map_err(|e| e.to_string());
+                    Self::on_action_changed(d, a, &mut ctx);
+                    ret
                 });
-            },
-            VerifyAction { uuid } => {
-                d.reply::<Result<Vec<ParameterError>, String>>({
-                   match self.actions.get_mut(&uuid) {
-                       Some(a) => {
-                            let ctx = ActionContext {
-                                engine: &mut self.engine,
-                                media: &mut self.media,
-                                remote: &mut self.remote
-                            };
-                            Ok(a.verify_params(ctx))
-                        },
-                        _ => Err("No action found".into())
-                    }
-                });
+                d.reply::<Result<(), String>>(x);
             },
             LoadAction { uuid } => {
-                let x = {
-                   match self.actions.get_mut(&uuid) {
-                       Some(a) => {
-                            let ctx = ActionContext {
-                                engine: &mut self.engine,
-                                media: &mut self.media,
-                                remote: &mut self.remote
-                            };
-                            a.load(ctx, &d.internal_tx).map_err(|e| e.to_string())
-                        },
-                        _ => Err("No action found".into())
-                    }
-                };
+                let x = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
+                    let ret = a.load(&mut ctx, &d.internal_tx).map_err(|e| e.to_string());
+                    Self::on_action_changed(d, a, &mut ctx);
+                    ret
+                });
                 d.reply::<Result<bool, String>>(x);
             },
             ExecuteAction { uuid } => {
-                let x = {
-                   match self.actions.get_mut(&uuid) {
-                       Some(a) => {
-                            let ctx = ActionContext {
-                                engine: &mut self.engine,
-                                media: &mut self.media,
-                                remote: &mut self.remote
-                            };
-                            a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), ctx, &d.internal_tx).map_err(|e| e.to_string())
-                        },
-                        _ => Err("No action found".into())
-                    }
-                };
+                let x = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
+                    let ret = a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), &mut ctx, &d.internal_tx).map_err(|e| e.to_string());
+                    Self::on_action_changed(d, a, &mut ctx);
+                    ret
+                });
                 d.reply::<Result<bool, String>>(x);
             },
             DeleteAction { uuid } => {
@@ -158,5 +145,11 @@ impl Context {
             ctx.engine.conn.connect_ports(&ctx.engine.chans[i], &port).unwrap();
         }
         ctx
+    }
+    pub fn on_action_changed(d: &mut CD, action: &mut Action, ctx: &mut ActionContext) {
+        d.broadcast::<Result<::serde_json::Value, String>>(
+            format!("/update/action/{}", action.uuid()),
+            action.get_data(ctx).map_err(|e| e.to_string())
+        );
     }
 }

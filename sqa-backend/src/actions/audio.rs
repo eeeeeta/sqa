@@ -43,7 +43,7 @@ impl ActionController for Controller {
     fn set_params(&mut self, p: AudioParams) {
         self.params = p;
     }
-    fn verify_params(&self, ctx: ActionContext) -> Vec<ParameterError> {
+    fn verify_params(&self, ctx: &mut ActionContext) -> Vec<ParameterError> {
         let mut ret = vec![];
         if let Some(ref st) = self.params.url {
             let mf = MediaFile::new(ctx.media, &st);

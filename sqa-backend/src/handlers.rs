@@ -17,6 +17,7 @@ use std::io::Result as IoResult;
 pub const INTERNAL_BUFFER_SIZE: usize = 128;
 pub const VERSION: &str = "SQA Backend alpha";
 
+#[derive(Debug)]
 pub struct Party {
     addr: SocketAddr,
     subscribed_at: SteadyTime,
@@ -59,6 +60,16 @@ impl<M> ConnData<M> {
         }))?;
         Ok(())
     }
+    pub fn subscribe(&mut self) {
+        let a = self.addr.clone();
+        self.parties.retain(|party| {
+            party.addr != a
+        });
+        self.parties.push(Party {
+            addr: a,
+            subscribed_at: SteadyTime::now()
+        });
+    }
 /*    pub fn register_interest(&mut self) -> IoResult<oneshot::Receiver<bool>> {
         if let Some((pid, pkt)) = self.party_data {
             let party = self.parties.get_mut(pid)
@@ -75,15 +86,19 @@ impl<M> ConnData<M> {
         else {
             Err(::std::io::Error::new(::std::io::ErrorKind::Other, "API used incorrectly: calling register_interest() at the wrong time"))
         }
-    }*/
-    pub fn broadcast(&mut self, msg: OscMessage) -> IoResult<usize> {
+}*/
+    pub fn broadcast<T>(&mut self, path: String, data: T) -> IoResult<usize> where T: Serialize {
         let mut n_sent = 0;
         let now = SteadyTime::now();
         self.parties.retain(|party| {
             now - party.subscribed_at <= Duration::seconds(30)
         });
+        let j = serde_json::to_string(&data).unwrap(); // FIXME FIXME FIXME
         for party in self.parties.iter_mut() {
-            self.framed.start_send(party.addr.msg_to(msg.clone()))?;
+            self.framed.start_send(party.addr.msg_to(OscMessage {
+                addr: path.clone(),
+                args: Some(vec![OscType::String(j.clone())])
+            }))?;
             n_sent += 1;
         }
         Ok(n_sent)
@@ -100,9 +115,17 @@ impl<H> Connection<H> where H: ConnHandler {
                 self.data.addr = addr;
                 self.data.path = path;
                 self.hdlr.external(&mut self.data, pkt);
+                for party in self.data.parties.iter_mut() {
+                    if party.addr == self.data.addr {
+                        party.subscribed_at = SteadyTime::now();
+                    }
+                }
             },
             Err(e) => {
-                self.data.framed.start_send(addr.msg_to("/error/deserfail".into()))?;
+                self.data.framed.start_send(addr.msg_to(OscMessage {
+                    addr: "/error/deserfail".into(),
+                    args: Some(vec![OscType::String(e.to_string())])
+                }))?;
                 println!("Deser failed: {:?}", e);
             }
         };
