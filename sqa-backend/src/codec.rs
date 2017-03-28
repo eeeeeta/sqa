@@ -2,7 +2,9 @@ use std::net::SocketAddr;
 use tokio_core::net::UdpCodec;
 use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
 use errors::*;
+use mixer::MixerConf;
 use errors::BackendErrorKind::*;
+use serde_json;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -26,7 +28,11 @@ pub enum Command {
     /// /action/{uuid}/load -> Result
     LoadAction { uuid: Uuid },
     /// /action/{uuid}/execute -> Result
-    ExecuteAction { uuid: Uuid }
+    ExecuteAction { uuid: Uuid },
+    /// /mixer/config -> MixerConf
+    GetMixerConf,
+    /// /mixer/config/set MixerConf -> Result
+    SetMixerConf { conf: MixerConf }
 }
 #[derive(Debug)]
 pub struct RecvMessage {
@@ -74,6 +80,22 @@ fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Co
         &["action", uuid] => {
             let uuid = Uuid::parse_str(uuid)?;
             Ok(Command::ActionInfo { uuid: uuid })
+        },
+        &["mixer", "config"] => {
+            Ok(Command::GetMixerConf)
+        },
+        &["mixer", "config", "set"] => {
+            if args.len() != 1 {
+                bail!(OSCWrongArgs(args.len(), 1));
+            }
+            if let Some(x) = args.remove(0).string() {
+                let conf = serde_json::from_str(&x)?;
+                Ok(Command::SetMixerConf { conf: conf })
+            }
+            else {
+                bail!(OSCWrongType(0, "string"));
+            }
+
         },
         &["action", uuid, cmd, ref a..] => {
             let uuid = Uuid::parse_str(uuid)?;

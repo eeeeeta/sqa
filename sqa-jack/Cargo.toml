@@ -13,7 +13,7 @@ authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 jack-sys = "0.1.3"
 libc = "0.2"
 bitflags = "0.7"
-error-chain = "0.7"
+error-chain = "0.10"
 lazy_static = "0.1"
 
 [features]

@@ -16,13 +16,13 @@ use std::fmt::Debug;
 use serde_json;
 mod audio;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ParameterError {
     name: Cow<'static, str>,
     err: String
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum PlaybackState {
     Inactive,
     Unverified(Vec<ParameterError>),
@@ -49,6 +49,9 @@ pub trait ActionController {
     fn verify_params(&self, ctx: &mut ActionContext) -> Vec<ParameterError>;
     fn load(&mut self, _ctx: ControllerParams) -> BackendResult<bool> {
         Ok(true)
+    }
+    fn accept_load(&mut self, _ctx: ControllerParams, data: Box<Any>) -> BackendResult<()> {
+        Ok(())
     }
     fn execute(&mut self, time: u64, data: Option<Box<Any>>, ctx: ControllerParams) -> BackendResult<bool>;
     fn duration(&self) -> Option<Duration> {
@@ -91,12 +94,63 @@ impl Action {
     pub fn accept_audio_message(&mut self, msg: &mut AudioThreadMessage) -> bool {
         unimplemented!()
     }
-    pub fn load(&mut self, ctx: &mut ActionContext, sender: &IntSender) -> BackendResult<bool> {
+    pub fn accept_load(&mut self, ctx: &mut ActionContext, sender: &IntSender, data: Box<Any>) -> BackendResult<()> {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
-        action!(mut self.ctl).load(cp)
+        if let PlaybackState::Loading = self.state {
+            match action!(mut self.ctl).accept_load(cp, data) {
+                Ok(_) => self.state = PlaybackState::Loaded,
+                Err(e) => self.state = PlaybackState::Errored(e.to_string())
+            }
+        }
+        else {
+            bail!(format!("Wrong state for accepting load data: expected Loading, found {:?}", self.state));
+        }
+        Ok(())
     }
-    pub fn execute(&mut self, time: u64, ctx: &mut ActionContext, sender: &IntSender) -> BackendResult<bool> {
-        action!(mut self.ctl).execute(time, None, ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu })
+    pub fn load(&mut self, ctx: &mut ActionContext, sender: &IntSender) -> BackendResult<()> {
+        self.verify_params(ctx);
+        let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
+        if let PlaybackState::Inactive = self.state {
+            let x = match action!(mut self.ctl).load(cp) {
+                Ok(b) => b,
+                Err(e) => {
+                    self.state = PlaybackState::Errored(e.to_string());
+                    return Ok(())
+                }
+            };
+            if x {
+                self.state = PlaybackState::Loaded;
+            }
+            else {
+                self.state = PlaybackState::Loading;
+            }
+        }
+        else {
+            bail!(format!("Wrong state for loading: expected Inactive, found {:?}", self.state));
+        }
+        Ok(())
+    }
+    pub fn execute(&mut self, time: u64, ctx: &mut ActionContext, sender: &IntSender) -> BackendResult<()> {
+        let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
+        if let PlaybackState::Loaded = self.state {
+            let x = match action!(mut self.ctl).execute(time, None, cp) {
+                Ok(b) => b,
+                Err(e) => {
+                    self.state = PlaybackState::Errored(e.to_string());
+                    return Ok(())
+                }
+            };
+            if x {
+                self.state = PlaybackState::Inactive;
+            }
+            else {
+                self.state = PlaybackState::Active;
+            }
+        }
+        else {
+            bail!(format!("Wrong state for executing: expected Loaded, found {:?}", self.state));
+        }
+        Ok(())
     }
     pub fn state_change(&mut self, ps: PlaybackState) {
         self.state = ps;

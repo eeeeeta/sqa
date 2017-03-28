@@ -204,7 +204,8 @@ impl<T> Drop for Sender<T> {
 /// Main engine context, containing a connection to JACK.
 pub struct EngineContext {
     pub conn: JackConnection<Activated>,
-    pub chans: ArrayVec<[JackPort; MAX_CHANS]>,
+    pub chans: ArrayVec<[Option<JackPort>; MAX_CHANS]>,
+    pub holes: ArrayVec<[usize; MAX_CHANS]>,
     length: Arc<AtomicUsize>,
     control: Producer<thread::AudioThreadCommand>,
     rx: Option<sync::AudioThreadHandle>
@@ -221,6 +222,7 @@ impl EngineContext {
         let dctx = thread::DeviceContext {
             players: ArrayVec::new(),
             chans: ArrayVec::new(),
+            holes: ArrayVec::new(),
             control: c,
             length: len.clone(),
             sample_rate: conn.sample_rate() as u64,
@@ -234,6 +236,7 @@ impl EngineContext {
         Ok(EngineContext {
             conn: conn,
             chans: ArrayVec::new(),
+            holes: ArrayVec::new(),
             length: len,
             control: p,
             rx: Some(rc)
@@ -257,12 +260,28 @@ impl EngineContext {
     }
     pub fn new_channel(&mut self, name: &str) -> EngineResult<usize> {
         let port = self.conn.register_port(name, PORT_IS_OUTPUT | PORT_IS_TERMINAL)?;
-        if self.chans.len() == self.chans.capacity() {
+        if (self.chans.len() - self.holes.len()) == self.chans.capacity() - 1 {
             Err(ErrorKind::LimitExceeded)?
         }
+        let ret;
+        if let Some(ix) = self.holes.remove(0) {
+            ret = ix;
+        }
+        else {
+            ret = self.chans.len();
+        }
         self.control.push(thread::AudioThreadCommand::AddChannel(port.clone()));
-        self.chans.push(port);
-        Ok(self.chans.len()-1)
+        self.chans.push(Some(port));
+        Ok(ret)
+    }
+    pub fn remove_channel(&mut self, idx: usize) -> EngineResult<()> {
+        if idx >= self.chans.len() || self.holes.contains(&idx) {
+            Err(ErrorKind::NoSuchChannel)?
+        }
+        self.chans.push(None);
+        self.holes.push(idx);
+        self.conn.unregister_port(self.chans.swap_remove(idx).unwrap().unwrap())?;
+        Ok(())
     }
     pub fn new_sender(&mut self, sample_rate: u64) -> BufferSender {
         let (p, c) = bounded_spsc_queue::make(STREAM_BUFFER_SIZE);

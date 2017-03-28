@@ -12,20 +12,23 @@ use futures::sync::{mpsc, oneshot};
 use std::thread;
 use std::panic;
 use errors::*;
+use uuid::Uuid;
 pub struct Controller {
     params: AudioParams,
     senders: Vec<PlainSender>
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AudioParams {
-    url: Option<String>
+    url: Option<String>,
+    patch: Vec<Option<Uuid>>
 }
 
 impl Controller {
     pub fn new() -> Self {
         Controller {
             params: AudioParams {
-                url: None
+                url: None,
+                patch: vec![]
             },
             senders: vec![]
         }
@@ -47,11 +50,24 @@ impl ActionController for Controller {
         let mut ret = vec![];
         if let Some(ref st) = self.params.url {
             let mf = MediaFile::new(ctx.media, &st);
-            if let Err(e) = mf {
-                ret.push(ParameterError {
-                    name: "url".into(),
-                    err: format!("Error opening URL: {}", e)
-                })
+            match mf {
+                Err(e) => {
+                    ret.push(ParameterError {
+                        name: "url".into(),
+                        err: format!("Error opening URL: {}", e)
+                    })
+                },
+                _ => {}
+            }
+            for (i, ch) in self.params.patch.iter().enumerate() {
+                if let &Some(ch) = ch {
+                    if ctx.mixer.obtain_channel(&ch).is_none() {
+                        ret.push(ParameterError {
+                            name: "patch".into(),
+                            err: format!("Channel {} does not exist.", i)
+                        });
+                    }
+                }
             }
         }
         else {
@@ -66,11 +82,15 @@ impl ActionController for Controller {
         let url = self.params.url.clone().unwrap();
         let mut mf = MediaFile::new(params.ctx.media, &url)?;
         let mut senders: Vec<BufferSender> = (0..mf.channels())
-            .map(|_| params.ctx.engine.new_sender(mf.sample_rate() as u64))
+            .map(|_| params.ctx.mixer.new_sender(mf.sample_rate() as u64))
             .collect();
         for (i, s) in senders.iter_mut().enumerate() {
-            if params.ctx.engine.chans.get(i).is_some() {
-                s.set_output_patch(i);
+            if let Some(ch) = self.params.patch.get(i) {
+                if let &Some(ch) = ch {
+                    let ch = params.ctx.mixer.obtain_channel(&ch)
+                        .ok_or("One channel mysteriously disappeared")?;
+                    s.set_output_patch(ch);
+                }
             }
         }
         let plains: Vec<PlainSender> = senders.iter()

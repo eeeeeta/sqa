@@ -13,14 +13,15 @@ use actions::{Action, PlaybackState};
 use sqa_engine::sync::{AudioThreadMessage, AudioThreadHandle};
 use sqa_ffmpeg::MediaContext;
 use actions::ParameterError;
+use mixer::{MixerConf, MixerContext};
 pub struct Context {
     pub remote: Remote,
-    pub engine: EngineContext,
+    pub mixer: MixerContext,
     pub media: MediaContext,
     pub actions: HashMap<Uuid, Action>
 }
 pub struct ActionContext<'a> {
-    pub engine: &'a mut EngineContext,
+    pub mixer: &'a mut MixerContext,
     pub media: &'a mut MediaContext,
     pub remote: &'a mut Remote
 }
@@ -29,7 +30,7 @@ macro_rules! do_with_ctx {
         match $self.actions.get_mut($uu) {
             Some(a) => {
                 let ctx = ActionContext {
-                    engine: &mut $self.engine,
+                    mixer: &mut $self.mixer,
                     media: &mut $self.media,
                     remote: &mut $self.remote
                 };
@@ -114,7 +115,7 @@ impl ConnHandler for Context {
                     Self::on_action_changed(d, a, &mut ctx);
                     ret
                 });
-                d.reply::<Result<bool, String>>(x);
+                d.reply::<Result<(), String>>(x);
             },
             ExecuteAction { uuid } => {
                 let x = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
@@ -122,10 +123,17 @@ impl ConnHandler for Context {
                     Self::on_action_changed(d, a, &mut ctx);
                     ret
                 });
-                d.reply::<Result<bool, String>>(x);
+                d.reply::<Result<(), String>>(x);
             },
             DeleteAction { uuid } => {
                 d.reply::<bool>(self.actions.remove(&uuid).is_some());
+            },
+            GetMixerConf => {
+                d.reply::<MixerConf>(self.mixer.obtain_config());
+            },
+            SetMixerConf { conf } => {
+                d.reply::<Result<(), String>>(self.mixer.process_config(conf)
+                                              .map_err(|e| e.to_string()));
             },
             _ => {}
         }
@@ -135,15 +143,11 @@ impl Context {
     pub fn new(r: Remote) -> Self {
         let mut ctx = Context {
             remote: r,
-            engine: EngineContext::new(Some("SQA Backend alpha")).unwrap(),
+            mixer: MixerContext::new().unwrap(),
             actions: HashMap::new(),
             media: ::sqa_ffmpeg::init().unwrap()
         };
-        for (i, port) in ctx.engine.conn.get_ports(None, None, Some(::sqa_engine::sqa_jack::PORT_IS_INPUT | ::sqa_engine::sqa_jack::PORT_IS_PHYSICAL)).unwrap().into_iter().enumerate() {
-            let st = format!("channel {}", i);
-            ctx.engine.new_channel(&st).unwrap();
-            ctx.engine.conn.connect_ports(&ctx.engine.chans[i], &port).unwrap();
-        }
+        ctx.mixer.default_config().unwrap();
         ctx
     }
     pub fn on_action_changed(d: &mut CD, action: &mut Action, ctx: &mut ActionContext) {

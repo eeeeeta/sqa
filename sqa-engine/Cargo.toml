@@ -15,7 +15,7 @@ sqa-bounded-spsc-queue = "0.2"
 time = "0.1"
 arrayvec = { version = "0.3", features = ["use_union"] }
 hound = "3.0"
-error-chain = "0.7"
+error-chain = "0.10"
 parking_lot = "0.3"
 uuid = { version = "0.3", features = ["v4"] }
 

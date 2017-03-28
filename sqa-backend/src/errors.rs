@@ -4,6 +4,8 @@ error_chain! {
     }
     links {
         Ffmpeg(::sqa_ffmpeg::Error, ::sqa_ffmpeg::ErrorKind);
+        Engine(::sqa_engine::errors::Error, ::sqa_engine::errors::ErrorKind);
+        Jack(::sqa_engine::sqa_jack::errors::Error, ::sqa_engine::sqa_jack::errors::ErrorKind);
     }
     foreign_links {
         Serde(::serde_json::Error);

@@ -1,5 +1,5 @@
 #![recursion_limit = "1024"]
-#![feature(slice_patterns, advanced_slice_patterns)]
+#![feature(slice_patterns, advanced_slice_patterns, retain_hash_collection)]
 extern crate futures;
 extern crate tokio_core;
 extern crate serde;
@@ -20,6 +20,7 @@ pub mod handlers;
 pub mod actions;
 pub mod state;
 pub mod errors;
+pub mod mixer;
 
 use handlers::Connection;
 use state::Context;
@@ -34,6 +35,4 @@ pub fn main() {
     let conn = Connection::new(sock, core.remote(), ctx);
     println!("[+] SQA Backend is up & running!");
     core.run(conn).unwrap();
-}
-pub fn client() {
 }

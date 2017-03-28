@@ -34,6 +34,7 @@ impl Drop for Player {
 pub enum AudioThreadCommand {
     AddPlayer(Player),
     AddChannel(JackPort),
+    RemoveChannel(usize)
 }
 
 /// A channel in the device context.
@@ -46,10 +47,12 @@ pub struct DeviceChannel {
     /// The time that this channel was last zeroed out.
     zeroed_t: u64
 }
+
 /// Audio thread handler.
 pub struct DeviceContext {
     pub players: ArrayVec<[Player; MAX_PLAYERS]>,
-    pub chans: ArrayVec<[DeviceChannel; MAX_CHANS]>,
+    pub chans: ArrayVec<[Option<DeviceChannel>; MAX_CHANS]>,
+    pub holes: ArrayVec<[usize; MAX_CHANS]>,
     pub control: Consumer<AudioThreadCommand>,
     pub length: Arc<AtomicUsize>,
     pub sender: AudioThreadSender,
@@ -72,8 +75,19 @@ impl DeviceContext {
                 }
             },
             AudioThreadCommand::AddChannel(p) => {
-                self.chans.push(DeviceChannel { port: p, written_t: 0, zeroed_t: 0 });
-            }
+                let ch = DeviceChannel { port: p, written_t: 0, zeroed_t: 0 };
+                if let Some(ix) = self.holes.remove(0) {
+                    self.chans[ix] = Some(ch);
+                }
+                else {
+                    self.chans.push(Some(ch));
+                }
+            },
+            AudioThreadCommand::RemoveChannel(ch) => {
+                self.chans.push(None);
+                self.chans.swap_remove(ch);
+                self.holes.push(ch);
+            },
         }
     }
 }
@@ -104,7 +118,7 @@ impl JackHandler for DeviceContext {
                 continue;
             }
             let outpatch = player.output_patch.load(Relaxed);
-            if outpatch >= self.chans.len() {
+            if outpatch >= self.chans.len() || self.chans[outpatch].is_none() {
                 self.sender.send(PlayerInvalidOutpatch(player.uuid));
                 player.active.store(false, Relaxed);
                 continue;
@@ -131,10 +145,11 @@ impl JackHandler for DeviceContext {
             let vol = unsafe {
                 ::std::mem::transmute::<u32, f32>(vol)
             };
-            if let Some(buf) = out.get_port_buffer(&self.chans[outpatch].port) {
-                let written = time == self.chans[outpatch].written_t;
+            let ch = self.chans[outpatch].as_mut().unwrap();
+            if let Some(buf) = out.get_port_buffer(&ch.port) {
+                let written = time == ch.written_t;
                 if !written {
-                    self.chans[outpatch].written_t = time;
+                    ch.written_t = time;
                 }
                 for x in buf.iter_mut() {
                     if let Some(data) = player.buf.try_pop() {
@@ -157,13 +172,15 @@ impl JackHandler for DeviceContext {
             self.length.store(self.length.load(Relaxed) - 1, Relaxed);
         }
         for ch in self.chans.iter_mut() {
-            if ch.written_t != time && ch.zeroed_t < ch.written_t {
-                if let Some(buf) = out.get_port_buffer(&ch.port) {
-                    for x in buf.iter_mut() {
-                        *x = 0.0;
+            if let &mut Some(ref mut ch) = ch {
+                if ch.written_t != time && ch.zeroed_t < ch.written_t {
+                    if let Some(buf) = out.get_port_buffer(&ch.port) {
+                        for x in buf.iter_mut() {
+                            *x = 0.0;
+                        }
                     }
+                    ch.zeroed_t = time;
                 }
-                ch.zeroed_t = time;
             }
         }
         self.sender.notify();

@@ -11,5 +11,8 @@ error_chain! {
             description("You have exceeded the channel or sender limit.")
                 display("Engine channel or sender limit exceeded")
         }
+        NoSuchChannel {
+            display("No such channel.")
+        }
     }
 }

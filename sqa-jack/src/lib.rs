@@ -207,7 +207,7 @@ impl<T> JackConnection<T> {
             }
         };
         match code {
-            47 => Ok(()),
+            libc::EEXIST => Ok(()),
             0 => Ok(()),
             _ => Err(ErrorKind::UnknownErrorCode("connect_or_disconnect_ports()", code))?
         }
@@ -375,8 +375,8 @@ impl<T> JackConnection<T> {
         let mine = unsafe {
             jack_port_is_mine(self.handle, port.as_ptr())
         };
-        if mine != 0 {
-            Err(ErrorKind::PortNotMine)?
+        if mine == 0 {
+           Err(ErrorKind::PortNotMine)?
         }
         let code = unsafe {
             jack_port_unregister(self.handle, port.as_ptr())
