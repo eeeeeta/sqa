@@ -1,9 +1,9 @@
 [package]
 name = "sqa-ffmpeg"
-version = "0.2.0"
+version = "0.2.1"
 description = "FFmpeg bindings for Rust (part of the SQA project)"
-documentation = "https://docs.rs/sqa-jack"
-repository = "https://github.com/eeeeeta/sqa-jack"
+documentation = "https://docs.rs/sqa-ffmpeg"
+repository = "https://github.com/eeeeeta/sqa"
 readme = "README.md"
 keywords = ["ffmpeg", "audio", "sqa"]
 license = "Unlicense"
