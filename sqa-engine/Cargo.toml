@@ -10,7 +10,7 @@ version = "0.1.0"
 authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 
 [dependencies]
-sqa-jack = { version = "0.4", path = "../sqa-jack" }
+sqa-jack = { version = "0.5", path = "../sqa-jack" }
 sqa-bounded-spsc-queue = "0.2"
 time = "0.1"
 arrayvec = { version = "0.3", features = ["use_union"] }
