@@ -6,7 +6,7 @@ repository = "https://github.com/eeeeeta/sqa-engine"
 readme = "README.md"
 keywords = ["audio", "sqa"]
 license = "GPLv3"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 
 [dependencies]

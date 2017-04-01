@@ -22,7 +22,9 @@ pub struct Player {
     pub alive: Arc<AtomicBool>,
     pub output_patch: Arc<AtomicUsize>,
     pub volume: Arc<AtomicU32>,
-    pub uuid: Uuid
+    pub uuid: Uuid,
+    pub half_sent: bool,
+    pub empty_sent: bool
 }
 impl Drop for Player {
     fn drop(&mut self) {
@@ -118,11 +120,6 @@ impl JackHandler for DeviceContext {
                 continue;
             }
             let outpatch = player.output_patch.load(Relaxed);
-            if outpatch >= self.chans.len() || self.chans[outpatch].is_none() {
-                self.sender.send(PlayerInvalidOutpatch(player.uuid));
-                player.active.store(false, Relaxed);
-                continue;
-            }
             let start_time = player.start_time.load(Relaxed);
             if start_time > time {
                 player.position.store(0, Relaxed);
@@ -134,12 +131,24 @@ impl JackHandler for DeviceContext {
                 pos += player.buf.skip_n((sample_delta - pos) as usize) as u64;
             }
             if pos < sample_delta || player.buf.size() < out.nframes() as usize {
-                self.sender.send(PlayerBufEmpty(player.uuid));
+                if !player.empty_sent {
+                    self.sender.send(PlayerBufEmpty(player.uuid));
+                    player.empty_sent = true;
+                }
                 player.position.store(pos, Relaxed);
                 continue;
             }
-            if player.buf.size()*2 == player.buf.capacity() {
+            if player.buf.size()*2 < player.buf.capacity() && !player.half_sent {
                 self.sender.send(PlayerBufHalf(player.uuid));
+                player.half_sent = true;
+            }
+            else if player.buf.size()*2 >= player.buf.capacity() && player.half_sent {
+                player.half_sent = false;
+            }
+            if outpatch >= self.chans.len() || self.chans[outpatch].is_none() {
+                self.sender.send(PlayerInvalidOutpatch(player.uuid));
+                player.active.store(false, Relaxed);
+                continue;
             }
             let vol = player.volume.load(Relaxed);
             let vol = unsafe {

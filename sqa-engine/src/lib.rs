@@ -280,6 +280,7 @@ impl EngineContext {
         }
         self.chans.push(None);
         self.holes.push(idx);
+        self.control.push(thread::AudioThreadCommand::RemoveChannel(idx));
         self.conn.unregister_port(self.chans.swap_remove(idx).unwrap().unwrap())?;
         Ok(())
     }
@@ -293,7 +294,7 @@ impl EngineContext {
             mem::transmute::<f32, u32>(1.0)
         };
         let volume = Arc::new(AtomicU32::new(one_f32_in_u32));
-        let output_patch = Arc::new(AtomicUsize::new(MAX_CHANS));
+        let output_patch = Arc::new(AtomicUsize::new(::std::usize::MAX));
         let uu = Uuid::new_v4();
 
         self.control.push(thread::AudioThreadCommand::AddPlayer(thread::Player {
@@ -305,7 +306,9 @@ impl EngineContext {
             alive: alive.clone(),
             output_patch: output_patch.clone(),
             volume: volume.clone(),
-            uuid: uu
+            uuid: uu,
+            half_sent: false,
+            empty_sent: false
         }));
 
         Sender {
