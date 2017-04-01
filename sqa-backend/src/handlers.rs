@@ -26,6 +26,7 @@ pub trait ConnHandler {
     type Message;
     fn internal(&mut self, d: &mut ConnData<Self::Message>, m: Self::Message);
     fn external(&mut self, d: &mut ConnData<Self::Message>, p: Command);
+    fn init(&mut self, d: &mut ConnData<Self::Message>);
 }
 /*struct WaitingHandler {
     pkt: u32,
@@ -165,7 +166,7 @@ impl<H> Connection<H> where H: ConnHandler {
     pub fn new(socket: UdpSocket, remote: Remote, handler: H) -> Self {
         let framed = socket.framed(SqaWireCodec);
         let (tx, rx) = mpsc::channel::<H::Message>(INTERNAL_BUFFER_SIZE);
-        Connection {
+        let mut ret = Connection {
             data: ConnData {
                 framed: framed,
                 internal_tx: tx,
@@ -176,7 +177,9 @@ impl<H> Connection<H> where H: ConnHandler {
                 path: String::new()
             },
             hdlr: handler
-        }
+        };
+        ret.hdlr.init(&mut ret.data);
+        ret
     }
     pub fn get_internal_tx(&self) -> Sender<H::Message> {
         self.data.internal_tx.clone()

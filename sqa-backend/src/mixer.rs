@@ -2,6 +2,9 @@
 use uuid::Uuid;
 use sqa_engine::{EngineContext, BufferSender, sqa_jack};
 use std::collections::HashMap;
+use std::thread;
+use state::{ServerMessage, IntSender};
+use futures::Sink;
 use errors::*;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -30,6 +33,16 @@ impl MixerContext {
             channels: HashMap::new(),
             defs: vec![]
         })
+    }
+    pub fn start_messaging(&mut self, s: IntSender) {
+        let mut hdl = self.engine.get_handle().unwrap();
+        let mut s = s.wait();
+        thread::spawn(move || {
+            loop {
+                let msg = hdl.recv();
+                s.send(ServerMessage::Audio(msg)); // FIXME on failure?
+            }
+        });
     }
     pub fn default_config(&mut self) -> BackendResult<()> {
         for (i, port) in self.engine.conn

@@ -25,15 +25,20 @@ pub struct ActionContext<'a> {
     pub media: &'a mut MediaContext,
     pub remote: &'a mut Remote
 }
+macro_rules! ctx_from_self {
+    ($self:expr) => {
+        ActionContext {
+            mixer: &mut $self.mixer,
+            media: &mut $self.media,
+            remote: &mut $self.remote
+        }
+    }
+}
 macro_rules! do_with_ctx {
     ($self:expr, $uu:expr, $clo:expr) => {{
         match $self.actions.get_mut($uu) {
             Some(a) => {
-                let ctx = ActionContext {
-                    mixer: &mut $self.mixer,
-                    media: &mut $self.media,
-                    remote: &mut $self.remote
-                };
+                let ctx = ctx_from_self!($self);
                 $clo(a, ctx)
             },
             _ => Err("No action found".into())
@@ -43,19 +48,23 @@ macro_rules! do_with_ctx {
 pub enum ServerMessage {
     Audio(AudioThreadMessage),
     ActionStateChange(Uuid, PlaybackState),
-    ActionLoad(Uuid, Box<Any>),
-    ActionPanic(Uuid, Box<::std::error::Error>),
-    ActionCustom(Uuid, Box<Any>),
+    ActionLoad(Uuid, Box<Any+Send>),
+    ActionCustom(Uuid, Box<Any+Send>),
+    ActionWarning(Uuid, String)
 }
 pub type IntSender = ::futures::sync::mpsc::Sender<ServerMessage>;
 type CD = ConnData<ServerMessage>;
 impl ConnHandler for Context {
     type Message = ServerMessage;
-    fn internal(&mut self, _: &mut CD, m: ServerMessage) {
+    fn init(&mut self, d: &mut CD) {
+        self.mixer.start_messaging(d.internal_tx.clone());
+    }
+    fn internal(&mut self, d: &mut CD, m: ServerMessage) {
         match m {
-            ServerMessage::Audio(mut msg) => {
+            ServerMessage::Audio(msg) => {
                 for (_, act) in self.actions.iter_mut() {
-                    if act.accept_audio_message(&mut msg) {
+                    let mut ctx = ctx_from_self!(self);
+                    if act.accept_audio_message(&mut ctx, &d.internal_tx, &msg) {
                         break;
                     }
                 }

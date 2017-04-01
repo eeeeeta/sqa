@@ -53,11 +53,11 @@ pub trait ActionController {
     fn accept_load(&mut self, _ctx: ControllerParams, data: Box<Any>) -> BackendResult<()> {
         Ok(())
     }
-    fn execute(&mut self, time: u64, data: Option<Box<Any>>, ctx: ControllerParams) -> BackendResult<bool>;
+    fn execute(&mut self, time: u64, ctx: ControllerParams) -> BackendResult<bool>;
     fn duration(&self) -> Option<Duration> {
         None
     }
-    fn accept_audio_message(&mut self, _msg: &mut AudioThreadMessage) -> bool {
+    fn accept_audio_message(&mut self, _msg: &AudioThreadMessage, ctx: ControllerParams) -> bool {
         false
     }
 }
@@ -91,8 +91,9 @@ impl Action {
             uu: Uuid::new_v4()
         }
     }
-    pub fn accept_audio_message(&mut self, msg: &mut AudioThreadMessage) -> bool {
-        unimplemented!()
+    pub fn accept_audio_message(&mut self, ctx: &mut ActionContext, sender: &IntSender, msg: &AudioThreadMessage) -> bool {
+        let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
+        action!(mut self.ctl).accept_audio_message(msg, cp)
     }
     pub fn accept_load(&mut self, ctx: &mut ActionContext, sender: &IntSender, data: Box<Any>) -> BackendResult<()> {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
@@ -133,7 +134,7 @@ impl Action {
     pub fn execute(&mut self, time: u64, ctx: &mut ActionContext, sender: &IntSender) -> BackendResult<()> {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         if let PlaybackState::Loaded = self.state {
-            let x = match action!(mut self.ctl).execute(time, None, cp) {
+            let x = match action!(mut self.ctl).execute(time, cp) {
                 Ok(b) => b,
                 Err(e) => {
                     self.state = PlaybackState::Errored(e.to_string());
