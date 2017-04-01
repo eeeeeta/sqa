@@ -29,7 +29,7 @@ fn main() {
     }
     for (i, port) in ec.conn.get_ports(None, None, Some(jack::PORT_IS_INPUT | jack::PORT_IS_PHYSICAL)).unwrap().into_iter().enumerate() {
         if let Some(ch) = ec.chans.get(i) {
-            ec.conn.connect_ports(&ch, &port).unwrap();
+            ec.conn.connect_ports(ch.as_ref().unwrap(), &port).unwrap();
         }
     }
     println!("Chans: {} Sample rate: {} Duration: {} Bitrate: {}", file.channels(), file.sample_rate(), file.duration(), file.bitrate());
@@ -37,11 +37,8 @@ fn main() {
         loop {
             for x in &mut file {
                 if let Ok(mut x) = x {
-                    for (i, ch) in chans.iter_mut().enumerate() {
-                        x.set_chan(i);
-                        for smpl in &mut x {
-                            ch.1.buf.push(smpl.f32() * 0.5);
-                        }
+                    for (ch, smpl) in &mut x {
+                        chans[ch].1.buf.push(smpl.f32());
                     }
                     if x.pts() > Duration::seconds(15) {
                         break;

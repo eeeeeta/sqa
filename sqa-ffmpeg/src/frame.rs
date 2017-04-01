@@ -48,56 +48,54 @@ impl Frame {
     pub fn capacity(&self) -> usize {
         self.cap
     }
+    pub fn drained(&self) -> bool {
+        self.cur_idx >= self.cap
+    }
     pub fn channels(&self) -> usize {
         self.chans
     }
     pub fn format(&self) -> SampleFormat {
         self.format
     }
-    pub fn set_chan(&mut self, ch: usize) -> bool {
-        if ch >= self.chans {
-            false
-        }
-        else {
-            self.cur_chan = ch;
-            self.cur_idx = 0;
-            true
-        }
-    }
     pub fn pts(&self) -> Duration {
         Duration::nanoseconds((1_000_000_000f64 * self.pts) as _)
     }
 }
 impl<'a> Iterator for &'a mut Frame {
-    type Item = Sample;
-    fn next(&mut self) -> Option<Sample> {
+    type Item = (usize, Sample);
+    fn next(&mut self) -> Option<(usize, Sample)> {
+        let chan = if self.format.is_planar() {
+            self.cur_chan
+        }
+        else {
+            0
+        };
         if self.cur_idx >= self.cap {
             return None;
         }
-        let chan;
-        if self.format.is_planar() {
-            chan = self.cur_chan;
-        }
-        else {
-            chan = 0;
-            if self.cur_idx == 0 {
-                self.cur_idx += self.cur_chan;
-            }
-        }
         unsafe {
             let data = *(*self.ptr).extended_data.offset(chan as isize);
-            let ret = Some(match self.format {
+            let ret = match self.format {
                 SampleFormat::U8(_) => Sample::U8(*(data as *mut _).offset(self.cur_idx as isize)),
                 SampleFormat::S16(_) => Sample::S16(*(data as *mut _).offset(self.cur_idx as isize)),
                 SampleFormat::S32(_) => Sample::S32(*(data as *mut _).offset(self.cur_idx as isize)),
                 SampleFormat::Float(_) => Sample::Float(*(data as *mut _).offset(self.cur_idx as isize)),
                 SampleFormat::Double(_) => Sample::Double(*(data as *mut _).offset(self.cur_idx as isize)),
-            });
+            };
+            let ret = Some((self.cur_chan, ret));
             if self.format.is_planar() {
-                self.cur_idx += 1;
+                self.cur_chan += 1;
+                if self.cur_chan >= self.chans {
+                    self.cur_chan = 0;
+                    self.cur_idx += 1;
+                }
             }
             else {
-                self.cur_idx += self.chans;
+                self.cur_idx += 1;
+                self.cur_chan += 1;
+                if self.cur_chan >= self.chans {
+                    self.cur_chan = 0;
+                }
             }
             ret
         }
