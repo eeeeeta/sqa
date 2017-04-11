@@ -4,13 +4,14 @@ use sqa_jack::*;
 use arrayvec::ArrayVec;
 use super::{MAX_PLAYERS, MAX_CHANS, ONE_SECOND_IN_NANOSECONDS};
 use bounded_spsc_queue::Consumer;
-use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64, AtomicU32};
+use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64, AtomicPtr};
 use std::sync::atomic::Ordering::*;
 use std::sync::Arc;
 use uuid::Uuid;
 use time;
 use sync::AudioThreadSender;
 use sync::AudioThreadMessage::*;
+use param::Parameter;
 
 /// Holds data about one mono channel of audio, to be played back on the audio thread.
 pub struct Player {
@@ -21,7 +22,7 @@ pub struct Player {
     pub active: Arc<AtomicBool>,
     pub alive: Arc<AtomicBool>,
     pub output_patch: Arc<AtomicUsize>,
-    pub volume: Arc<AtomicU32>,
+    pub volume: Arc<AtomicPtr<Parameter<f32>>>,
     pub uuid: Uuid,
     pub half_sent: bool,
     pub empty_sent: bool
@@ -152,7 +153,7 @@ impl JackHandler for DeviceContext {
             }
             let vol = player.volume.load(Relaxed);
             let vol = unsafe {
-                ::std::mem::transmute::<u32, f32>(vol)
+                (*vol).get(time)
             };
             let ch = self.chans[outpatch].as_mut().unwrap();
             if let Some(buf) = out.get_port_buffer(&ch.port) {

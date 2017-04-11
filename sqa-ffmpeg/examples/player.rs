@@ -2,6 +2,7 @@ extern crate sqa_engine;
 extern crate sqa_ffmpeg;
 
 use sqa_engine::{EngineContext, jack, Sender};
+use sqa_engine::param::{Parameter, FadeDetails};
 use sqa_ffmpeg::{MediaFile, init, Duration};
 use std::io::{self, BufRead, Read};
 use std::thread;
@@ -57,6 +58,18 @@ fn main() {
     loop {
         thread::sleep(::std::time::Duration::new(1, 0));
         secs += 1;
-        println!("{}: {} samples - vol {}", ctls[0].position(), ctls[0].position_samples(), ctls[0].volume());
+        println!("{}: {} samples - vol {:?}", ctls[0].position(), ctls[0].position_samples(), ctls[0].volume());
+        if secs == 10 {
+            println!("*** Linear fade test commencing!");
+            let cur_vol = ctls[0].volume().get(0);
+            let mut fd = FadeDetails::new(cur_vol, 0.0);
+            fd.set_start_time(Sender::<()>::precise_time_ns() + sqa_engine::ONE_SECOND_IN_NANOSECONDS);
+            fd.set_duration(10 * sqa_engine::ONE_SECOND_IN_NANOSECONDS);
+            fd.set_active(true);
+            for ch in ctls.iter_mut() {
+                ch.set_volume(Box::new(Parameter::LinearFade(fd.clone())));
+            }
+            println!("*** The volume will fade to 0.0 over 10 seconds, commencing in 1 second.");
+        }
     }
 }

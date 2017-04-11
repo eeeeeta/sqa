@@ -20,18 +20,19 @@ extern crate uuid;
 
 pub mod errors;
 pub mod sync;
+pub mod param;
 mod thread;
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64, AtomicU32};
+use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64, AtomicPtr};
 use std::sync::atomic::Ordering::*;
 use bounded_spsc_queue::Producer;
 use arrayvec::ArrayVec;
 use std::sync::Arc;
-use std::mem;
 use time::Duration;
 use sqa_jack::*;
 pub use errors::EngineResult;
 use errors::{ErrorKind};
+use param::Parameter;
 pub use uuid::Uuid;
 pub use sqa_jack as jack;
 /// The maximum amount of streams that can play concurrently.
@@ -53,7 +54,7 @@ pub const STREAM_BUFFER_SIZE: usize = 100_000;
 /// The size of the communication buffer between audio thread and main thread, in messages.
 pub const CONTROL_BUFFER_SIZE: usize = MAX_PLAYERS * 2;
 /// One second, in nanoseconds.
-const ONE_SECOND_IN_NANOSECONDS: u64 = 1_000_000_000;
+pub const ONE_SECOND_IN_NANOSECONDS: u64 = 1_000_000_000;
 
 /// Corresponds to, and controls, a `Player` in the audio thread.
 pub struct Sender<T> {
@@ -67,8 +68,8 @@ pub struct Sender<T> {
     start_time: Arc<AtomicU64>,
     /// Which channel number this stream is patched to (rw)
     output_patch: Arc<AtomicUsize>,
-    /// The playback volume (actually a f32 transmuted!) (rw)
-    volume: Arc<AtomicU32>,
+    /// The playback volume (rw)
+    volume: Arc<AtomicPtr<Parameter<f32>>>,
     /// The buffer to write to (or not) - will be a `bounded_spsc_queue::Producer<f32>` or `()`.
     pub buf: T,
     /// The sample rate of this sender. Can differ from the output sample rate.
@@ -104,21 +105,18 @@ impl<T> Sender<T> {
         self.set_active(true);
     }
     /// Set the volume of this stream.
-    ///
-    /// This volume is linear: a value of `1.0` means 0dB.
-    pub fn set_volume(&mut self, vol: f32) {
-        let val = unsafe {
-            mem::transmute::<f32, u32>(vol)
-        };
-        self.volume.store(val, Relaxed);
+    pub fn set_volume(&mut self, vol: Box<Parameter<f32>>) {
+        let val = Box::into_raw(vol);
+        let old_ptr = self.volume.swap(val, Relaxed);
+        unsafe {
+            let _: Box<Parameter<f32>> = Box::from_raw(old_ptr);
+        }
     }
     /// Get the volume of this stream.
-    ///
-    /// This volume is linear: a value of `1.0` means 0dB.
-    pub fn volume(&self) -> f32 {
+    pub fn volume(&self) -> &Parameter<f32> {
         let val = self.volume.load(Relaxed);
         unsafe {
-            mem::transmute::<u32, f32>(val)
+            &*val
         }
     }
     /// Get whether this stream will play samples or not.
@@ -290,10 +288,8 @@ impl EngineContext {
         let alive = Arc::new(AtomicBool::new(false));
         let position = Arc::new(AtomicU64::new(0));
         let start_time = Arc::new(AtomicU64::new(0));
-        let one_f32_in_u32 = unsafe {
-            mem::transmute::<f32, u32>(1.0)
-        };
-        let volume = Arc::new(AtomicU32::new(one_f32_in_u32));
+        let default_volume = Box::new(Parameter::Raw(1.0));
+        let volume = Arc::new(AtomicPtr::new(Box::into_raw(default_volume)));
         let output_patch = Arc::new(AtomicUsize::new(::std::usize::MAX));
         let uu = Uuid::new_v4();
 
