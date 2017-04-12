@@ -3,7 +3,6 @@ use std::error::Error;
 use std::path::PathBuf;
 use std::any::Any;
 use uuid::Uuid;
-use time::Duration;
 use std::borrow::Cow;
 use sqa_engine::sync::AudioThreadMessage;
 use state::{ActionContext};
@@ -14,6 +13,7 @@ use errors::*;
 use serde::{Serialize, Deserialize};
 use std::fmt::Debug;
 use serde_json;
+use std::time::Duration;
 mod audio;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -29,7 +29,7 @@ pub enum PlaybackState {
     Loaded,
     Loading,
     Paused,
-    Active,
+    Active(Duration),
     Errored(String)
 }
 pub struct ControllerParams<'a, 'b: 'a> {
@@ -50,14 +50,18 @@ pub trait ActionController {
     fn load(&mut self, _ctx: ControllerParams) -> BackendResult<bool> {
         Ok(true)
     }
-    fn accept_load(&mut self, _ctx: ControllerParams, data: Box<Any>) -> BackendResult<()> {
+    fn accept_load(&mut self, _ctx: ControllerParams, _data: Box<Any>) -> BackendResult<()> {
         Ok(())
     }
     fn execute(&mut self, time: u64, ctx: ControllerParams) -> BackendResult<bool>;
+    fn pause(&mut self, _ctx: ControllerParams) {
+    }
+    fn reset(&mut self, _ctx: ControllerParams) {
+    }
     fn duration(&self) -> Option<Duration> {
         None
     }
-    fn accept_audio_message(&mut self, _msg: &AudioThreadMessage, ctx: ControllerParams) -> bool {
+    fn accept_audio_message(&mut self, _msg: &AudioThreadMessage, _ctx: ControllerParams) -> bool {
         false
     }
 }
@@ -145,7 +149,7 @@ impl Action {
                 self.state = PlaybackState::Inactive;
             }
             else {
-                self.state = PlaybackState::Active;
+                self.state = PlaybackState::Active(Duration::from_millis(0));
             }
         }
         else {
@@ -168,11 +172,22 @@ impl Action {
     pub fn verify_params(&mut self, ctx: &mut ActionContext) {
         use self::PlaybackState::*;
         let mut new = None;
+        let mut active = false;
         match self.state {
             Unverified(..) | Inactive => new = Some(action!(self.ctl).verify_params(ctx)),
+            Active(_) => active = true,
             _ => {}
         }
-        if let Some(vec) = new {
+        if active {
+            let dur = action!(self.ctl).duration();
+            if let Some(dur) = dur {
+                self.state = PlaybackState::Active(dur);
+            }
+            else {
+                self.state = PlaybackState::Active(Duration::from_millis(0));
+            }
+        }
+        else if let Some(vec) = new {
             if vec.len() == 0 {
                 self.state = Inactive;
             }

@@ -9,6 +9,7 @@ use std::thread;
 use futures::Sink;
 use futures::sink::Wait;
 use futures::Future;
+use std::time::Duration;
 use errors::*;
 use std::sync::mpsc::{Sender, Receiver, self};
 use uuid::Uuid;
@@ -191,6 +192,25 @@ impl ActionController for Controller {
             sender.set_active(true);
         }
         Ok(true)
+    }
+    fn pause(&mut self, _: ControllerParams) {
+        for sender in self.senders.iter_mut() {
+            sender.set_active(false);
+        }
+    }
+    fn reset(&mut self, _: ControllerParams) {
+        for _ in self.senders.drain(..) {}
+        if let Some(c) = self.control.take() {
+            c.send(SpoolerMessage::Quit);
+        }
+    }
+    fn duration(&self) -> Option<Duration> {
+        if let Some(s) = self.senders.get(0) {
+            if let Ok(d) = s.position().to_std() {
+                return Some(d);
+            }
+        }
+        None
     }
     fn accept_audio_message(&mut self, msg: &AudioThreadMessage, ctx: ControllerParams) -> bool {
         use self::AudioThreadMessage::*;

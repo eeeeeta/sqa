@@ -14,6 +14,7 @@ extern crate sqa_ffmpeg;
 extern crate rosc;
 #[macro_use]
 extern crate error_chain;
+extern crate chrono;
 
 pub mod codec;
 pub mod handlers;

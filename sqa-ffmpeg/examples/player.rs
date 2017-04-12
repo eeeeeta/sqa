@@ -41,12 +41,9 @@ fn main() {
                     for (ch, smpl) in &mut x {
                         chans[ch].1.buf.push(smpl.f32());
                     }
-                    if x.pts() > Duration::seconds(15) {
-                        break;
-                    }
                 }
             }
-            file.seek(Duration::seconds(1)).unwrap();
+            file.seek(Duration::seconds(0)).unwrap();
         }
     });
     let time = Sender::<()>::precise_time_ns();
@@ -70,6 +67,12 @@ fn main() {
                 ch.set_volume(Box::new(Parameter::LinearFade(fd.clone())));
             }
             println!("*** The volume will fade to 0.0 over 10 seconds, commencing in 1 second.");
+        }
+        if secs == 25 {
+            println!("*** Okay, returning to normal.");
+            for ch in ctls.iter_mut() {
+                ch.set_volume(Box::new(Parameter::Raw(1.0)));
+            }
         }
     }
 }
