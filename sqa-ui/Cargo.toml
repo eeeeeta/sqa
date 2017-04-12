@@ -1,0 +1,6 @@
+[package]
+name = "sqa-ui"
+version = "0.1.0"
+authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
+
+[dependencies]
