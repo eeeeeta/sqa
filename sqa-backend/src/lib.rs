@@ -23,6 +23,8 @@ pub mod state;
 pub mod errors;
 pub mod mixer;
 
+pub static VERSION: &str = "indev";
+
 use handlers::Connection;
 use state::Context;
 use tokio_core::reactor::Core;

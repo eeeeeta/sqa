@@ -4,8 +4,8 @@ use tokio_core::reactor::Remote;
 use std::any::Any;
 use uuid::Uuid;
 use handlers::{ConnHandler, ConnData};
-use codec::{Command};
-use rosc::OscMessage;
+use codec::{Command, Reply};
+use rosc::{OscMessage, OscType};
 use std::net::SocketAddr;
 use sqa_engine::EngineContext;
 use std::collections::HashMap;
@@ -86,11 +86,14 @@ impl ConnHandler for Context {
         use self::Command::*;
         match c {
             Ping => {
-                d.respond("/pong".into());
+                d.respond(Reply::Pong.into());
+            },
+            Version => {
+                d.respond(Reply::ServerVersion { ver: super::VERSION.into() }.into());
             },
             Subscribe => {
                 d.subscribe();
-                d.respond("/reply/subscribe".into());
+                d.respond(Reply::Subscribed.into());
             },
             CreateAction { typ } => {
                 d.reply::<Result<Uuid, String>>(match &*typ {

@@ -9,8 +9,10 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub enum Command {
-    /// /ping -> /pong
+    /// /ping -> Pong
     Ping,
+    /// /version -> ServerVersion
+    Version,
     /// /subscribe -> /reply/subscribe
     Subscribe,
     /// /create {type} -> /reply/create UUID
@@ -33,6 +35,43 @@ pub enum Command {
     GetMixerConf,
     /// /mixer/config/set MixerConf -> Result
     SetMixerConf { conf: MixerConf }
+}
+impl Into<OscMessage> for Command {
+    fn into(self) -> OscMessage {
+        use self::Command::*;
+        match self {
+            Ping => "/ping".into(),
+            Version => "/version".into(),
+            Subscribe => "/subscribe".into(),
+            CreateAction { typ } => OscMessage {
+                addr: "/create".into(),
+                args: Some(vec![OscType::String(typ)])
+            },
+            _ => unimplemented!()
+        }
+    }
+}
+#[derive(Debug, Clone)]
+pub enum Reply {
+    /// /pong
+    Pong,
+    /// /reply/version {ver_string}
+    ServerVersion { ver: String },
+    /// /reply/subscribe
+    Subscribed,
+}
+impl Into<OscMessage> for Reply {
+    fn into(self) -> OscMessage {
+        use self::Reply::*;
+        match self {
+            Pong => "/pong".into(),
+            ServerVersion { ver } => OscMessage {
+                addr: "/reply/version".into(),
+                args: Some(vec![OscType::String(ver)])
+            },
+            Subscribed => "/reply/subscribe".into()
+        }
+    }
 }
 #[derive(Debug)]
 pub struct RecvMessage {
@@ -57,7 +96,32 @@ impl SendMessageExt for SocketAddr {
         }
     }
 }
-fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Command> {
+pub fn parse_osc_reply(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Reply> {
+    use self::Reply::*;
+
+    let path: Vec<&str> = (&addr).split("/").collect();
+    let mut args = if let Some(a) = args { a } else { vec![] };
+    if path.len() < 2 {
+        bail!("Blank OSC path.");
+    }
+    match &path[1..] {
+        &["pong"] => Ok(Pong),
+        &["reply", "subscribe"] => Ok(Subscribed),
+        &["reply", "version"] => {
+            if args.len() != 1 {
+                bail!(OSCWrongArgs(args.len(), 1));
+            }
+            if let Some(ver) = args.remove(0).string() {
+                Ok(ServerVersion { ver })
+            }
+            else {
+                bail!(OSCWrongType(0, "string"));
+            }
+        },
+        _ => Err(BackendErrorKind::UnknownOSCPath.into())
+    }
+}
+pub fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Command> {
     let path: Vec<&str> = (&addr).split("/").collect();
     let mut args = if let Some(a) = args { a } else { vec![] };
     if path.len() < 2 {
@@ -66,6 +130,7 @@ fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Co
     match &path[1..] {
         &["ping"] => Ok(Command::Ping),
         &["subscribe"] => Ok(Command::Subscribe),
+        &["version"] => Ok(Command::Version),
         &["create"] => {
             if args.len() != 1 {
                 bail!(OSCWrongArgs(args.len(), 1));
@@ -133,7 +198,45 @@ fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Co
         _ => Err(BackendErrorKind::UnknownOSCPath.into())
     }
 }
-
+pub struct SqaClientCodec {
+    addr: SocketAddr
+}
+impl SqaClientCodec {
+    pub fn new(addr: SocketAddr) -> Self {
+        Self { addr }
+    }
+}
+impl UdpCodec for SqaClientCodec {
+    type In = BackendResult<Reply>;
+    type Out = Command;
+    fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> ::std::io::Result<Self::In> {
+        if self.addr != *src {
+            return Ok(Err("Received a message from another server.".into()));
+        }
+        let pkt = match decoder::decode(buf) {
+            Ok(pkt) => {
+                match pkt {
+                    OscPacket::Message(m) => {
+                        let OscMessage { addr, args } = m;
+                        match parse_osc_reply(&addr, args) {
+                            Ok(r) => Ok(r),
+                            Err(e) => Err(e)
+                        }
+                    },
+                    _ => Err(BackendErrorKind::UnsupportedOSCBundle.into())
+                }
+            },
+            Err(e) => Err(e.into())
+        };
+        Ok(pkt)
+    }
+    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> SocketAddr {
+        if let Ok(b) = encoder::encode(&OscPacket::Message(msg.into())) {
+            ::std::mem::replace(buf, b);
+        }
+        self.addr
+    }
+}
 pub struct SqaWireCodec;
 impl UdpCodec for SqaWireCodec {
     type In = RecvMessage;

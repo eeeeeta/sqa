@@ -4,3 +4,11 @@ version = "0.1.0"
 authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 
 [dependencies]
+sqa-backend = { path = "../sqa-backend" }
+rosc = { path = "../rosc" }
+tokio-core = "0.1"
+futures = "0.1"
+gtk = { version = "0.1", features = ["v3_16"] }
+glib = "0.1"
+error-chain = "0.10"
+time = "0.1"
