@@ -6,6 +6,7 @@ extern crate futures;
 extern crate glib;
 extern crate time;
 #[macro_use] extern crate error_chain;
+extern crate gdk;
 
 use gtk::prelude::*;
 use gtk::{Builder, Window};
@@ -17,6 +18,7 @@ use std::cell::RefCell;
 
 #[macro_use]
 mod util;
+mod widgets;
 mod errors;
 mod sync;
 mod connection;
@@ -33,13 +35,14 @@ fn main() {
     let ttn = tn.clone();
     let (btx, brx) = mpsc::unbounded();
     let (utx, urx) = smpsc::channel();
+    let tutx = utx.clone();
     thread::spawn(move || {
         let mut core = Core::new().unwrap();
         let mut ctx = BackendContext {
             conn: connection::Context::new(),
             tn: ttn,
             rx: brx,
-            tx: utx,
+            tx: tutx,
             hdl: core.handle()
         };
         core.run(&mut ctx).unwrap();
@@ -50,9 +53,12 @@ fn main() {
     let mut ctx = UIContext {
         rx: urx,
         tx: btx,
+        stn: tn.clone(),
+        stx: utx,
         conn: connection::ConnectionController::new(&b)
     };
     ctx.bind_all();
+    ctx.conn.pwin.window.show_all();
     let ctx = RefCell::new(ctx);
     tn.register_handler(move || {
         ctx.borrow_mut().on_event();

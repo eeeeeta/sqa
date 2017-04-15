@@ -1,18 +1,16 @@
-use futures::sync::mpsc;
 use tokio_core::net::{UdpFramed, UdpSocket};
-use tokio_core::reactor::{Timeout, Remote};
-use sqa_backend::VERSION;
+use tokio_core::reactor::{Timeout};
 use sqa_backend::codec::{SqaClientCodec, Reply, Command};
 use gtk::prelude::*;
-use gtk::{Label, Button, Popover, Entry, Builder};
+use gtk::{Button, Builder};
 use std::net::SocketAddr;
-use futures::{Sink, Stream, Poll, Async, Future};
-use sync::{BackendContextArgs, BackendMessage, UIMessage};
+use futures::{Sink, Stream, Async, Future};
+use sync::{BackendContextArgs, UIMessage, UISender};
+use widgets::{PropertyWindow, FallibleEntry};
 use errors;
 use time;
 use std::mem;
 use std::time::Duration;
-use std::default::Default;
 
 #[derive(Clone, Debug)]
 pub enum ConnectionState {
@@ -22,6 +20,9 @@ pub enum ConnectionState {
     Connected { addr: SocketAddr, ver: String, last_ping: u64, last_err: Option<String> },
     RecvFailed(String),
     RecvThreadFailed
+}
+pub enum ConnectionUIMessage {
+    ConnectClicked
 }
 pub enum ConnectionMessage {
     Disconnect,
@@ -54,8 +55,10 @@ impl Context {
         Ok(())
     }
     fn ping_timeout(&mut self, args: &mut BackendContextArgs) -> errors::Result<()> {
-        self.send(Command::Ping)?;
-        self.timeout = Some(Timeout::new(Duration::new(10, 0), &args.hdl)?);
+        if let ConnectionState::Connected {..} = self.state {
+            self.send(Command::Ping)?;
+            self.timeout = Some(Timeout::new(Duration::new(10, 0), &args.hdl)?);
+        }
         Ok(())
     }
     fn handle_external(&mut self, msg: Reply, args: &mut BackendContextArgs) -> errors::Result<bool> {
@@ -162,55 +165,93 @@ impl Context {
     }
 }
 pub struct ConnectionController {
-    header_lbl: Label,
-    status_lbl: Label,
-    popover_btn: Button,
-    popover: Popover,
+    pub pwin: PropertyWindow,
+    ipe: FallibleEntry,
     connect_btn: Button,
     disconnect_btn: Button,
-    ip_entry: Entry,
-    version_lbl: Label,
+    tx: Option<UISender>,
+    state: ConnectionState
 }
 
 impl ConnectionController {
     pub fn new(b: &Builder) -> Self {
-        build!(ConnectionController
-               using b
-               get header_lbl, status_lbl, popover_btn, popover, connect_btn,
-               disconnect_btn, ip_entry, version_lbl)
+        let mut pwin = PropertyWindow::new(b);
+        let ipe = FallibleEntry::new(b);
+        let connect_btn = Button::new_with_mnemonic("_Connect");
+        let disconnect_btn = Button::new_with_mnemonic("_Disconnect");
+        pwin.append_property("IP address and port", &*ipe);
+        pwin.append_button(&connect_btn);
+        pwin.append_button(&disconnect_btn);
+        let tx = None;
+        let state = ConnectionState::Disconnected;
+        let mut ret = ConnectionController { pwin, ipe, connect_btn, disconnect_btn, tx, state };
+        ret.on_state_change(ConnectionState::Disconnected);
+        ret
     }
-    pub fn bind(&mut self, tx: &mpsc::UnboundedSender<BackendMessage>) {
-        let pop = self.popover.clone();
-        self.popover_btn.connect_clicked(move |_| {
-            pop.show_all();
-        });
+    pub fn bind(&mut self, tx: &UISender) {
         self.disconnect_btn.connect_clicked(clone!(tx; |_a| {
-            mpsc::UnboundedSender::send(&tx, BackendMessage::Connection(ConnectionMessage::Disconnect));
+            tx.send(ConnectionMessage::Disconnect);
         }));
-        let ipe = self.ip_entry.clone();
         self.connect_btn.connect_clicked(clone!(tx; |_a| {
-            if let Ok(addr) = ipe.get_text().unwrap_or("".into()).parse() {
-                mpsc::UnboundedSender::send(&tx,
-                                            BackendMessage::Connection(ConnectionMessage::Connect(addr)));
-            }
+            tx.send_internal(ConnectionUIMessage::ConnectClicked);
         }));
+        self.ipe.on_enter(clone!(tx; |_a| {
+            tx.send_internal(ConnectionUIMessage::ConnectClicked);
+        }));
+        self.tx = Some(tx.clone());
     }
-    pub fn on_msg(&mut self, msg: ConnectionState) {
+    pub fn on_msg(&mut self, msg: ConnectionUIMessage) {
+        use self::ConnectionUIMessage::*;
+        match msg {
+            ConnectClicked => {
+                match self.ipe.get_text().parse() {
+                    Ok(addr2) => {
+                        if let ConnectionState::Connected { addr, .. } = self.state {
+                            if addr2 == addr {
+                                return;
+                            }
+                        }
+                        self.tx.as_mut().unwrap()
+                            .send(ConnectionMessage::Connect(addr2));
+                    },
+                    Err(e) => {
+                        self.ipe.throw_error(e.to_string());
+                    },
+                }
+            }
+        }
+    }
+    pub fn on_state_change(&mut self, msg: ConnectionState) {
         use self::ConnectionState::*;
+        self.state = msg.clone();
         match msg {
             Disconnected => {
-                self.status_lbl.set_text("Disconnected. Enter a server IP to connect.");
-                self.version_lbl.set_text("Enter an IP below!");
+                self.pwin.update_header(
+                    "gtk-disconnect",
+                    "Disconnected",
+                    "Enter an IP address to connect."
+                );
             },
             VersionQuerySent { addr } => {
-                self.status_lbl.set_text(&format!("Connecting to {} (sent version query)...", addr));
+                self.pwin.update_header(
+                    "gtk-refresh",
+                    "Connecting (0%)...",
+                    format!("Connecting to {} (sent version query)...", addr)
+                );
             },
             SubscriptionQuerySent { addr, ver } => {
-                self.status_lbl.set_text(&format!("Version of {} is {}. Connecting...", addr, ver));
+                self.pwin.update_header(
+                    "gtk-refresh",
+                    "Connecting (50%)...",
+                    format!("Version of {} is {}. Connecting...", addr, ver)
+                );
             },
             Connected { addr, ver, .. } => {
-                self.status_lbl.set_text(&format!("Connected to {}.", addr));
-                self.version_lbl.set_text(&format!("Server version: {}", ver));
+                self.pwin.update_header(
+                    "gtk-connect",
+                    "Connected",
+                    format!("Connected to {}, version: {}", addr, ver)
+                );
             },
             _ => {}
         }

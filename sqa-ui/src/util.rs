@@ -18,7 +18,7 @@ impl ThreadNotifier {
             ::glib::Continue(false)
         });
     }
-    pub fn register_handler<F: Fn() + 'static>(&self, mut func: F) {
+    pub fn register_handler<F: Fn() + 'static>(&self, func: F) {
         self.adj.connect_changed(move |_| {
             func()
         });
@@ -45,6 +45,17 @@ macro_rules! build {
         )*
             $o { $($i),* $(,$f)* }
     }}
+}
+macro_rules! message_impls {
+    ($msg:ident, $($variant:ident, $ty:ty),*) => {
+        $(
+            impl From<$ty> for $msg {
+                fn from(obj: $ty) -> $msg {
+                    $msg::$variant(obj)
+                }
+            }
+        )*
+    }
 }
 macro_rules! clone {
     ($($n:ident),+; || $body:block) => (
