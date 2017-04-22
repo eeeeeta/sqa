@@ -28,8 +28,8 @@ error_chain! {
         MalformedOSCPath {
             description("The OSC path provided was malformed.")
         }
-        OSCWrongArgs(p: usize, n: usize) {
-            display("Wrong number of arguments: {} provided, {} required", p, n)
+        OSCWrongArgs(r: &'static str) {
+            display("expected a {}", r)
         }
         OSCWrongType(n: usize, r: &'static str) {
             display("Argument {} should be a {}", n, r)

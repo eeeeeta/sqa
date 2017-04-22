@@ -7,70 +7,58 @@ use errors::BackendErrorKind::*;
 use serde_json;
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+type OscResult<T> = BackendResult<T>;
+
+#[derive(OscSerde, Debug, Clone)]
 pub enum Command {
-    /// /ping -> Pong
+    #[oscpath = "/ping"]
     Ping,
-    /// /version -> ServerVersion
+    #[oscpath = "/version"]
     Version,
-    /// /subscribe -> /reply/subscribe
+    #[oscpath = "/subscribe"]
     Subscribe,
-    /// /create {type} -> /reply/create UUID
-    CreateAction { typ: String },
-    /// /action/{uuid} -> /reply/action/{uuid} {details}
-    ActionInfo { uuid: Uuid },
-    /// /action/{uuid}/update {parameters} -> /reply/action/{uuid}/update
-    UpdateActionParams { uuid: Uuid, params: String },
-    /// /action/{uuid}/delete -> /reply/action/{uuid}/delete
-    DeleteAction { uuid: Uuid },
+    #[oscpath = "/action/create"]
+    CreateAction { #[verbatim = "string"] typ: String },
+    #[oscpath = "/action/{uuid}"]
+    ActionInfo { #[subst] uuid: Uuid },
+    #[oscpath = "/action/{uuid}/update"]
+    UpdateActionParams { #[subst] uuid: Uuid, #[verbatim = "string"] params: String },
+    #[oscpath = "/action/{uuid}/delete"]
+    DeleteAction { #[subst] uuid: Uuid },
+/*
     /// /action/{uuid}/{method} {???} -> ???
     ActionMethod { uuid: Uuid, path: Vec<String>, args: Vec<OscType> },
-    /// /action/{uuid}/verify -> Vec<ParameterError>
-    VerifyAction { uuid: Uuid },
-    /// /action/{uuid}/load -> Result
-    LoadAction { uuid: Uuid },
-    /// /action/{uuid}/execute -> Result
-    ExecuteAction { uuid: Uuid },
-    /// /mixer/config -> MixerConf
+*/
+    #[oscpath = "/action/{uuid}/verify"]
+    VerifyAction { #[subst] uuid: Uuid },
+    #[oscpath = "/action/{uuid}/load"]
+    LoadAction { #[subst] uuid: Uuid },
+    #[oscpath = "/action/{uuid}/execute"]
+    ExecuteAction { #[subst] uuid: Uuid },
+    #[oscpath = "/mixer/config"]
     GetMixerConf,
-    /// /mixer/config/set MixerConf -> Result
-    SetMixerConf { conf: MixerConf }
+    #[oscpath = "/mixer/config/set"]
+    SetMixerConf { #[ser] conf: MixerConf }
 }
 impl Into<OscMessage> for Command {
     fn into(self) -> OscMessage {
-        use self::Command::*;
-        match self {
-            Ping => "/ping".into(),
-            Version => "/version".into(),
-            Subscribe => "/subscribe".into(),
-            CreateAction { typ } => OscMessage {
-                addr: "/create".into(),
-                args: Some(vec![OscType::String(typ)])
-            },
-            _ => unimplemented!()
-        }
+        self.to_osc()
+            .expect("No impl generated, check codec.rs")
     }
 }
-#[derive(Debug, Clone)]
+#[derive(OscSerde, Debug, Clone)]
 pub enum Reply {
-    /// /pong
+    #[oscpath = "/pong"]
     Pong,
-    /// /reply/version {ver_string}
-    ServerVersion { ver: String },
-    /// /reply/subscribe
+    #[oscpath = "/reply/version"]
+    ServerVersion { #[verbatim = "string"] ver: String },
+    #[oscpath = "/subscribed"]
     Subscribed,
 }
 impl Into<OscMessage> for Reply {
     fn into(self) -> OscMessage {
-        use self::Reply::*;
-        match self {
-            Pong => "/pong".into(),
-            ServerVersion { ver } => OscMessage {
-                addr: "/reply/version".into(),
-                args: Some(vec![OscType::String(ver)])
-            },
-            Subscribed => "/reply/subscribe".into()
-        }
+        self.to_osc()
+            .expect("No impl generated, check codec.rs")
     }
 }
 #[derive(Debug)]
@@ -96,7 +84,7 @@ impl SendMessageExt for SocketAddr {
         }
     }
 }
-pub fn parse_osc_reply(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Reply> {
+/*pub fn parse_osc_reply(addr: &str, args: Option<Vec<OscType>>) -> BackendResult<Reply> {
     use self::Reply::*;
 
     let path: Vec<&str> = (&addr).split("/").collect();
@@ -197,7 +185,7 @@ pub fn parse_osc_message(addr: &str, args: Option<Vec<OscType>>) -> BackendResul
         },
         _ => Err(BackendErrorKind::UnknownOSCPath.into())
     }
-}
+}*/
 pub struct SqaClientCodec {
     addr: SocketAddr
 }
@@ -218,7 +206,7 @@ impl UdpCodec for SqaClientCodec {
                 match pkt {
                     OscPacket::Message(m) => {
                         let OscMessage { addr, args } = m;
-                        match parse_osc_reply(&addr, args) {
+                        match Reply::from_osc(&addr, args) {
                             Ok(r) => Ok(r),
                             Err(e) => Err(e)
                         }
@@ -247,7 +235,7 @@ impl UdpCodec for SqaWireCodec {
                 match pkt {
                     OscPacket::Message(m) => {
                         let OscMessage { addr, args } = m;
-                        match parse_osc_message(&addr, args) {
+                        match Command::from_osc(&addr, args) {
                             Ok(r) => Ok((addr, r)),
                             Err(e) => Err(e)
                         }

@@ -1,2 +1,2 @@
 [workspace]
-members = ["./sqa-backend", "./sqa-jack", "./sqa-ffmpeg", "./sqa-engine", "./rosc", "./sqa-ui"]
+members = ["./sqa-backend", "./sqa-jack", "./sqa-ffmpeg", "./sqa-engine", "./rosc", "./sqa-ui", "./sqa-osc-custom-derive"]

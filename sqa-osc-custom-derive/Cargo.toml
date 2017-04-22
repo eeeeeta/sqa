@@ -1,0 +1,11 @@
+[package]
+name = "sqa-osc-custom-derive"
+version = "0.1.0"
+authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
+
+[dependencies]
+syn = "*"
+quote = "*"
+
+[lib]
+proc-macro = true
