@@ -150,8 +150,10 @@ fn message_from_variant(var: &Variant) -> Option<Message> {
                     if id == "verbatim" {
                         alltoks.push((ident.clone(), IdentType::Verb(Ident::new(st as &str))));
                         verbs.push(ident.clone());
+                        break;
                     }
                 }
+                alltoks.push((ident.clone(), IdentType::None));
             }
         }
     }
