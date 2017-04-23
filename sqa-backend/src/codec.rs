@@ -48,12 +48,35 @@ impl Into<OscMessage> for Command {
 }
 #[derive(OscSerde, Debug, Clone)]
 pub enum Reply {
-    #[oscpath = "/pong"]
     Pong,
     #[oscpath = "/reply/version"]
     ServerVersion { #[verbatim = "string"] ver: String },
-    #[oscpath = "/subscribed"]
+    #[oscpath = "/reply/subscribe"]
     Subscribed,
+
+    #[oscpath = "/reply/action/create"]
+    ActionCreated { #[ser] res: Result<Uuid, String> },
+    #[oscpath = "/reply/action/{uuid}"]
+    ActionInfoRetrieved { #[subst] uuid: Uuid, #[ser] res: Result<serde_json::Value, String> },
+    #[oscpath = "/reply/action/{uuid}/update"]
+    ActionParamsUpdated { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
+    #[oscpath = "/reply/action/{uuid}/delete"]
+    ActionDeleted { #[subst] uuid: Uuid, #[ser] deleted: bool },
+    #[oscpath = "/reply/action/{uuid}/load"]
+    ActionLoaded { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
+    #[oscpath = "/reply/action/{uuid}/execute"]
+    ActionExecuted { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
+    #[oscpath = "/reply/mixer/config"]
+    MixerConfSet { #[ser] res: Result<(), String> },
+
+    #[oscpath = "/update/action/create"]
+    UpdateActionCreated { #[ser] uuid: Uuid },
+    #[oscpath = "/update/action/{uuid}"]
+    UpdateActionInfo { #[subst] uuid: Uuid, #[ser] data: serde_json::Value },
+    #[oscpath = "/update/action/{uuid}/delete"]
+    UpdateActionDeleted { #[subst] uuid: Uuid },
+    #[oscpath = "/update/mixer/config"]
+    UpdateMixerConf { #[ser] conf: MixerConf },
 }
 impl Into<OscMessage> for Reply {
     fn into(self) -> OscMessage {

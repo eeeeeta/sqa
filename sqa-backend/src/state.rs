@@ -5,15 +5,12 @@ use std::any::Any;
 use uuid::Uuid;
 use handlers::{ConnHandler, ConnData};
 use codec::{Command, Reply};
-use rosc::{OscMessage, OscType};
-use std::net::SocketAddr;
-use sqa_engine::EngineContext;
 use std::collections::HashMap;
 use actions::{Action, PlaybackState};
-use sqa_engine::sync::{AudioThreadMessage, AudioThreadHandle};
+use sqa_engine::sync::{AudioThreadMessage};
 use sqa_ffmpeg::MediaContext;
-use actions::ParameterError;
-use mixer::{MixerConf, MixerContext};
+use mixer::{MixerContext};
+use errors::*;
 pub struct Context {
     pub remote: Remote,
     pub mixer: MixerContext,
@@ -82,21 +79,22 @@ impl ConnHandler for Context {
             _ => {}
         }
     }
-    fn external(&mut self, d: &mut CD, c: Command) {
+    fn external(&mut self, d: &mut CD, c: Command) -> BackendResult<()> {
         use self::Command::*;
+        use self::Reply::*;
         match c {
             Ping => {
-                d.respond(Reply::Pong.into());
+                d.respond(Pong)?;
             },
             Version => {
-                d.respond(Reply::ServerVersion { ver: super::VERSION.into() }.into());
+                d.respond(ServerVersion { ver: super::VERSION.into() })?;
             },
             Subscribe => {
                 d.subscribe();
-                d.respond(Reply::Subscribed.into());
+                d.respond(Subscribed)?;
             },
             CreateAction { typ } => {
-                d.reply::<Result<Uuid, String>>(match &*typ {
+                d.respond(ActionCreated { res: match &*typ {
                     "audio" => {
                         let act = Action::new_audio();
                         let uu = act.uuid();
@@ -104,51 +102,60 @@ impl ConnHandler for Context {
                         Ok(uu)
                     },
                     _ => Err("Unknown action type".into())
-                });
+                }})?;
             },
             ActionInfo { uuid } => {
-                d.reply::<Result<::serde_json::Value, String>>(
-                    do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
-                        a.get_data(&mut ctx).map_err(|e| e.to_string())
-                    })
-                );
+                let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
+                    let ret = a.get_data(&mut ctx).map_err(|e| e.to_string());
+                    Self::on_action_changed(d, a, &mut ctx);
+                    ret
+                });
+                d.respond(ActionInfoRetrieved { uuid, res })?;
             },
             UpdateActionParams { uuid, params } => {
-                let x = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
+                let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
                     let ret = a.set_params(&params).map_err(|e| e.to_string());
                     Self::on_action_changed(d, a, &mut ctx);
                     ret
                 });
-                d.reply::<Result<(), String>>(x);
+                d.respond(ActionParamsUpdated { uuid, res })?;
             },
             LoadAction { uuid } => {
-                let x = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
+                let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
                     let ret = a.load(&mut ctx, &d.internal_tx).map_err(|e| e.to_string());
                     Self::on_action_changed(d, a, &mut ctx);
                     ret
                 });
-                d.reply::<Result<(), String>>(x);
+                d.respond(ActionLoaded { uuid, res })?;
             },
             ExecuteAction { uuid } => {
-                let x = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
+                let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
                     let ret = a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), &mut ctx, &d.internal_tx).map_err(|e| e.to_string());
                     Self::on_action_changed(d, a, &mut ctx);
                     ret
                 });
-                d.reply::<Result<(), String>>(x);
+                d.respond(ActionExecuted { uuid, res })?;
             },
             DeleteAction { uuid } => {
-                d.reply::<bool>(self.actions.remove(&uuid).is_some());
+                if self.actions.remove(&uuid).is_some() {
+                    d.respond(ActionDeleted { uuid, deleted: true })?;
+                    d.broadcast(UpdateActionDeleted { uuid })?;
+                }
+                else {
+                    d.respond(ActionDeleted { uuid, deleted: false })?;
+                }
             },
             GetMixerConf => {
-                d.reply::<MixerConf>(self.mixer.obtain_config());
+                d.respond(UpdateMixerConf { conf: self.mixer.obtain_config() })?;
             },
             SetMixerConf { conf } => {
-                d.reply::<Result<(), String>>(self.mixer.process_config(conf)
-                                              .map_err(|e| e.to_string()));
+                d.respond(MixerConfSet {res: self.mixer.process_config(conf)
+                                        .map_err(|e| e.to_string())})?;
+                d.respond(UpdateMixerConf { conf: self.mixer.obtain_config() })?;
             },
             _ => {}
-        }
+        };
+        Ok(())
     }
 }
 impl Context {
@@ -163,9 +170,11 @@ impl Context {
         ctx
     }
     pub fn on_action_changed(d: &mut CD, action: &mut Action, ctx: &mut ActionContext) {
-        d.broadcast::<Result<::serde_json::Value, String>>(
-            format!("/update/action/{}", action.uuid()),
-            action.get_data(ctx).map_err(|e| e.to_string())
-        );
+        if let Ok(data) = action.get_data(ctx) {
+            d.broadcast(Reply::UpdateActionInfo {
+                    uuid: action.uuid(),
+                    data
+            });
+        }
     }
 }

@@ -2,7 +2,6 @@ use codec::{Command, RecvMessage, SendMessage, SendMessageExt, SqaWireCodec};
 use futures::stream::Stream;
 use futures::sink::Sink;
 use futures::{Poll, Async, Future};
-use futures::sync::oneshot;
 use futures::sync::mpsc::{self, Sender, Receiver};
 use tokio_core::net::{UdpFramed, UdpSocket};
 use tokio_core::reactor::Remote;
@@ -25,7 +24,7 @@ pub struct Party {
 pub trait ConnHandler {
     type Message;
     fn internal(&mut self, d: &mut ConnData<Self::Message>, m: Self::Message);
-    fn external(&mut self, d: &mut ConnData<Self::Message>, p: Command);
+    fn external(&mut self, d: &mut ConnData<Self::Message>, p: Command) -> BackendResult<()>;
     fn init(&mut self, d: &mut ConnData<Self::Message>);
 }
 /*struct WaitingHandler {
@@ -47,8 +46,8 @@ impl<M> ConnData<M> {
         self.framed.start_send(msg)?;
         Ok(())
     }
-    pub fn respond(&mut self, msg: OscMessage) -> IoResult<()> {
-        self.framed.start_send(self.addr.msg_to(msg))?;
+    pub fn respond<T: Into<OscMessage>>(&mut self, msg: T) -> IoResult<()> {
+        self.framed.start_send(self.addr.msg_to(msg.into()))?;
         Ok(())
     }
     pub fn reply<T>(&mut self, data: T) -> IoResult<()> where T: Serialize {
@@ -88,18 +87,15 @@ impl<M> ConnData<M> {
             Err(::std::io::Error::new(::std::io::ErrorKind::Other, "API used incorrectly: calling register_interest() at the wrong time"))
         }
 }*/
-    pub fn broadcast<T>(&mut self, path: String, data: T) -> IoResult<usize> where T: Serialize {
+    pub fn broadcast<T: Into<OscMessage>>(&mut self, pdata: T) -> IoResult<usize> {
         let mut n_sent = 0;
         let now = SteadyTime::now();
         self.parties.retain(|party| {
             now - party.subscribed_at <= Duration::seconds(30)
         });
-        let j = serde_json::to_string(&data).unwrap(); // FIXME FIXME FIXME
+        let data = pdata.into();
         for party in self.parties.iter_mut() {
-            self.framed.start_send(party.addr.msg_to(OscMessage {
-                addr: path.clone(),
-                args: Some(vec![OscType::String(j.clone())])
-            }))?;
+            self.framed.start_send(party.addr.msg_to(data.clone()))?;
             n_sent += 1;
         }
         Ok(n_sent)
@@ -115,7 +111,9 @@ impl<H> Connection<H> where H: ConnHandler {
             Ok((path, pkt)) => {
                 self.data.addr = addr;
                 self.data.path = path;
-                self.hdlr.external(&mut self.data, pkt);
+                if let Err(e) = self.hdlr.external(&mut self.data, pkt) {
+                    println!("ERROR in external handler: {:?}", e);
+                }
                 for party in self.data.parties.iter_mut() {
                     if party.addr == self.data.addr {
                         party.subscribed_at = SteadyTime::now();
