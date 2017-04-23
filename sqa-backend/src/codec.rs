@@ -48,6 +48,7 @@ impl Into<OscMessage> for Command {
 }
 #[derive(OscSerde, Debug, Clone)]
 pub enum Reply {
+    #[oscpath = "/pong"]
     Pong,
     #[oscpath = "/reply/version"]
     ServerVersion { #[verbatim = "string"] ver: String },
