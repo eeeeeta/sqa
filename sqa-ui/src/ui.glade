@@ -8,6 +8,23 @@
     <property name="can_focus">False</property>
     <property name="icon_name">view-refresh</property>
   </object>
+  <object class="GtkWindow" id="sqa-ActionController-props">
+    <property name="can_focus">False</property>
+    <child>
+      <placeholder/>
+    </child>
+    <child type="titlebar">
+      <placeholder/>
+    </child>
+  </object>
+  <object class="GtkListStore" id="sqa-ActionController-store">
+    <columns>
+      <!-- column-name uuid -->
+      <column type="gchararray"/>
+      <!-- column-name descrip -->
+      <column type="gchararray"/>
+    </columns>
+  </object>
   <object class="GtkApplicationWindow" id="sqa-main">
     <property name="can_focus">False</property>
     <property name="default_width">640</property>
@@ -94,9 +111,35 @@
           </packing>
         </child>
         <child>
-          <object class="GtkListBox" id="sqa-ActionController-list">
+          <object class="GtkTreeView" id="sqa-ActionController-view">
             <property name="visible">True</property>
-            <property name="can_focus">False</property>
+            <property name="can_focus">True</property>
+            <property name="model">sqa-ActionController-store</property>
+            <child internal-child="selection">
+              <object class="GtkTreeSelection"/>
+            </child>
+            <child>
+              <object class="GtkTreeViewColumn">
+                <property name="title" translatable="yes">UUID</property>
+                <child>
+                  <object class="GtkCellRendererText"/>
+                  <attributes>
+                    <attribute name="text">0</attribute>
+                  </attributes>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkTreeViewColumn">
+                <property name="title" translatable="yes">Description</property>
+                <child>
+                  <object class="GtkCellRendererText"/>
+                  <attributes>
+                    <attribute name="text">1</attribute>
+                  </attributes>
+                </child>
+              </object>
+            </child>
           </object>
           <packing>
             <property name="expand">True</property>
@@ -184,15 +227,6 @@
           </packing>
         </child>
       </object>
-    </child>
-  </object>
-  <object class="GtkWindow" id="sqa-ActionController-props">
-    <property name="can_focus">False</property>
-    <child>
-      <placeholder/>
-    </child>
-    <child type="titlebar">
-      <placeholder/>
     </child>
   </object>
   <object class="GtkPopover" id="sqa-FallibleEntry-popover">

@@ -57,7 +57,8 @@ fn main() {
         tx: btx,
         stn: tn.clone(),
         stx: utx,
-        conn: connection::ConnectionController::new(&b)
+        conn: connection::ConnectionController::new(&b),
+        act: actions::ActionController::new(&b)
     };
     ctx.bind_all();
     ctx.conn.pwin.window.show_all();

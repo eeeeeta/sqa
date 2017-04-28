@@ -6,6 +6,7 @@ use util::ThreadNotifier;
 use tokio_core::reactor::{Handle, Remote};
 use futures::{Poll, Async, Future, Stream};
 use errors;
+use actions;
 
 pub enum UIMessage {
     ConnState(ConnectionState),
@@ -22,7 +23,8 @@ impl From<Command> for BackendMessage {
 }
 message_impls!(UIMessage,
                ConnState, ConnectionState,
-               ConnMessage, ConnectionUIMessage);
+               ConnMessage, ConnectionUIMessage,
+               ActionReply, Reply);
 message_impls!(BackendMessage,
                Connection, ConnectionMessage);
 
@@ -39,6 +41,7 @@ pub struct UIContext {
     pub stn: ThreadNotifier,
     pub tx: mpsc::UnboundedSender<BackendMessage>,
     pub conn: connection::ConnectionController,
+    pub act: actions::ActionController
 }
 #[derive(Clone)]
 pub struct UISender {
@@ -111,7 +114,7 @@ impl UIContext {
             match msg {
                 ConnState(msg) => self.conn.on_state_change(msg),
                 ConnMessage(msg) => self.conn.on_msg(msg),
-                ActionReply(rpl) => {}
+                ActionReply(rpl) => self.act.on_action_reply(rpl)
             }
         }
     }

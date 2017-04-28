@@ -5,6 +5,8 @@ use errors::*;
 use mixer::MixerConf;
 use errors::BackendErrorKind::*;
 use serde_json;
+use actions::OpaqueAction;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 type OscResult<T> = BackendResult<T>;
@@ -35,6 +37,8 @@ pub enum Command {
     LoadAction { #[subst] uuid: Uuid },
     #[oscpath = "/action/{uuid}/execute"]
     ExecuteAction { #[subst] uuid: Uuid },
+    #[oscpath = "/action/list"]
+    ActionList,
     #[oscpath = "/mixer/config"]
     GetMixerConf,
     #[oscpath = "/mixer/config/set"]
@@ -58,7 +62,7 @@ pub enum Reply {
     #[oscpath = "/reply/action/create"]
     ActionCreated { #[ser] res: Result<Uuid, String> },
     #[oscpath = "/reply/action/{uuid}"]
-    ActionInfoRetrieved { #[subst] uuid: Uuid, #[ser] res: Result<serde_json::Value, String> },
+    ActionInfoRetrieved { #[subst] uuid: Uuid, #[ser] res: Result<OpaqueAction, String> },
     #[oscpath = "/reply/action/{uuid}/update"]
     ActionParamsUpdated { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/action/{uuid}/delete"]
@@ -69,11 +73,11 @@ pub enum Reply {
     ActionExecuted { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/mixer/config"]
     MixerConfSet { #[ser] res: Result<(), String> },
+    #[oscpath = "/reply/action/list"]
+    ReplyActionList { #[ser] list: HashMap<Uuid, OpaqueAction> },
 
-    #[oscpath = "/update/action/create"]
-    UpdateActionCreated { #[ser] uuid: Uuid },
     #[oscpath = "/update/action/{uuid}"]
-    UpdateActionInfo { #[subst] uuid: Uuid, #[ser] data: serde_json::Value },
+    UpdateActionInfo { #[subst] uuid: Uuid, #[ser] data: OpaqueAction },
     #[oscpath = "/update/action/{uuid}/delete"]
     UpdateActionDeleted { #[subst] uuid: Uuid },
     #[oscpath = "/update/mixer/config"]

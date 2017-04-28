@@ -14,7 +14,8 @@ use serde::{Serialize, Deserialize};
 use std::fmt::Debug;
 use serde_json;
 use std::time::Duration;
-mod audio;
+
+pub mod audio;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ParameterError {
@@ -68,6 +69,10 @@ pub trait ActionController {
 pub enum ActionType {
     Audio(audio::Controller),
 }
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum ActionParameters {
+    Audio(<audio::Controller as ActionController>::Parameters)
+}
 macro_rules! action {
     (mut $a:expr) => {{
         use self::ActionType::*;
@@ -80,7 +85,20 @@ macro_rules! action {
         match $a {
             Audio(ref a) => a
         }
-    }}
+    }};
+    (params $a:expr) => {{
+        use self::ActionType::*;
+        match $a {
+            Audio(ref a) => ActionParameters::Audio(a.get_params().clone())
+        }
+    }};
+}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OpaqueAction {
+    pub state: PlaybackState,
+    pub params: ActionParameters,
+    pub desc: String,
+    pub uu: Uuid
 }
 pub struct Action {
     state: PlaybackState,
@@ -160,14 +178,14 @@ impl Action {
     pub fn state_change(&mut self, ps: PlaybackState) {
         self.state = ps;
     }
-    pub fn get_data(&mut self, ctx: &mut ActionContext) -> BackendResult<serde_json::Value> {
+    pub fn get_data(&mut self, ctx: &mut ActionContext) -> BackendResult<OpaqueAction> {
         self.verify_params(ctx);
-        let state = serde_json::to_value(&self.state)?;
-        let params = serde_json::to_value(action!(self.ctl).get_params())?;
-        Ok(json!({
-            "state": state,
-            "params": params
-        }))
+        Ok(OpaqueAction {
+            state: self.state.clone(),
+            params: action!(params self.ctl),
+            uu: self.uu,
+            desc: action!(self.ctl).desc()
+        })
     }
     pub fn verify_params(&mut self, ctx: &mut ActionContext) {
         use self::PlaybackState::*;

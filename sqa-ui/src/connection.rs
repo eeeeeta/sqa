@@ -70,7 +70,6 @@ impl Context {
             x @ ActionDeleted {..} |
             x @ ActionLoaded {..} |
             x @ ActionExecuted {..} |
-            x @ UpdateActionCreated {..} |
             x @ UpdateActionInfo {..} |
             x @ UpdateActionDeleted {..} => {
                 args.send(UIMessage::ActionReply(x));

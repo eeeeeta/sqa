@@ -94,15 +94,18 @@ impl ConnHandler for Context {
                 d.respond(Subscribed)?;
             },
             CreateAction { typ } => {
-                d.respond(ActionCreated { res: match &*typ {
+                let res = ActionCreated { res: match &*typ {
                     "audio" => {
-                        let act = Action::new_audio();
+                        let mut act = Action::new_audio();
                         let uu = act.uuid();
+                        let mut ctx = ctx_from_self!(self);
+                        Self::on_action_changed(d, &mut act, &mut ctx);
                         self.actions.insert(uu, act);
                         Ok(uu)
                     },
                     _ => Err("Unknown action type".into())
-                }})?;
+                }};
+                d.respond(res)?;
             },
             ActionInfo { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
