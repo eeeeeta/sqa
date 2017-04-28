@@ -71,7 +71,9 @@ fn tokens_from_message(name: Ident, Message { path, substs, sers, ident, verbs, 
                     bail!(OSCWrongArgs(stringify!(#id)))
                 }
             },
-            _ => continue
+            IdentType::None => quote! {
+                let #tok = ::std::default::Default::default();
+            }
         };
         body.append_all(&[toks]);
     }

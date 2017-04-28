@@ -1,6 +1,7 @@
 use futures::sync::mpsc;
 use std::sync::mpsc as smpsc;
 use connection::{self, ConnectionState, ConnectionMessage, ConnectionUIMessage};
+use sqa_backend::codec::{Reply, Command};
 use util::ThreadNotifier;
 use tokio_core::reactor::{Handle, Remote};
 use futures::{Poll, Async, Future, Stream};
@@ -8,10 +9,16 @@ use errors;
 
 pub enum UIMessage {
     ConnState(ConnectionState),
-    ConnMessage(ConnectionUIMessage)
+    ConnMessage(ConnectionUIMessage),
+    ActionReply(Reply)
 }
 pub enum BackendMessage {
     Connection(ConnectionMessage)
+}
+impl From<Command> for BackendMessage {
+    fn from(c: Command) -> BackendMessage {
+        BackendMessage::Connection(ConnectionMessage::Send(c))
+    }
 }
 message_impls!(UIMessage,
                ConnState, ConnectionState,
@@ -104,6 +111,7 @@ impl UIContext {
             match msg {
                 ConnState(msg) => self.conn.on_state_change(msg),
                 ConnMessage(msg) => self.conn.on_msg(msg),
+                ActionReply(rpl) => {}
             }
         }
     }

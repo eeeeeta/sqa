@@ -61,6 +61,24 @@ impl Context {
         }
         Ok(())
     }
+    fn handle_external_nonstateful(&mut self, msg: Reply, args: &mut BackendContextArgs) -> errors::Result<()> {
+        use self::Reply::*;
+        match msg {
+            x @ ActionCreated {..} |
+            x @ ActionInfoRetrieved {..} |
+            x @ ActionParamsUpdated {..} |
+            x @ ActionDeleted {..} |
+            x @ ActionLoaded {..} |
+            x @ ActionExecuted {..} |
+            x @ UpdateActionCreated {..} |
+            x @ UpdateActionInfo {..} |
+            x @ UpdateActionDeleted {..} => {
+                args.send(UIMessage::ActionReply(x));
+            },
+            _ => {}
+        }
+        Ok(())
+    }
     fn handle_external(&mut self, msg: Reply, args: &mut BackendContextArgs) -> errors::Result<bool> {
         use self::ConnectionState::*;
         match mem::replace(&mut self.state, Disconnected) {
@@ -91,6 +109,7 @@ impl Context {
             },
             x => {
                 self.state = x;
+                self.handle_external_nonstateful(msg, args)?;
                 Ok(false)
             }
         }

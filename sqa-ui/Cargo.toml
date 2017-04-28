@@ -13,3 +13,4 @@ gdk = { git = "https://github.com/gtk-rs/gdk", features = ["v3_12"] }
 glib = { git = "https://github.com/gtk-rs/glib" }
 error-chain = "0.10"
 time = "0.1"
+uuid = { version = "0.4", features = ["v4", "serde"] }

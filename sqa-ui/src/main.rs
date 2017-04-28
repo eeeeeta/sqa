@@ -7,6 +7,7 @@ extern crate glib;
 extern crate time;
 #[macro_use] extern crate error_chain;
 extern crate gdk;
+extern crate uuid;
 
 use gtk::prelude::*;
 use gtk::{Builder, Window};
@@ -21,6 +22,7 @@ mod util;
 mod widgets;
 mod errors;
 mod sync;
+mod actions;
 mod connection;
 static INTERFACE_SRC: &str = include_str!("ui.glade");
 
