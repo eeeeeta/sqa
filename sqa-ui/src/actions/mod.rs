@@ -3,25 +3,67 @@ use gtk::{TreeView, ListStore, Builder};
 use uuid::Uuid;
 use std::collections::HashMap;
 use std::mem;
+use sync::UISender;
+use widgets::PropertyWindow;
 use sqa_backend::codec::Reply;
-use sqa_backend::actions::{ActionParameters, OpaqueAction};
+use sqa_backend::actions::{ActionParameters, PlaybackState, OpaqueAction};
 use sqa_backend::actions::audio::Controller as AudioController;
 
 use connection::ConnectionState;
 
+pub mod audio;
+use self::audio::AudioUI;
+pub enum ActionMessageInner {
+    Audio(audio::AudioMessage)
+}
+pub type ActionMessage = (Uuid, ActionMessageInner);
 pub struct ActionController {
     view: TreeView,
     store: ListStore,
     builder: Builder,
+    tx: Option<UISender>,
     actions: HashMap<Uuid, Action>
 }
-struct Fixme;
-impl ActionUI for Fixme {
-    fn on_new_parameters(&mut self, p: &ActionParameters) {
-    }
-}
 pub trait ActionUI {
-    fn on_new_parameters(&mut self, p: &ActionParameters);
+    fn on_update(&mut self, p: &OpaqueAction);
+    fn on_message(&mut self, m: ActionMessageInner);
+    fn show(&mut self);
+}
+pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {
+    use self::PlaybackState::*;
+    match p.state {
+        Inactive => pwin.update_header(
+            "gtk-media-stop",
+            "Inactive",
+            &p.desc
+        ),
+        Unverified(ref errs) => pwin.update_header(
+            "gtk-dialog-error",
+            "Incomplete",
+            format!("{} errors are present.", errs.len())
+        ),
+        Loading => pwin.update_header(
+            "gtk-refresh",
+            "Loading",
+            &p.desc
+        ),
+        Loaded => pwin.update_header(
+            "gtk-home",
+            "Loaded",
+            &p.desc
+        ),
+        Paused => pwin.update_header(
+            "gtk-media-pause",
+            "Paused",
+            &p.desc
+        ),
+        Active(ref dur) => pwin.update_header(
+            "gtk-media-play",
+            format!("Active ({}s)", dur.as_secs()),
+            &p.desc
+        ),
+        _ => {}
+    }
 }
 pub struct Action {
     inner: OpaqueAction,
@@ -31,9 +73,13 @@ impl ActionController {
     pub fn new(b: &Builder) -> Self {
         let actions = HashMap::new();
         let builder = b.clone();
+        let tx = None;
         build!(ActionController using b
-               with actions, builder
+               with actions, builder, tx
                get view, store)
+    }
+    pub fn bind(&mut self, tx: &UISender) {
+        self.tx = Some(tx.clone());
     }
     fn update_store(&mut self) {
         self.store.clear();
@@ -49,15 +95,19 @@ impl ActionController {
             // FIXME(rust): the borrow checker forbids if let here, because bad desugaring.
             let act = self.actions.get_mut(&uu).unwrap();
             mem::replace(&mut act.inner, data);
-            act.ctl.on_new_parameters(&act.inner.params);
+            act.ctl.on_update(&act.inner);
         }
         else {
-            let aui = Fixme;
+            let mut aui = match data.params {
+                ActionParameters::Audio(..) =>
+                    Box::new(AudioUI::new(&self.builder, data.uu, self.tx.as_ref().unwrap().clone()))
+            };
+            aui.show();
             let mut act = Action {
                 inner: data,
-                ctl: Box::new(aui)
+                ctl: aui
             };
-            act.ctl.on_new_parameters(&act.inner.params);
+            act.ctl.on_update(&act.inner);
             self.actions.insert(uu, act);
         }
     }
@@ -77,5 +127,10 @@ impl ActionController {
             x => println!("warn: unexpected action reply {:?}", x)
         }
         self.update_store();
+    }
+    pub fn on_internal(&mut self, msg: ActionMessage) {
+        if let Some(ref mut act) = self.actions.get_mut(&msg.0) {
+            act.ctl.on_message(msg.1);
+        }
     }
 }

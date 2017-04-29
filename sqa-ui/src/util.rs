@@ -1,5 +1,6 @@
 use gtk::Adjustment;
 
+pub static INTERFACE_SRC: &str = include_str!("ui.glade");
 #[derive(Clone)]
 /// An object for cross-thread notification.
 pub struct ThreadNotifier {

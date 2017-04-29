@@ -193,8 +193,8 @@ pub struct ConnectionController {
 
 impl ConnectionController {
     pub fn new(b: &Builder) -> Self {
-        let mut pwin = PropertyWindow::new(b);
-        let ipe = FallibleEntry::new(b);
+        let mut pwin = PropertyWindow::new();
+        let ipe = FallibleEntry::new();
         let connect_btn = Button::new_with_mnemonic("_Connect");
         let disconnect_btn = Button::new_with_mnemonic("_Disconnect");
         pwin.append_property("IP address and port", &*ipe);
@@ -233,7 +233,7 @@ impl ConnectionController {
                             .send(ConnectionMessage::Connect(addr2));
                     },
                     Err(e) => {
-                        self.ipe.throw_error(e.to_string());
+                        self.ipe.throw_error(&e.to_string());
                     },
                 }
             }

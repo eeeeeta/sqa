@@ -117,7 +117,7 @@ impl ConnHandler for Context {
             },
             UpdateActionParams { uuid, params } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
-                    let ret = a.set_params(&params).map_err(|e| e.to_string());
+                    let ret = a.set_params(params).map_err(|e| e.to_string());
                     Self::on_action_changed(d, a, &mut ctx);
                     ret
                 });

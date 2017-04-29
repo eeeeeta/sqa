@@ -83,10 +83,10 @@ pub struct Controller {
     senders: Vec<PlainSender>,
     control: Option<Sender<SpoolerMessage>>
 }
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct AudioParams {
-    url: Option<String>,
-    patch: Vec<Option<Uuid>>
+    pub url: Option<String>,
+    pub patch: Vec<Option<Uuid>>
 }
 
 impl Controller {

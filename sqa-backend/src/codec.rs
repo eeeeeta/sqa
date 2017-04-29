@@ -5,7 +5,7 @@ use errors::*;
 use mixer::MixerConf;
 use errors::BackendErrorKind::*;
 use serde_json;
-use actions::OpaqueAction;
+use actions::{ActionParameters, OpaqueAction};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -24,7 +24,7 @@ pub enum Command {
     #[oscpath = "/action/{uuid}"]
     ActionInfo { #[subst] uuid: Uuid },
     #[oscpath = "/action/{uuid}/update"]
-    UpdateActionParams { #[subst] uuid: Uuid, #[verbatim = "string"] params: String },
+    UpdateActionParams { #[subst] uuid: Uuid, #[ser] params: ActionParameters },
     #[oscpath = "/action/{uuid}/delete"]
     DeleteAction { #[subst] uuid: Uuid },
 /*

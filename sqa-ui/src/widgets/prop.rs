@@ -1,5 +1,6 @@
 use gtk::prelude::*;
 use gtk::{Window, Box, ButtonBox, Button, Label, Image, Builder, IsA, Widget, Orientation, IconSize};
+use util;
 
 pub struct PropertyWindow {
     pub window: Window,
@@ -10,7 +11,8 @@ pub struct PropertyWindow {
     pub button_box: ButtonBox
 }
 impl PropertyWindow {
-    pub fn new(b: &Builder) -> Self {
+    pub fn new() -> Self {
+        let b = Builder::new_from_string(util::INTERFACE_SRC);
         build!(PropertyWindow using b
                get window, header_lbl, subheader_lbl, header_img,
                props_box, button_box)

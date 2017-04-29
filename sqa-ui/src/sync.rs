@@ -11,7 +11,8 @@ use actions;
 pub enum UIMessage {
     ConnState(ConnectionState),
     ConnMessage(ConnectionUIMessage),
-    ActionReply(Reply)
+    ActionReply(Reply),
+    ActionMessage(actions::ActionMessage)
 }
 pub enum BackendMessage {
     Connection(ConnectionMessage)
@@ -24,7 +25,8 @@ impl From<Command> for BackendMessage {
 message_impls!(UIMessage,
                ConnState, ConnectionState,
                ConnMessage, ConnectionUIMessage,
-               ActionReply, Reply);
+               ActionReply, Reply,
+               ActionMessage, actions::ActionMessage);
 message_impls!(BackendMessage,
                Connection, ConnectionMessage);
 
@@ -107,6 +109,7 @@ impl UIContext {
             backend: self.tx.clone()
         };
         self.conn.bind(&uis);
+        self.act.bind(&uis);
     }
     pub fn on_event(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
@@ -114,7 +117,8 @@ impl UIContext {
             match msg {
                 ConnState(msg) => self.conn.on_state_change(msg),
                 ConnMessage(msg) => self.conn.on_msg(msg),
-                ActionReply(rpl) => self.act.on_action_reply(rpl)
+                ActionReply(rpl) => self.act.on_action_reply(rpl),
+                ActionMessage(msg) => self.act.on_internal(msg)
             }
         }
     }

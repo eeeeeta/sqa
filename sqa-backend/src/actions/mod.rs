@@ -19,8 +19,8 @@ pub mod audio;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ParameterError {
-    name: Cow<'static, str>,
-    err: String
+    pub name: Cow<'static, str>,
+    pub err: String
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -42,7 +42,7 @@ pub trait OscEditable {
     fn edit(&mut self, path: &str, args: Vec<OscType>) -> BackendResult<()>;
 }
 pub trait ActionController {
-    type Parameters: Serialize + Deserialize + Clone + Debug;
+    type Parameters: Serialize + Deserialize + Clone + Debug + Default;
 
     fn desc(&self) -> String;
     fn get_params(&self) -> &Self::Parameters;
@@ -214,11 +214,11 @@ impl Action {
             }
         }
     }
-    pub fn set_params(&mut self, data: &str) -> BackendResult<()> {
+    pub fn set_params(&mut self, data: ActionParameters) -> BackendResult<()> {
         match self.ctl {
             ActionType::Audio(ref mut a) => {
-                let data = serde_json::from_str(data)?;
-                a.set_params(data);
+                let ActionParameters::Audio(d) = data;
+                a.set_params(d);
                 Ok(())
             }
         }

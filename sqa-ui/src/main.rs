@@ -24,7 +24,6 @@ mod errors;
 mod sync;
 mod actions;
 mod connection;
-static INTERFACE_SRC: &str = include_str!("ui.glade");
 
 use sync::{UIContext, BackendContext};
 fn main() {
@@ -51,7 +50,7 @@ fn main() {
         panic!("The future resolved! What is this sorcery?!");
     });
     println!("[+] Initialising UI context");
-    let b = Builder::new_from_string(INTERFACE_SRC);
+    let b = Builder::new_from_string(util::INTERFACE_SRC);
     let mut ctx = UIContext {
         rx: urx,
         tx: btx,
