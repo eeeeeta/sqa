@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{Builder, Button};
+use gtk::{Builder, Button, Widget};
 use super::{ActionUI, OpaqueAction, ActionUIMessage, UITemplate, ActionMessageInner};
 use sync::UISender;
 use uuid::Uuid;
@@ -168,11 +168,14 @@ impl ActionUI for AudioUI {
         }
 
     }
-    fn show(&mut self) {
-        self.temp.pwin.window.show_all();
+    fn edit_separately(&mut self) {
+        self.temp.edit_separately();
     }
     fn on_mixer(&mut self, cnf: &MixerConf) {
         self.cnf = cnf.clone();
         println!("new mixer conf: {:?}", self.cnf);
+    }
+    fn get_container(&mut self) -> Option<Widget> {
+        self.temp.get_container()
     }
 }

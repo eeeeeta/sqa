@@ -7,6 +7,7 @@ pub struct PropertyWindow {
     pub header_lbl: Label,
     pub subheader_lbl: Label,
     pub header_img: Image,
+    pub props_box_box: Box,
     pub props_box: Box,
     pub button_box: ButtonBox
 }
@@ -15,7 +16,7 @@ impl PropertyWindow {
         let b = Builder::new_from_string(util::INTERFACE_SRC);
         let ctx = build!(PropertyWindow using b
                          get window, header_lbl, subheader_lbl, header_img,
-                         props_box, button_box);
+                         props_box, props_box_box, button_box);
         ctx.window.connect_delete_event(move |slf, _| {
             slf.hide();
             Inhibit(true)

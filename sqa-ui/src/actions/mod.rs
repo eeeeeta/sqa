@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{self, TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags};
+use gtk::{self, Widget, TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack, SelectionMode};
 use gdk;
 use uuid::Uuid;
 use std::collections::HashMap;
@@ -33,6 +33,8 @@ pub struct ActionController {
     store: ListStore,
     builder: Builder,
     tx: Option<UISender>,
+    cur_widget: Option<(Uuid, Widget)>,
+    sidebar: Stack,
     actions: HashMap<Uuid, Action>,
     medit: MenuItem,
     mdelete: MenuItem,
@@ -43,7 +45,8 @@ pub struct ActionController {
 pub trait ActionUI {
     fn on_update(&mut self, p: &OpaqueAction);
     fn on_message(&mut self, m: ActionMessageInner);
-    fn show(&mut self);
+    fn edit_separately(&mut self);
+    fn get_container(&mut self) -> Option<Widget>;
     fn on_mixer(&mut self, _m: &MixerConf) {}
 }
 pub trait ActionUIMessage {
@@ -59,6 +62,7 @@ pub struct UITemplate {
     pub load_btn: Button,
     pub execute_btn: Button,
     pub tx: UISender,
+    pub popped_out: bool,
     pub uu: Uuid
 }
 
@@ -71,6 +75,7 @@ impl UITemplate {
         let load_btn = Button::new_with_mnemonic("_Load");
         let execute_btn = Button::new_with_mnemonic("_Execute");
         let btn_box = ButtonBox::new(Orientation::Horizontal);
+        let popped_out = false;
         btn_box.set_layout(ButtonBoxStyle::Spread);
         btn_box.pack_start(&load_btn, false, false, 0);
         btn_box.pack_start(&execute_btn, false, false, 0);
@@ -78,7 +83,26 @@ impl UITemplate {
         pwin.append_button(&cancel_btn);
         pwin.append_button(&apply_btn);
         pwin.props_box.pack_start(&btn_box, false, false, 0);
-        UITemplate { pwin, apply_btn, ok_btn, cancel_btn, load_btn, execute_btn, tx, uu }
+        UITemplate { pwin, apply_btn, ok_btn, cancel_btn, load_btn, execute_btn, popped_out, tx, uu }
+    }
+    pub fn get_container(&mut self) -> Option<Widget> {
+        if self.pwin.window.is_visible() {
+            None
+        }
+        else {
+            if !self.popped_out {
+                self.pwin.props_box_box.remove(&self.pwin.props_box);
+                self.popped_out = true;
+            }
+            Some(self.pwin.props_box.clone().upcast())
+        }
+    }
+    pub fn edit_separately(&mut self) {
+        if self.popped_out {
+            self.popped_out = false;
+            self.pwin.props_box_box.pack_start(&self.pwin.props_box, true, true, 0);
+        }
+        self.pwin.window.show_all();
     }
     pub fn bind<T: ActionUIMessage>(&mut self) {
         let uu = self.uu;
@@ -176,10 +200,11 @@ impl ActionController {
         let actions = HashMap::new();
         let builder = b.clone();
         let tx = None;
+        let cur_widget = None;
         let mixer = Default::default();
         build!(ActionController using b
-               with actions, builder, tx, mixer
-               get view, store, medit, mload, mexec, mdelete, mcreate_audio)
+               with actions, builder, tx, mixer, cur_widget
+               get view, store, medit, mload, mexec, mdelete, mcreate_audio, sidebar)
     }
     pub fn bind(&mut self, tx: &UISender) {
         use self::ActionMessageInner::*;
@@ -211,12 +236,19 @@ impl ActionController {
         tx.send_internal(ActionInternalMessage::SelectionChanged);
     }
     fn update_store(&mut self) {
+        let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
+        let sel = tsg.get();
         self.store.clear();
         for (uu, action) in self.actions.iter() {
-            self.store.insert_with_values(None, &[0, 1], &[
+            let iter = self.store.insert_with_values(None, &[0, 1], &[
                 &uu.to_string(),
                 &action.inner.desc
             ]);
+            if let Some(u2) = sel {
+                if *uu == u2 {
+                    tsg.sel.select_iter(&iter);
+                }
+            }
         }
     }
     fn on_action_info(&mut self, uu: Uuid, data: OpaqueAction) {
@@ -264,11 +296,34 @@ impl ActionController {
                 self.tx.as_mut().unwrap().send(Command::CreateAction { typ: typ.into() });
             },
             SelectionChanged => {
-                let activated = self.view.get_selection().get_selected().is_some();
+                let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
+                let activated = tsg.get().is_some();
                 self.medit.set_sensitive(activated);
                 self.mload.set_sensitive(activated);
                 self.mexec.set_sensitive(activated);
                 self.mdelete.set_sensitive(activated);
+                if let Some(uu) = tsg.get() {
+                    if let Some((u2, w)) = self.cur_widget.take() {
+                        if uu == u2 {
+                            self.cur_widget = Some((u2, w));
+                            return;
+                        }
+                        self.sidebar.remove(&w);
+                    }
+                    if let Some(act) = self.actions.get_mut(&uu) {
+                        if let Some(w) = act.ctl.get_container() {
+                            self.sidebar.add_named(&w, "action");
+                            w.show_all();
+                            self.sidebar.set_visible_child(&w);
+                            self.cur_widget = Some((uu, w));
+                        }
+                    }
+                }
+                else {
+                    if let Some((_, w)) = self.cur_widget.take() {
+                        self.sidebar.remove(&w);
+                    }
+                }
             },
             FilesDropped(files) => {
                 for file in files {
@@ -285,13 +340,23 @@ impl ActionController {
     }
     pub fn on_action_msg(&mut self, msg: ActionMessage) {
         let tx = self.tx.as_mut().unwrap();
-        if let Some(ref mut act) = self.actions.get_mut(&msg.0) {
+        if let Some(act) = self.actions.get_mut(&msg.0) {
             use self::ActionMessageInner::*;
             match msg.1 {
                 LoadAction => tx.send(Command::LoadAction { uuid: msg.0 }),
                 ExecuteAction => tx.send(Command::ExecuteAction { uuid: msg.0 }),
                 DeleteAction => tx.send(Command::DeleteAction { uuid: msg.0 }),
-                EditAction => act.ctl.show(),
+                EditAction => {
+                    if let Some((uu, w)) = self.cur_widget.take() {
+                        if uu == msg.0 {
+                            self.sidebar.remove(&w);
+                        }
+                        else {
+                            self.cur_widget = Some((uu, w));
+                        }
+                    }
+                    act.ctl.edit_separately()
+                },
                 x => act.ctl.on_message(x)
             }
         }
