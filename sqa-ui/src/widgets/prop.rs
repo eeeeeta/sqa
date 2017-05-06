@@ -37,8 +37,8 @@ impl PropertyWindow {
         label.set_markup(text);
         label.set_halign(Align::Start);
         let bx = Box::new(Orientation::Horizontal, 0);
-        bx.pack_start(&label, true, true, 5);
-        bx.pack_end(prop, false, true, 5);
+        bx.pack_start(&label, false, true, 5);
+        bx.pack_end(prop, true, true, 5);
         self.props_box.pack_start(&bx, false, true, 5);
         label
     }
