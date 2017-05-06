@@ -22,6 +22,7 @@ mod util;
 mod widgets;
 mod errors;
 mod sync;
+mod messages;
 mod actions;
 mod connection;
 
@@ -57,7 +58,8 @@ fn main() {
         stn: tn.clone(),
         stx: utx,
         conn: connection::ConnectionController::new(&b),
-        act: actions::ActionController::new(&b)
+        act: actions::ActionController::new(&b),
+        msg: messages::MessageController::new(&b)
     };
     ctx.bind_all();
     let ctx = RefCell::new(ctx);

@@ -58,6 +58,8 @@ pub enum Reply {
     ServerVersion { #[verbatim = "string"] ver: String },
     #[oscpath = "/reply/subscribe"]
     Subscribed,
+    #[oscpath = "/error/deserfail"]
+    DeserFailed { #[verbatim = "string"] err: String },
 
     #[oscpath = "/reply/action/create"]
     ActionCreated { #[ser] res: Result<Uuid, String> },

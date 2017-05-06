@@ -6,6 +6,7 @@ use sqa_backend::codec::{Reply, Command};
 use util::ThreadNotifier;
 use tokio_core::reactor::{Handle, Remote};
 use futures::{Poll, Async, Future, Stream};
+use messages;
 use errors;
 use actions;
 
@@ -16,7 +17,7 @@ pub enum UIMessage {
     ActionMessage(actions::ActionMessage),
     ActionInternal(actions::ActionInternalMessage),
     UpdatedMixerConf(MixerConf),
-    NewlyConnected
+    Message(messages::Message)
 }
 pub enum BackendMessage {
     Connection(ConnectionMessage)
@@ -33,7 +34,8 @@ message_impls!(
     ActionReply, Reply,
     ActionMessage, actions::ActionMessage,
     ActionInternal, actions::ActionInternalMessage,
-    UpdatedMixerConf, MixerConf
+    UpdatedMixerConf, MixerConf,
+    Message, messages::Message
 );
 message_impls!(
     BackendMessage,
@@ -53,7 +55,8 @@ pub struct UIContext {
     pub stn: ThreadNotifier,
     pub tx: mpsc::UnboundedSender<BackendMessage>,
     pub conn: connection::ConnectionController,
-    pub act: actions::ActionController
+    pub act: actions::ActionController,
+    pub msg: messages::MessageController
 }
 #[derive(Clone)]
 pub struct UISender {
@@ -131,7 +134,7 @@ impl UIContext {
                 ActionInternal(msg) => self.act.on_internal(msg),
                 ActionMessage(msg) => self.act.on_action_msg(msg),
                 UpdatedMixerConf(cnf) => self.act.on_mixer(cnf),
-                NewlyConnected => self.conn.on_newly_connected()
+                Message(msg) => self.msg.on_message(msg)
             }
         }
     }

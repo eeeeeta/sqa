@@ -10,11 +10,11 @@ use time::{Duration, SteadyTime};
 use serde::Serialize;
 use serde_json;
 use rosc::{OscType, OscMessage};
+use codec::Reply;
 use errors::*;
 use std::io::Result as IoResult;
 
 pub const INTERNAL_BUFFER_SIZE: usize = 128;
-pub const VERSION: &str = "SQA Backend alpha";
 
 #[derive(Debug)]
 pub struct Party {
@@ -121,10 +121,9 @@ impl<H> Connection<H> where H: ConnHandler {
                 }
             },
             Err(e) => {
-                self.data.framed.start_send(addr.msg_to(OscMessage {
-                    addr: "/error/deserfail".into(),
-                    args: Some(vec![OscType::String(e.to_string())])
-                }))?;
+                self.data.framed.start_send(addr.msg_to(
+                    Reply::DeserFailed { err: e.to_string() }.into()
+                ))?;
                 println!("Deser failed: {:?}", e);
             }
         };

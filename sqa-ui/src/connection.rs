@@ -8,6 +8,7 @@ use futures::{Sink, Stream, Async, Future};
 use sync::{BackendContextArgs, UIMessage, UISender};
 use widgets::{PropertyWindow, FallibleEntry};
 use errors;
+use messages::Message;
 use time;
 use std::mem;
 use std::time::Duration;
@@ -23,7 +24,9 @@ pub enum ConnectionState {
 }
 pub enum ConnectionUIMessage {
     ConnectClicked,
-    Show
+    Show,
+    NewlyConnected,
+    NewlyDisconnected
 }
 pub enum ConnectionMessage {
     Disconnect,
@@ -106,7 +109,7 @@ impl Context {
                     self.state = Connected { addr, ver, last_ping, last_err };
                     self.send(Command::GetMixerConf)?;
                     self.send(Command::ActionList)?;
-                    args.send(UIMessage::NewlyConnected);
+                    args.send(ConnectionUIMessage::NewlyConnected.into());
                     Ok(true)
                 }
                 else {
@@ -162,7 +165,14 @@ impl Context {
             if let Some(data) = self.sock.as_mut().map(|s| s.poll()) {
                 match data {
                     Ok(Async::Ready(Some(res))) => {
-                        if self.handle_external(res?, &mut args)? {
+                        let res = match res {
+                            Ok(r) => r,
+                            Err(e) => {
+                                args.send(Message::Error(format!("Error deserialising reply from server: {}", e)).into());
+                                continue
+                            }
+                        };
+                        if self.handle_external(res, &mut args)? {
                             self.notify_state_change(&mut args);
                         }
                     },
@@ -251,11 +261,18 @@ impl ConnectionController {
                     },
                 }
             },
-            Show => self.pwin.window.show_all()
+            Show => self.pwin.window.show_all(),
+            NewlyConnected => {
+                self.pwin.window.hide();
+                self.tx.as_mut().unwrap()
+                    .send_internal(Message::Statusbar("Connected to server.".into()));
+            },
+            NewlyDisconnected => {
+                self.tx.as_mut().unwrap().
+                    send_internal(Message::Statusbar("Disconnected from server.".into()));
+                self.pwin.window.show_all();
+            }
         }
-    }
-    pub fn on_newly_connected(&mut self) {
-        self.pwin.window.hide();
     }
     pub fn on_state_change(&mut self, msg: ConnectionState) {
         use self::ConnectionState::*;
