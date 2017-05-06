@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{Window, Box, ButtonBox, Button, Label, Image, Builder, IsA, Widget, Orientation, IconSize};
+use gtk::{Window, Box, ButtonBox, Button, Label, Image, Builder, IsA, Widget, Orientation, IconSize, Inhibit};
 use util;
 
 pub struct PropertyWindow {
@@ -13,9 +13,14 @@ pub struct PropertyWindow {
 impl PropertyWindow {
     pub fn new() -> Self {
         let b = Builder::new_from_string(util::INTERFACE_SRC);
-        build!(PropertyWindow using b
-               get window, header_lbl, subheader_lbl, header_img,
-               props_box, button_box)
+        let ctx = build!(PropertyWindow using b
+                         get window, header_lbl, subheader_lbl, header_img,
+                         props_box, button_box);
+        ctx.window.connect_delete_event(move |slf, _| {
+            slf.hide();
+            Inhibit(true)
+        });
+        ctx
     }
     pub fn update_header<T: AsRef<str>, U: AsRef<str>>(&mut self, img_stock: &str, header: T, subheader: U) {
         self.set_stock_img(img_stock);
@@ -27,7 +32,8 @@ impl PropertyWindow {
     }
     pub fn append_property<T: IsA<Widget>>(&mut self, text: &str, prop: &T) -> Label {
         use gtk::Align;
-        let label = Label::new(Some(text));
+        let label = Label::new(None);
+        label.set_markup(text);
         label.set_halign(Align::Start);
         let bx = Box::new(Orientation::Horizontal, 0);
         bx.pack_start(&label, true, true, 5);

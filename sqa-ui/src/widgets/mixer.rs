@@ -43,7 +43,8 @@ impl SliderBox {
         let mut sliders = Vec::with_capacity(n_input);
         for n in 0..n_input {
             let bx = Box::new(Orientation::Vertical, 5);
-            let lbl = Label::new(Some(&format!("{}", (n+1)) as &str));
+            let lbl = Label::new(None);
+            lbl.set_markup(&format!("<i>{}</i>", (n+1)));
             let vol = Entry::new();
             let patch = Entry::new();
             let sep = Separator::new(Orientation::Horizontal);

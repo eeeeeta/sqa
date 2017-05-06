@@ -65,11 +65,12 @@ impl SpoolerContext {
                         }
                     },
                     Err(e) => {
-                        let msg = format!("Spooler error: {:?}", e);
+                        println!("FIXME: spooler error {:?}", e);
+                        /*
                         self.sender.send(ServerMessage::ActionStateChange(self.uuid,
                                                                           PlaybackState::Errored(msg)))
                             .unwrap();
-                        return;
+                        return;*/
                     }
                 }
             }
@@ -127,7 +128,10 @@ impl ActionController for Controller {
                         Ok(mf) => {
                             if p.chans.len() != mf.channels() {
                                 if p.chans.len() == 0 {
-                                    p.chans = vec![Default::default(); mf.channels()];
+                                    p.chans = (0..mf.channels())
+                                        .map(|idx| ctx.mixer.obtain_def(idx))
+                                        .map(|patch| AudioChannel { patch, .. Default::default() })
+                                        .collect::<Vec<_>>();
                                 }
                                 else if p.chans.len() < mf.channels() {
                                     let len = p.chans.len();
@@ -173,7 +177,7 @@ impl ActionController for Controller {
                     if self.params.chans.len() > mf.channels() {
                         ret.push(ParameterError {
                             name: "chans".into(),
-                            err: "The file has less channels than expected (FIXME: better error message here)".into()
+                            err: "The file has fewer channels than expected (FIXME: better error message here)".into()
                         });
                     }
                 }
