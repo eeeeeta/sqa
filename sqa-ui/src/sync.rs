@@ -14,7 +14,9 @@ pub enum UIMessage {
     ConnMessage(ConnectionUIMessage),
     ActionReply(Reply),
     ActionMessage(actions::ActionMessage),
-    UpdatedMixerConf(MixerConf)
+    ActionInternal(actions::ActionInternalMessage),
+    UpdatedMixerConf(MixerConf),
+    NewlyConnected
 }
 pub enum BackendMessage {
     Connection(ConnectionMessage)
@@ -30,6 +32,7 @@ message_impls!(
     ConnMessage, ConnectionUIMessage,
     ActionReply, Reply,
     ActionMessage, actions::ActionMessage,
+    ActionInternal, actions::ActionInternalMessage,
     UpdatedMixerConf, MixerConf
 );
 message_impls!(
@@ -125,8 +128,10 @@ impl UIContext {
                 ConnState(msg) => self.conn.on_state_change(msg),
                 ConnMessage(msg) => self.conn.on_msg(msg),
                 ActionReply(rpl) => self.act.on_action_reply(rpl),
-                ActionMessage(msg) => self.act.on_internal(msg),
-                UpdatedMixerConf(cnf) => self.act.on_mixer(cnf)
+                ActionInternal(msg) => self.act.on_internal(msg),
+                ActionMessage(msg) => self.act.on_action_msg(msg),
+                UpdatedMixerConf(cnf) => self.act.on_mixer(cnf),
+                NewlyConnected => self.conn.on_newly_connected()
             }
         }
     }

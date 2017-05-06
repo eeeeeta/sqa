@@ -60,7 +60,6 @@ fn main() {
         act: actions::ActionController::new(&b)
     };
     ctx.bind_all();
-    ctx.conn.pwin.window.show_all();
     let ctx = RefCell::new(ctx);
     tn.register_handler(move || {
         ctx.borrow_mut().on_event();

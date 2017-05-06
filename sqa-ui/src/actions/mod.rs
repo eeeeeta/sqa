@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder};
+use gtk::{TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder, MenuItem, TreeSelection};
 use uuid::Uuid;
 use std::collections::HashMap;
 use std::mem;
@@ -8,16 +8,19 @@ use widgets::PropertyWindow;
 use sqa_backend::codec::{Command, Reply};
 use sqa_backend::mixer::MixerConf;
 use sqa_backend::actions::{ActionParameters, PlaybackState, OpaqueAction};
-use sqa_backend::actions::audio::Controller as AudioController;
-
-use connection::ConnectionState;
 
 pub mod audio;
 use self::audio::AudioUI;
+pub enum ActionInternalMessage {
+    Create(&'static str),
+    SelectionChanged
+}
 pub enum ActionMessageInner {
     Audio(audio::AudioMessage),
     LoadAction,
     ExecuteAction,
+    DeleteAction,
+    EditAction
 }
 pub type ActionMessage = (Uuid, ActionMessageInner);
 pub struct ActionController {
@@ -26,13 +29,18 @@ pub struct ActionController {
     store: ListStore,
     builder: Builder,
     tx: Option<UISender>,
-    actions: HashMap<Uuid, Action>
+    actions: HashMap<Uuid, Action>,
+    medit: MenuItem,
+    mdelete: MenuItem,
+    mload: MenuItem,
+    mexec: MenuItem,
+    mcreate_audio: MenuItem
 }
 pub trait ActionUI {
     fn on_update(&mut self, p: &OpaqueAction);
     fn on_message(&mut self, m: ActionMessageInner);
     fn show(&mut self);
-    fn on_mixer(&mut self, m: &MixerConf) {}
+    fn on_mixer(&mut self, _m: &MixerConf) {}
 }
 pub trait ActionUIMessage {
     fn apply() -> ActionMessageInner;
@@ -91,6 +99,23 @@ impl UITemplate {
         playback_state_update(p, &mut self.pwin);
     }
 }
+#[derive(Clone)]
+struct TreeSelectGetter {
+    sel: TreeSelection,
+    ts: ListStore
+}
+impl TreeSelectGetter {
+    pub fn get(&self) -> Option<Uuid> {
+        if let Some((_, ti)) = self.sel.get_selected() {
+            if let Some(v) = self.ts.get_value(&ti, 0).get::<String>() {
+                if let Ok(uu) = Uuid::parse_str(&v) {
+                    return Some(uu);
+                }
+            }
+        }
+        None
+    }
+}
 pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {
     use self::PlaybackState::*;
     match p.state {
@@ -131,6 +156,17 @@ pub struct Action {
     inner: OpaqueAction,
     ctl: Box<ActionUI>
 }
+macro_rules! bind_action_menu_items {
+    ($self:ident, $tx:ident, $tsg:ident, $($name:ident => $res:ident),*) => {
+        $(
+            $self.$name.connect_activate(clone!($tx, $tsg; |_s| {
+                if let Some(uu) = $tsg.get() {
+                    $tx.send_internal((uu, $res));
+                }
+            }));
+        )*
+    }
+}
 impl ActionController {
     pub fn new(b: &Builder) -> Self {
         let actions = HashMap::new();
@@ -139,10 +175,26 @@ impl ActionController {
         let mixer = Default::default();
         build!(ActionController using b
                with actions, builder, tx, mixer
-               get view, store)
+               get view, store, medit, mload, mexec, mdelete, mcreate_audio)
     }
     pub fn bind(&mut self, tx: &UISender) {
+        use self::ActionMessageInner::*;
         self.tx = Some(tx.clone());
+        let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
+        bind_action_menu_items! {
+            self, tx, tsg,
+            medit => EditAction,
+            mexec => ExecuteAction,
+            mload => LoadAction,
+            mdelete => DeleteAction
+        }
+        self.view.get_selection().connect_changed(clone!(tx; |_s| {
+            tx.send_internal(ActionInternalMessage::SelectionChanged);
+        }));
+        self.mcreate_audio.connect_activate(clone!(tx; |_s| {
+            tx.send_internal(ActionInternalMessage::Create("audio"));
+        }));
+        tx.send_internal(ActionInternalMessage::SelectionChanged);
     }
     fn update_store(&mut self) {
         self.store.clear();
@@ -161,11 +213,10 @@ impl ActionController {
             act.ctl.on_update(&act.inner);
         }
         else {
-            let mut aui = match data.params {
+            let aui = match data.params {
                 ActionParameters::Audio(..) =>
                     Box::new(AudioUI::new(&self.builder, data.uu, self.tx.as_ref().unwrap().clone()))
             };
-            aui.show();
             let mut act = Action {
                 inner: data,
                 ctl: aui
@@ -192,13 +243,30 @@ impl ActionController {
         }
         self.update_store();
     }
-    pub fn on_internal(&mut self, msg: ActionMessage) {
+    pub fn on_internal(&mut self, msg: ActionInternalMessage) {
+        use self::ActionInternalMessage::*;
+        match msg {
+            Create(typ) => {
+                self.tx.as_mut().unwrap().send(Command::CreateAction { typ: typ.into() });
+            },
+            SelectionChanged => {
+                let activated = self.view.get_selection().get_selected().is_some();
+                self.medit.set_sensitive(activated);
+                self.mload.set_sensitive(activated);
+                self.mexec.set_sensitive(activated);
+                self.mdelete.set_sensitive(activated);
+            },
+        }
+    }
+    pub fn on_action_msg(&mut self, msg: ActionMessage) {
         let tx = self.tx.as_mut().unwrap();
         if let Some(ref mut act) = self.actions.get_mut(&msg.0) {
             use self::ActionMessageInner::*;
             match msg.1 {
                 LoadAction => tx.send(Command::LoadAction { uuid: msg.0 }),
                 ExecuteAction => tx.send(Command::ExecuteAction { uuid: msg.0 }),
+                DeleteAction => tx.send(Command::DeleteAction { uuid: msg.0 }),
+                EditAction => act.ctl.show(),
                 x => act.ctl.on_message(x)
             }
         }

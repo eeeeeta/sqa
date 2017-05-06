@@ -2,7 +2,7 @@ use tokio_core::net::{UdpFramed, UdpSocket};
 use tokio_core::reactor::{Timeout};
 use sqa_backend::codec::{SqaClientCodec, Reply, Command};
 use gtk::prelude::*;
-use gtk::{Button, Builder};
+use gtk::{Button, Builder, MenuItem};
 use std::net::SocketAddr;
 use futures::{Sink, Stream, Async, Future};
 use sync::{BackendContextArgs, UIMessage, UISender};
@@ -22,7 +22,8 @@ pub enum ConnectionState {
     RecvThreadFailed
 }
 pub enum ConnectionUIMessage {
-    ConnectClicked
+    ConnectClicked,
+    Show
 }
 pub enum ConnectionMessage {
     Disconnect,
@@ -105,6 +106,7 @@ impl Context {
                     self.state = Connected { addr, ver, last_ping, last_err };
                     self.send(Command::GetMixerConf)?;
                     self.send(Command::ActionList)?;
+                    args.send(UIMessage::NewlyConnected);
                     Ok(true)
                 }
                 else {
@@ -194,7 +196,8 @@ pub struct ConnectionController {
     connect_btn: Button,
     disconnect_btn: Button,
     tx: Option<UISender>,
-    state: ConnectionState
+    state: ConnectionState,
+    menuitem: MenuItem
 }
 
 impl ConnectionController {
@@ -208,7 +211,9 @@ impl ConnectionController {
         pwin.append_button(&disconnect_btn);
         let tx = None;
         let state = ConnectionState::Disconnected;
-        let mut ret = ConnectionController { pwin, ipe, connect_btn, disconnect_btn, tx, state };
+        let mut ret = build!(ConnectionController using b
+                             with pwin, ipe, connect_btn, disconnect_btn, tx, state
+                             get menuitem);
         ret.on_state_change(ConnectionState::Disconnected);
         ret
     }
@@ -221,6 +226,9 @@ impl ConnectionController {
         }));
         self.ipe.on_enter(clone!(tx; |_a| {
             tx.send_internal(ConnectionUIMessage::ConnectClicked);
+        }));
+        self.menuitem.connect_activate(clone!(tx; |_a| {
+            tx.send_internal(ConnectionUIMessage::Show);
         }));
         self.tx = Some(tx.clone());
     }
@@ -242,8 +250,12 @@ impl ConnectionController {
                         self.ipe.throw_error(&e.to_string());
                     },
                 }
-            }
+            },
+            Show => self.pwin.window.show_all()
         }
+    }
+    pub fn on_newly_connected(&mut self) {
+        self.pwin.window.hide();
     }
     pub fn on_state_change(&mut self, msg: ConnectionState) {
         use self::ConnectionState::*;

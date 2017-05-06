@@ -150,7 +150,7 @@ impl ConnHandler for Context {
                         println!("FIXME: handle failure to get_data");
                     }
                 }
-                d.broadcast(ReplyActionList { list: resp })?;
+                d.respond(ReplyActionList { list: resp })?;
             },
             DeleteAction { uuid } => {
                 if self.actions.remove(&uuid).is_some() {
