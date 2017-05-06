@@ -8,6 +8,7 @@ extern crate time;
 #[macro_use] extern crate error_chain;
 extern crate gdk;
 extern crate uuid;
+extern crate url;
 
 use gtk::prelude::*;
 use gtk::{Builder, Window};

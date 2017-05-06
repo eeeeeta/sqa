@@ -10,6 +10,7 @@ error_chain! {
     foreign_links {
         Serde(::serde_json::Error);
         Io(::std::io::Error);
+        StrParse(::std::string::ParseError);
     }
     errors {
         OSC(t: String) {

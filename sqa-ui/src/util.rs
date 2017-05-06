@@ -59,16 +59,18 @@ macro_rules! message_impls {
     }
 }
 macro_rules! clone {
-    ($($n:ident),+; || $body:block) => (
+    (@param _) => ( _ );
+    (@param $x:ident) => ( $x );
+    ($($n:ident),+; || $body:expr) => (
         {
             $( let $n = $n.clone(); )+
-                move || { $body }
+            move || $body
         }
     );
-    ($($n:ident),+; |$($p:ident),+| $body:block) => (
+    ($($n:ident),+; |$($p:tt),+| $body:expr) => (
         {
             $( let $n = $n.clone(); )+
-                move |$($p),+| { $body }
+            move |$(clone!(@param $p),)+| $body
         }
     );
 }

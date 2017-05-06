@@ -1,5 +1,6 @@
 use gtk::prelude::*;
-use gtk::{TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder, MenuItem, TreeSelection};
+use gtk::{self, TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags};
+use gdk;
 use uuid::Uuid;
 use std::collections::HashMap;
 use std::mem;
@@ -8,12 +9,15 @@ use widgets::PropertyWindow;
 use sqa_backend::codec::{Command, Reply};
 use sqa_backend::mixer::MixerConf;
 use sqa_backend::actions::{ActionParameters, PlaybackState, OpaqueAction};
+use sqa_backend::actions::audio::AudioParams;
+use url::percent_encoding;
 
 pub mod audio;
 use self::audio::AudioUI;
 pub enum ActionInternalMessage {
     Create(&'static str),
-    SelectionChanged
+    SelectionChanged,
+    FilesDropped(Vec<String>)
 }
 pub enum ActionMessageInner {
     Audio(audio::AudioMessage),
@@ -188,12 +192,22 @@ impl ActionController {
             mload => LoadAction,
             mdelete => DeleteAction
         }
-        self.view.get_selection().connect_changed(clone!(tx; |_s| {
+        self.view.get_selection().connect_changed(clone!(tx; |_| {
             tx.send_internal(ActionInternalMessage::SelectionChanged);
         }));
-        self.mcreate_audio.connect_activate(clone!(tx; |_s| {
+        self.mcreate_audio.connect_activate(clone!(tx; |_| {
             tx.send_internal(ActionInternalMessage::Create("audio"));
         }));
+        let dnd_targets = vec![TargetEntry::new("text/uri-list", TargetFlags::empty(), 0)];
+        self.view.drag_dest_set(gtk::DEST_DEFAULT_ALL, &dnd_targets, gdk::ACTION_COPY | gdk::ACTION_MOVE);
+
+        self.view.connect_drag_data_received(clone!(tx; |_, _, _, _, data, _, _| {
+            let uris = data.get_uris();
+            println!("dnd: got uris {:?}", uris);
+            if uris.len() == 0 { return; }
+            tx.send_internal(ActionInternalMessage::FilesDropped(uris));
+        }));
+
         tx.send_internal(ActionInternalMessage::SelectionChanged);
     }
     fn update_store(&mut self) {
@@ -255,6 +269,17 @@ impl ActionController {
                 self.mload.set_sensitive(activated);
                 self.mexec.set_sensitive(activated);
                 self.mdelete.set_sensitive(activated);
+            },
+            FilesDropped(files) => {
+                for file in files {
+                    if let Ok(url) = percent_encoding::percent_decode(file.as_bytes()).decode_utf8() {
+                        let mut params: AudioParams = Default::default();
+                        params.url = Some(url.into());
+                        let params = ActionParameters::Audio(params);
+                        self.tx.as_mut().unwrap()
+                            .send(Command::CreateActionWithParams { typ: "audio".into(), params });
+                    }
+                }
             },
         }
     }

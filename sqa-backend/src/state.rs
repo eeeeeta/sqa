@@ -93,12 +93,25 @@ impl ConnHandler for Context {
                 d.subscribe();
                 d.respond(Subscribed)?;
             },
-            CreateAction { typ } => {
-                let res = ActionCreated { res: match &*typ {
+            x @ CreateAction { .. } | x @ CreateActionWithParams { .. } => {
+                let ty;
+                let mut pars = None;
+                match x {
+                    CreateAction { typ } => ty = typ,
+                    CreateActionWithParams { typ, params } => {
+                        ty = typ;
+                        pars = Some(params);
+                    },
+                    _ => unreachable!()
+                }
+                let res = ActionCreated { res: match &*ty {
                     "audio" => {
                         let mut act = Action::new_audio();
                         let uu = act.uuid();
                         let mut ctx = ctx_from_self!(self);
+                        if let Some(pars) = pars {
+                            act.set_params(pars, &mut ctx);
+                        }
                         Self::on_action_changed(d, &mut act, &mut ctx);
                         self.actions.insert(uu, act);
                         Ok(uu)

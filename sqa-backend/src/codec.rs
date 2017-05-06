@@ -19,8 +19,12 @@ pub enum Command {
     Version,
     #[oscpath = "/subscribe"]
     Subscribe,
-    #[oscpath = "/action/create"]
-    CreateAction { #[verbatim = "string"] typ: String },
+    #[oscpath = "/actions/{typ}/new"]
+    CreateAction { #[subst] typ: String },
+    #[oscpath = "/actions/{typ}/new/withparams"]
+    CreateActionWithParams { #[subst] typ: String, #[ser] params: ActionParameters },
+    #[oscpath = "/actionlist"]
+    ActionList,
     #[oscpath = "/action/{uuid}"]
     ActionInfo { #[subst] uuid: Uuid },
     #[oscpath = "/action/{uuid}/update"]
@@ -37,8 +41,6 @@ pub enum Command {
     LoadAction { #[subst] uuid: Uuid },
     #[oscpath = "/action/{uuid}/execute"]
     ExecuteAction { #[subst] uuid: Uuid },
-    #[oscpath = "/actionlist"]
-    ActionList,
     #[oscpath = "/mixer/config"]
     GetMixerConf,
     #[oscpath = "/mixer/config/set"]
@@ -61,7 +63,7 @@ pub enum Reply {
     #[oscpath = "/error/deserfail"]
     DeserFailed { #[verbatim = "string"] err: String },
 
-    #[oscpath = "/reply/action/create"]
+    #[oscpath = "/reply/actions/create"]
     ActionCreated { #[ser] res: Result<Uuid, String> },
     #[oscpath = "/reply/action/{uuid}"]
     ActionInfoRetrieved { #[subst] uuid: Uuid, #[ser] res: Result<OpaqueAction, String> },
