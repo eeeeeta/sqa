@@ -117,7 +117,7 @@ impl ConnHandler for Context {
             },
             UpdateActionParams { uuid, params } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
-                    let ret = a.set_params(params).map_err(|e| e.to_string());
+                    let ret = a.set_params(params, &mut ctx).map_err(|e| e.to_string());
                     Self::on_action_changed(d, a, &mut ctx);
                     ret
                 });
@@ -138,6 +138,19 @@ impl ConnHandler for Context {
                     ret
                 });
                 d.respond(ActionExecuted { uuid, res })?;
+            },
+            ActionList => {
+                let mut ctx = ctx_from_self!(self);
+                let mut resp = HashMap::new();
+                for (uu, act) in self.actions.iter_mut() {
+                    if let Ok(data) = act.get_data(&mut ctx) {
+                        resp.insert(*uu, data);
+                    }
+                    else {
+                        println!("FIXME: handle failure to get_data");
+                    }
+                }
+                d.broadcast(ReplyActionList { list: resp })?;
             },
             DeleteAction { uuid } => {
                 if self.actions.remove(&uuid).is_some() {

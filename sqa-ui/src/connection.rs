@@ -71,8 +71,12 @@ impl Context {
             x @ ActionLoaded {..} |
             x @ ActionExecuted {..} |
             x @ UpdateActionInfo {..} |
-            x @ UpdateActionDeleted {..} => {
+            x @ UpdateActionDeleted {..} |
+            x @ ReplyActionList {..} => {
                 args.send(UIMessage::ActionReply(x));
+            },
+            UpdateMixerConf { conf } => {
+                args.send(UIMessage::UpdatedMixerConf(conf));
             },
             _ => {}
         }
@@ -99,6 +103,8 @@ impl Context {
                     let ver = ver.clone(); // FIXME: not ideal :p
                     self.ping_timeout(args)?;
                     self.state = Connected { addr, ver, last_ping, last_err };
+                    self.send(Command::GetMixerConf)?;
+                    self.send(Command::ActionList)?;
                     Ok(true)
                 }
                 else {

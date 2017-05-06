@@ -46,7 +46,7 @@ pub trait ActionController {
 
     fn desc(&self) -> String;
     fn get_params(&self) -> &Self::Parameters;
-    fn set_params(&mut self, Self::Parameters);
+    fn set_params(&mut self, Self::Parameters, ctx: &mut ActionContext);
     fn verify_params(&self, ctx: &mut ActionContext) -> Vec<ParameterError>;
     fn load(&mut self, _ctx: ControllerParams) -> BackendResult<bool> {
         Ok(true)
@@ -192,7 +192,7 @@ impl Action {
         let mut new = None;
         let mut active = false;
         match self.state {
-            Unverified(..) | Inactive => new = Some(action!(self.ctl).verify_params(ctx)),
+            Unverified(..) | Inactive => new = Some(action!(mut self.ctl).verify_params(ctx)),
             Active(_) => active = true,
             _ => {}
         }
@@ -214,11 +214,11 @@ impl Action {
             }
         }
     }
-    pub fn set_params(&mut self, data: ActionParameters) -> BackendResult<()> {
+    pub fn set_params(&mut self, data: ActionParameters, ctx: &mut ActionContext) -> BackendResult<()> {
         match self.ctl {
             ActionType::Audio(ref mut a) => {
                 let ActionParameters::Audio(d) = data;
-                a.set_params(d);
+                a.set_params(d, ctx);
                 Ok(())
             }
         }

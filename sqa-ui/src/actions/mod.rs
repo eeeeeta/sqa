@@ -1,11 +1,12 @@
 use gtk::prelude::*;
-use gtk::{TreeView, ListStore, Builder};
+use gtk::{TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder};
 use uuid::Uuid;
 use std::collections::HashMap;
 use std::mem;
 use sync::UISender;
 use widgets::PropertyWindow;
-use sqa_backend::codec::Reply;
+use sqa_backend::codec::{Command, Reply};
+use sqa_backend::mixer::MixerConf;
 use sqa_backend::actions::{ActionParameters, PlaybackState, OpaqueAction};
 use sqa_backend::actions::audio::Controller as AudioController;
 
@@ -14,11 +15,14 @@ use connection::ConnectionState;
 pub mod audio;
 use self::audio::AudioUI;
 pub enum ActionMessageInner {
-    Audio(audio::AudioMessage)
+    Audio(audio::AudioMessage),
+    LoadAction,
+    ExecuteAction,
 }
 pub type ActionMessage = (Uuid, ActionMessageInner);
 pub struct ActionController {
     view: TreeView,
+    mixer: MixerConf,
     store: ListStore,
     builder: Builder,
     tx: Option<UISender>,
@@ -28,6 +32,64 @@ pub trait ActionUI {
     fn on_update(&mut self, p: &OpaqueAction);
     fn on_message(&mut self, m: ActionMessageInner);
     fn show(&mut self);
+    fn on_mixer(&mut self, m: &MixerConf) {}
+}
+pub trait ActionUIMessage {
+    fn apply() -> ActionMessageInner;
+    fn ok() -> ActionMessageInner;
+    fn cancel() -> ActionMessageInner;
+}
+pub struct UITemplate {
+    pub pwin: PropertyWindow,
+    pub apply_btn: Button,
+    pub ok_btn: Button,
+    pub cancel_btn: Button,
+    pub load_btn: Button,
+    pub execute_btn: Button,
+    pub tx: UISender,
+    pub uu: Uuid
+}
+
+impl UITemplate {
+    pub fn new(uu: Uuid, tx: UISender) -> Self {
+        let mut pwin = PropertyWindow::new();
+        let apply_btn = Button::new_with_mnemonic("_Apply");
+        let ok_btn = Button::new_with_mnemonic("_OK");
+        let cancel_btn = Button::new_with_mnemonic("_Cancel");
+        let load_btn = Button::new_with_mnemonic("_Load");
+        let execute_btn = Button::new_with_mnemonic("_Execute");
+        let btn_box = ButtonBox::new(Orientation::Horizontal);
+        btn_box.set_layout(ButtonBoxStyle::Spread);
+        btn_box.pack_start(&load_btn, false, false, 0);
+        btn_box.pack_start(&execute_btn, false, false, 0);
+        pwin.append_button(&ok_btn);
+        pwin.append_button(&cancel_btn);
+        pwin.append_button(&apply_btn);
+        pwin.props_box.pack_start(&btn_box, false, false, 0);
+        UITemplate { pwin, apply_btn, ok_btn, cancel_btn, load_btn, execute_btn, tx, uu }
+    }
+    pub fn bind<T: ActionUIMessage>(&mut self) {
+        let uu = self.uu;
+        let ref tx = self.tx;
+        self.apply_btn.connect_clicked(clone!(tx; |_a| {
+            tx.send_internal((uu, T::apply()));
+        }));
+        self.ok_btn.connect_clicked(clone!(tx; |_a| {
+            tx.send_internal((uu, T::ok()));
+        }));
+        self.cancel_btn.connect_clicked(clone!(tx; |_a| {
+            tx.send_internal((uu, T::cancel()));
+        }));
+        self.load_btn.connect_clicked(clone!(tx; |_a| {
+            tx.send_internal((uu, ActionMessageInner::LoadAction));
+        }));
+        self.execute_btn.connect_clicked(clone!(tx; |_a| {
+            tx.send_internal((uu, ActionMessageInner::ExecuteAction));
+        }));
+    }
+    pub fn on_update(&mut self, p: &OpaqueAction) {
+        playback_state_update(p, &mut self.pwin);
+    }
 }
 pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {
     use self::PlaybackState::*;
@@ -74,8 +136,9 @@ impl ActionController {
         let actions = HashMap::new();
         let builder = b.clone();
         let tx = None;
+        let mixer = Default::default();
         build!(ActionController using b
-               with actions, builder, tx
+               with actions, builder, tx, mixer
                get view, store)
     }
     pub fn bind(&mut self, tx: &UISender) {
@@ -108,6 +171,7 @@ impl ActionController {
                 ctl: aui
             };
             act.ctl.on_update(&act.inner);
+            act.ctl.on_mixer(&self.mixer);
             self.actions.insert(uu, act);
         }
     }
@@ -129,8 +193,20 @@ impl ActionController {
         self.update_store();
     }
     pub fn on_internal(&mut self, msg: ActionMessage) {
+        let tx = self.tx.as_mut().unwrap();
         if let Some(ref mut act) = self.actions.get_mut(&msg.0) {
-            act.ctl.on_message(msg.1);
+            use self::ActionMessageInner::*;
+            match msg.1 {
+                LoadAction => tx.send(Command::LoadAction { uuid: msg.0 }),
+                ExecuteAction => tx.send(Command::ExecuteAction { uuid: msg.0 }),
+                x => act.ctl.on_message(x)
+            }
         }
+    }
+    pub fn on_mixer(&mut self, conf: MixerConf) {
+        for (_, act) in self.actions.iter_mut() {
+            act.ctl.on_mixer(&conf);
+        }
+        self.mixer = conf;
     }
 }

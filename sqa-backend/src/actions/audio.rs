@@ -2,7 +2,7 @@
 
 use sqa_engine::{PlainSender, BufferSender};
 use sqa_engine::sync::AudioThreadMessage;
-use sqa_ffmpeg::{Frame, MediaFile};
+use sqa_ffmpeg::{Frame, MediaFile, MediaResult};
 use super::{ParameterError, ControllerParams, PlaybackState, ActionController};
 use state::{ServerMessage, ActionContext, IntSender};
 use std::thread;
@@ -81,12 +81,18 @@ impl SpoolerContext {
 pub struct Controller {
     params: AudioParams,
     senders: Vec<PlainSender>,
-    control: Option<Sender<SpoolerMessage>>
+    control: Option<Sender<SpoolerMessage>>,
+    file: Option<MediaResult<MediaFile>>
+}
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct AudioChannel {
+    pub patch: Option<Uuid>,
+    pub vol: f32
 }
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct AudioParams {
     pub url: Option<String>,
-    pub patch: Vec<Option<Uuid>>
+    pub chans: Vec<AudioChannel>
 }
 
 impl Controller {
@@ -94,10 +100,11 @@ impl Controller {
         Controller {
             params: AudioParams {
                 url: None,
-                patch: vec![]
+                chans: vec![],
             },
             senders: vec![],
-            control: None
+            control: None,
+            file: None
         }
     }
 }
@@ -110,35 +117,72 @@ impl ActionController for Controller {
     fn get_params(&self) -> &AudioParams {
         &self.params
     }
-    fn set_params(&mut self, p: AudioParams) {
+    fn set_params(&mut self, mut p: AudioParams, ctx: &mut ActionContext) {
+        if self.params.url != p.url {
+            self.file = match p.url {
+                Some(ref st) => {
+                    let mf = MediaFile::new(ctx.media, &st);
+                    match mf {
+                        Err(e) => Some(Err(e)),
+                        Ok(mf) => {
+                            if p.chans.len() != mf.channels() {
+                                if p.chans.len() == 0 {
+                                    p.chans = vec![Default::default(); mf.channels()];
+                                }
+                                else if p.chans.len() < mf.channels() {
+                                    let len = p.chans.len();
+                                    p.chans.extend(::std::iter::repeat(Default::default())
+                                                             .take(mf.channels() - len));
+                                }
+                            }
+                            Some(Ok(mf))
+                        }
+                    }
+                },
+                None => None
+            };
+        }
         self.params = p;
     }
     fn verify_params(&self, ctx: &mut ActionContext) -> Vec<ParameterError> {
         let mut ret = vec![];
-        if let Some(ref st) = self.params.url {
-            let mf = MediaFile::new(ctx.media, &st);
-            match mf {
-                Err(e) => {
+        if self.params.url.is_some() {
+            let mf = match self.file.as_ref() {
+                Some(f) => f,
+                None => {
+                    return vec![ParameterError {
+                        name: "url".into(),
+                        err: format!("Internal error: no file opened!")
+                    }]
+                }
+            };
+            match *mf {
+                Err(ref e) => {
                     ret.push(ParameterError {
                         name: "url".into(),
                         err: format!("Error opening URL: {}", e)
                     })
                 },
-                Ok(mf) => {
+                Ok(ref mf) => {
                     if mf.channels() == 0 {
                         ret.push(ParameterError {
                             name: "url".into(),
                             err: "What sort of file has exactly ZERO channels in it?!".into()
                         });
                     }
-
+                    if self.params.chans.len() > mf.channels() {
+                        ret.push(ParameterError {
+                            name: "chans".into(),
+                            err: "The file has less channels than expected (FIXME: better error message here)".into()
+                        });
+                    }
                 }
             }
-            for (i, ch) in self.params.patch.iter().enumerate() {
-                if let &Some(ch) = ch {
+            for (i, ch) in self.params.chans.iter().enumerate() {
+                if let Some(ref ch) = ch.patch {
                     if ctx.mixer.obtain_channel(&ch).is_none() {
                         ret.push(ParameterError {
-                            name: "patch".into(),
+                            name: "chans".into(),
                             err: format!("Channel {} does not exist.", i)
                         });
                     }
@@ -160,8 +204,8 @@ impl ActionController for Controller {
             .map(|_| params.ctx.mixer.new_sender(mf.sample_rate() as u64))
             .collect();
         for (i, s) in senders.iter_mut().enumerate() {
-            if let Some(ch) = self.params.patch.get(i) {
-                if let &Some(ch) = ch {
+            if let Some(ch) = self.params.chans.get(i) {
+                if let Some(ref ch) = ch.patch {
                     let ch = params.ctx.mixer.obtain_channel(&ch)
                         .ok_or("One channel mysteriously disappeared")?;
                     s.set_output_patch(ch);

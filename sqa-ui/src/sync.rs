@@ -1,6 +1,7 @@
 use futures::sync::mpsc;
 use std::sync::mpsc as smpsc;
 use connection::{self, ConnectionState, ConnectionMessage, ConnectionUIMessage};
+use sqa_backend::mixer::MixerConf;
 use sqa_backend::codec::{Reply, Command};
 use util::ThreadNotifier;
 use tokio_core::reactor::{Handle, Remote};
@@ -12,7 +13,8 @@ pub enum UIMessage {
     ConnState(ConnectionState),
     ConnMessage(ConnectionUIMessage),
     ActionReply(Reply),
-    ActionMessage(actions::ActionMessage)
+    ActionMessage(actions::ActionMessage),
+    UpdatedMixerConf(MixerConf)
 }
 pub enum BackendMessage {
     Connection(ConnectionMessage)
@@ -22,13 +24,18 @@ impl From<Command> for BackendMessage {
         BackendMessage::Connection(ConnectionMessage::Send(c))
     }
 }
-message_impls!(UIMessage,
-               ConnState, ConnectionState,
-               ConnMessage, ConnectionUIMessage,
-               ActionReply, Reply,
-               ActionMessage, actions::ActionMessage);
-message_impls!(BackendMessage,
-               Connection, ConnectionMessage);
+message_impls!(
+    UIMessage,
+    ConnState, ConnectionState,
+    ConnMessage, ConnectionUIMessage,
+    ActionReply, Reply,
+    ActionMessage, actions::ActionMessage,
+    UpdatedMixerConf, MixerConf
+);
+message_impls!(
+    BackendMessage,
+    Connection, ConnectionMessage
+);
 
 pub struct BackendContext {
     pub conn: connection::Context,
@@ -118,7 +125,8 @@ impl UIContext {
                 ConnState(msg) => self.conn.on_state_change(msg),
                 ConnMessage(msg) => self.conn.on_msg(msg),
                 ActionReply(rpl) => self.act.on_action_reply(rpl),
-                ActionMessage(msg) => self.act.on_internal(msg)
+                ActionMessage(msg) => self.act.on_internal(msg),
+                UpdatedMixerConf(cnf) => self.act.on_mixer(cnf)
             }
         }
     }

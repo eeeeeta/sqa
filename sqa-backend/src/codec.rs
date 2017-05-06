@@ -37,7 +37,7 @@ pub enum Command {
     LoadAction { #[subst] uuid: Uuid },
     #[oscpath = "/action/{uuid}/execute"]
     ExecuteAction { #[subst] uuid: Uuid },
-    #[oscpath = "/action/list"]
+    #[oscpath = "/actionlist"]
     ActionList,
     #[oscpath = "/mixer/config"]
     GetMixerConf,
@@ -73,7 +73,7 @@ pub enum Reply {
     ActionExecuted { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/mixer/config"]
     MixerConfSet { #[ser] res: Result<(), String> },
-    #[oscpath = "/reply/action/list"]
+    #[oscpath = "/reply/actionlist"]
     ReplyActionList { #[ser] list: HashMap<Uuid, OpaqueAction> },
 
     #[oscpath = "/update/action/{uuid}"]

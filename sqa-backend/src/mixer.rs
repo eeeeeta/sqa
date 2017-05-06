@@ -14,10 +14,10 @@ pub struct Channel {
     pub eid: usize,
     pub patch: Option<String>
 }
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct MixerConf {
-    channels: Vec<Channel>,
-    defs: Vec<Uuid>
+    pub channels: Vec<Channel>,
+    pub defs: Vec<Uuid>
 }
 pub struct MixerContext {
     engine: EngineContext,
