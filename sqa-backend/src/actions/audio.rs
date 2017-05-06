@@ -1,6 +1,7 @@
 //! Plays back an audio file.
 
 use sqa_engine::{PlainSender, BufferSender};
+use sqa_engine::param::Parameter;
 use sqa_engine::sync::AudioThreadMessage;
 use sqa_ffmpeg::{Frame, MediaFile, MediaResult};
 use super::{ParameterError, ControllerParams, PlaybackState, ActionController};
@@ -13,7 +14,14 @@ use std::time::Duration;
 use errors::*;
 use std::sync::mpsc::{Sender, Receiver, self};
 use uuid::Uuid;
-
+/// Converts a linear amplitude to decibels.
+pub fn lin_db(lin: f32) -> f32 {
+    lin.log10() * 20.0
+}
+/// Converts a decibel value to a linear amplitude.
+pub fn db_lin(db: f32) -> f32 {
+    10.0_f32.powf(db / 20.0)
+}
 pub enum SpoolerMessage {
     Wakeup,
     Quit
@@ -146,6 +154,13 @@ impl ActionController for Controller {
                 None => None
             };
         }
+        if self.senders.len() > 0 {
+            for (i, ch) in p.chans.iter().enumerate() {
+                if let Some(s) = self.senders.get_mut(i) {
+                    s.set_volume(Box::new(Parameter::Raw(db_lin(ch.vol))));
+                }
+            }
+        }
         self.params = p;
     }
     fn verify_params(&self, ctx: &mut ActionContext) -> Vec<ParameterError> {
@@ -235,7 +250,10 @@ impl ActionController for Controller {
         Ok(true)
     }
     fn execute(&mut self, time: u64, _: ControllerParams) -> BackendResult<bool> {
-        for sender in self.senders.iter_mut() {
+        for (i, sender) in self.senders.iter_mut().enumerate() {
+            if let Some(ch) = self.params.chans.get(i) {
+                sender.set_volume(Box::new(Parameter::Raw(db_lin(ch.vol))));
+            }
             sender.set_start_time(time);
             sender.set_active(true);
         }
