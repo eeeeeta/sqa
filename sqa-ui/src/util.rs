@@ -34,15 +34,17 @@ unsafe impl Send for ThreadNotifier {}
 macro_rules! build {
     ($o:ident using $b:ident get $($i:ident),*) => {{
         $(
-            let $i = $b.get_object(concat!("sqa-", stringify!($o), "-", stringify!($i)))
-                .expect("Incorrect UI description, tried to get nonexistent path");
+            let path = concat!("sqa-", stringify!($o), "-", stringify!($i));
+            let $i = $b.get_object(path)
+                .expect(&format!("Incorrect UI description, tried to get nonexistent path {}", path));
         )*
             $o { $($i),* }
     }};
     ($o:ident using $b:ident with $($f:ident),* get $($i:ident),*) => {{
         $(
-            let $i = $b.get_object(concat!("sqa-", stringify!($o), "-", stringify!($i)))
-                .expect("Incorrect UI description, tried to get nonexistent path");
+            let path = concat!("sqa-", stringify!($o), "-", stringify!($i));
+            let $i = $b.get_object(path)
+                .expect(&format!("Incorrect UI description, tried to get nonexistent path {}", path));
         )*
             $o { $($i),* $(,$f)* }
     }}

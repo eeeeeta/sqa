@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{self, Widget, TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack, SelectionMode};
+use gtk::{self, Widget, TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack, SelectionMode, ScrolledWindow};
 use gdk;
 use uuid::Uuid;
 use std::collections::HashMap;
@@ -10,7 +10,7 @@ use sqa_backend::codec::{Command, Reply};
 use sqa_backend::mixer::MixerConf;
 use sqa_backend::actions::{ActionParameters, PlaybackState, OpaqueAction};
 use sqa_backend::actions::audio::AudioParams;
-use url::percent_encoding;
+use messages::Message;
 
 pub mod audio;
 use self::audio::AudioUI;
@@ -94,7 +94,9 @@ impl UITemplate {
                 self.pwin.props_box_box.remove(&self.pwin.props_box);
                 self.popped_out = true;
             }
-            Some(self.pwin.props_box.clone().upcast())
+            let swin = ScrolledWindow::new(None, None);
+            swin.add(&self.pwin.props_box);
+            Some(swin.upcast())
         }
     }
     pub fn edit_separately(&mut self) {
@@ -195,6 +197,18 @@ macro_rules! bind_action_menu_items {
         )*
     }
 }
+macro_rules! action_reply_notify {
+    ($self:ident, $res:ident, $failmsg:expr, $successmsg:expr) => {
+        let msg;
+        if let Err(e) = $res {
+            msg = Message::Error(format!(concat!($failmsg, " failed: {}"), e));
+        }
+        else {
+            msg = Message::Statusbar($successmsg.into());
+        }
+        $self.tx.as_mut().unwrap().send_internal(msg);
+    }
+}
 impl ActionController {
     pub fn new(b: &Builder) -> Self {
         let actions = HashMap::new();
@@ -278,13 +292,27 @@ impl ActionController {
             UpdateActionInfo { uuid, data } => self.on_action_info(uuid, data),
             UpdateActionDeleted { uuid } => {
                 self.actions.remove(&uuid);
+                self.tx.as_mut().unwrap()
+                    .send_internal(Message::Statusbar("Action deleted.".into()));
             },
             ReplyActionList { list } => {
                 self.actions.clear();
                 for (uu, oa) in list {
                     self.on_action_info(uu, oa);
                 }
-            }
+            },
+            ActionCreated { res } => {
+                action_reply_notify!(self, res, "Creating action", "Action created.");
+            },
+            ActionLoaded { res, .. } => {
+                action_reply_notify!(self, res, "Loading action", "Action loaded.");
+            },
+            ActionParamsUpdated { res, .. } => {
+                action_reply_notify!(self, res, "Modifying action", "Action modified.");
+            },
+            ActionExecuted { res, .. } => {
+                action_reply_notify!(self, res, "Executing action", "Action executed.");
+            },
             x => println!("warn: unexpected action reply {:?}", x)
         }
         self.update_store();
@@ -302,6 +330,7 @@ impl ActionController {
                 self.mload.set_sensitive(activated);
                 self.mexec.set_sensitive(activated);
                 self.mdelete.set_sensitive(activated);
+                self.mcreate_audio.set_sensitive(activated);
                 if let Some(uu) = tsg.get() {
                     if let Some((u2, w)) = self.cur_widget.take() {
                         if uu == u2 {
@@ -327,13 +356,11 @@ impl ActionController {
             },
             FilesDropped(files) => {
                 for file in files {
-                    if let Ok(url) = percent_encoding::percent_decode(file.as_bytes()).decode_utf8() {
-                        let mut params: AudioParams = Default::default();
-                        params.url = Some(url.into());
-                        let params = ActionParameters::Audio(params);
-                        self.tx.as_mut().unwrap()
-                            .send(Command::CreateActionWithParams { typ: "audio".into(), params });
-                    }
+                    let mut params: AudioParams = Default::default();
+                    params.url = Some(file.into());
+                    let params = ActionParameters::Audio(params);
+                    self.tx.as_mut().unwrap()
+                        .send(Command::CreateActionWithParams { typ: "audio".into(), params });
                 }
             },
         }

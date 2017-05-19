@@ -2,7 +2,7 @@ use tokio_core::net::{UdpFramed, UdpSocket};
 use tokio_core::reactor::{Timeout};
 use sqa_backend::codec::{SqaClientCodec, Reply, Command};
 use gtk::prelude::*;
-use gtk::{Button, Builder, MenuItem};
+use gtk::{Button, Builder, MenuItem, IconSize, Image};
 use std::net::SocketAddr;
 use futures::{Sink, Stream, Async, Future};
 use sync::{BackendContextArgs, UIMessage, UISender};
@@ -18,7 +18,7 @@ pub enum ConnectionState {
     Disconnected,
     VersionQuerySent { addr: SocketAddr },
     SubscriptionQuerySent { addr: SocketAddr, ver: String },
-    Connected { addr: SocketAddr, ver: String, last_ping: u64, last_err: Option<String> },
+    Connected { addr: SocketAddr, ver: String, last_ping: u64, last_pong: u64, last_err: Option<String> },
     RecvFailed(String),
     RecvThreadFailed
 }
@@ -56,12 +56,34 @@ impl Context {
         self.sock.as_mut()
             .expect("Connected with no socket")
             .start_send(cmd)?;
+        self.sock.as_mut()
+            .expect("Connected with no socket")
+            .poll_complete()?;
         Ok(())
     }
+    fn update_last_ping(&mut self) {
+        if let ConnectionState::Connected { ref mut last_ping, .. } = self.state {
+            *last_ping = time::precise_time_ns();
+        }
+    }
     fn ping_timeout(&mut self, args: &mut BackendContextArgs) -> errors::Result<()> {
-        if let ConnectionState::Connected {..} = self.state {
-            self.send(Command::Ping)?;
-            self.timeout = Some(Timeout::new(Duration::new(10, 0), &args.hdl)?);
+        if let ConnectionState::Connected { last_ping, last_pong, .. } = self.state {
+            if last_pong < last_ping {
+                println!("Ping timeout!");
+                self.sock.take();
+                self.state = ConnectionState::Disconnected;
+                args.send(ConnectionUIMessage::NewlyDisconnected.into());
+                self.notify_state_change(args);
+            }
+            else {
+                self.send(Command::Ping)?;
+                println!("sending ping");
+                self.update_last_ping();
+                self.notify_state_change(args);
+            }
+            let mut tm = Timeout::new(Duration::new(10, 0), &args.hdl)?;
+            tm.poll()?;
+            self.timeout = Some(tm);
         }
         Ok(())
     }
@@ -103,10 +125,11 @@ impl Context {
             SubscriptionQuerySent { addr, ver } => {
                 if let Reply::Subscribed = msg {
                     let last_ping = time::precise_time_ns();
+                    let last_pong = time::precise_time_ns();
                     let last_err = None;
                     let ver = ver.clone(); // FIXME: not ideal :p
+                    self.state = Connected { addr, ver, last_ping, last_err, last_pong };
                     self.ping_timeout(args)?;
-                    self.state = Connected { addr, ver, last_ping, last_err };
                     self.send(Command::GetMixerConf)?;
                     self.send(Command::ActionList)?;
                     args.send(ConnectionUIMessage::NewlyConnected.into());
@@ -117,9 +140,20 @@ impl Context {
                     Ok(false)
                 }
             },
-            x => {
-                self.state = x;
-                self.handle_external_nonstateful(msg, args)?;
+            Connected { addr, ver, last_ping, mut last_pong, last_err } => {
+                if let Reply::Pong = msg {
+                    last_pong = time::precise_time_ns();
+                    println!("got pong");
+                    self.state = Connected { addr, ver, last_ping, last_pong, last_err };
+                    Ok(true)
+                }
+                else {
+                    self.state = Connected { addr, ver, last_ping, last_pong, last_err };
+                    self.handle_external_nonstateful(msg, args)?;
+                    Ok(false)
+                }
+            },
+            _ => {
                 Ok(false)
             }
         }
@@ -146,6 +180,9 @@ impl Context {
             Send(cmd) => {
                 if let ConnectionState::Connected { .. } = self.state {
                     self.send(cmd)?;
+                }
+                else {
+                    args.send(Message::Error("Not connected, but tried to send messages.".into()).into());
                 }
                 Ok(false)
             }
@@ -205,6 +242,8 @@ pub struct ConnectionController {
     ipe: FallibleEntry,
     connect_btn: Button,
     disconnect_btn: Button,
+    status_btn: Button,
+    status_img: Image,
     tx: Option<UISender>,
     state: ConnectionState,
     menuitem: MenuItem
@@ -223,7 +262,7 @@ impl ConnectionController {
         let state = ConnectionState::Disconnected;
         let mut ret = build!(ConnectionController using b
                              with pwin, ipe, connect_btn, disconnect_btn, tx, state
-                             get menuitem);
+                             get menuitem, status_btn, status_img);
         ret.on_state_change(ConnectionState::Disconnected);
         ret
     }
@@ -238,6 +277,9 @@ impl ConnectionController {
             tx.send_internal(ConnectionUIMessage::ConnectClicked);
         }));
         self.menuitem.connect_activate(clone!(tx; |_a| {
+            tx.send_internal(ConnectionUIMessage::Show);
+        }));
+        self.status_btn.connect_clicked(clone!(tx; |_a| {
             tx.send_internal(ConnectionUIMessage::Show);
         }));
         self.tx = Some(tx.clone());
@@ -284,6 +326,8 @@ impl ConnectionController {
                     "Disconnected",
                     "Enter an IP address to connect."
                 );
+                self.status_img.set_from_stock("gtk-disconnect", IconSize::Button.into());
+                self.status_btn.set_label("disconnected");
             },
             VersionQuerySent { addr } => {
                 self.pwin.update_header(
@@ -291,6 +335,8 @@ impl ConnectionController {
                     "Connecting (0%)...",
                     format!("Connecting to {} (sent version query)...", addr)
                 );
+                self.status_img.set_from_stock("gtk-refresh", IconSize::Button.into());
+                self.status_btn.set_label("connecting");
             },
             SubscriptionQuerySent { addr, ver } => {
                 self.pwin.update_header(
@@ -298,13 +344,22 @@ impl ConnectionController {
                     "Connecting (50%)...",
                     format!("Version of {} is {}. Connecting...", addr, ver)
                 );
+                self.status_img.set_from_stock("gtk-refresh", IconSize::Button.into());
+                self.status_btn.set_label("connecting");
             },
-            Connected { addr, ver, .. } => {
+            Connected { addr, ver, last_ping, last_pong, .. } => {
+                let ping = if last_ping > last_pong {
+                    format!("...")
+                } else {
+                    format!("{:.2}ms", (((last_pong - last_ping) / 1000) as f64) / 1000.0)
+                };
                 self.pwin.update_header(
                     "gtk-connect",
-                    "Connected",
+                    format!("Connected (ping: {})", ping),
                     format!("Connected to {}, version: {}", addr, ver)
                 );
+                self.status_img.set_from_stock("gtk-connect", IconSize::Button.into());
+                self.status_btn.set_label(&format!("ping: {}", ping));
             },
             _ => {}
         }

@@ -11,9 +11,13 @@ use futures::Sink;
 use futures::sink::Wait;
 use futures::Future;
 use std::time::Duration;
+use std::ops::Deref;
 use errors::*;
 use std::sync::mpsc::{Sender, Receiver, self};
 use uuid::Uuid;
+use url::percent_encoding;
+use url::Url;
+use std::path::{Path, PathBuf};
 /// Converts a linear amplitude to decibels.
 pub fn lin_db(lin: f32) -> f32 {
     lin.log10() * 20.0
@@ -87,11 +91,13 @@ impl SpoolerContext {
         }
     }
 }
+#[derive(Default)]
 pub struct Controller {
     params: AudioParams,
     senders: Vec<PlainSender>,
     control: Option<Sender<SpoolerMessage>>,
-    file: Option<MediaResult<MediaFile>>
+    file: Option<MediaResult<MediaFile>>,
+    url: Option<BackendResult<PathBuf>>
 }
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct AudioChannel {
@@ -106,14 +112,39 @@ pub struct AudioParams {
 
 impl Controller {
     pub fn new() -> Self {
-        Controller {
-            params: AudioParams {
-                url: None,
-                chans: vec![],
-            },
-            senders: vec![],
-            control: None,
-            file: None
+        Default::default()
+    }
+    fn parse_url(st: &str) -> BackendResult<PathBuf> {
+        let url = Url::parse(st)?;
+        if url.scheme() != "file" {
+            bail!(format!("The URL scheme {} is not yet supported; only file:// URLs currently work.", url.scheme()));
+        }
+        let path = url.path();
+        let st = percent_encoding::percent_decode(path.as_bytes()).decode_utf8_lossy();
+        let path = Path::new(st.deref()).to_path_buf();
+        if path.file_name().is_none() {
+            bail!(format!("The URL provided contains no file name."));
+        }
+        Ok(path)
+    }
+    fn open_file(&mut self, ctx: &mut ActionContext) -> Option<MediaResult<MediaFile>> {
+        if let Some(ref uri2) = self.url {
+            let uri;
+            if let Ok(ref u) = *uri2 {
+                uri = u;
+            }
+            else { return None; }
+            let uri = uri.to_string_lossy();
+            let mf = MediaFile::new(ctx.media, &uri);
+            match mf {
+                Err(e) => Some(Err(e)),
+                Ok(mf) => {
+                    Some(Ok(mf))
+                }
+            }
+        }
+        else {
+            None
         }
     }
 }
@@ -121,38 +152,38 @@ impl ActionController for Controller {
     type Parameters = AudioParams;
 
     fn desc(&self) -> String {
-        format!("Play audio at {}", self.params.url.as_ref().map(|x| x as &str).unwrap_or("???"))
+        if let Some(Ok(ref url)) = self.url {
+            format!("Play audio at {}", url.file_name().unwrap().to_string_lossy())
+        }
+        else {
+            format!("Play audio [invalid]")
+        }
     }
     fn get_params(&self) -> &AudioParams {
         &self.params
     }
     fn set_params(&mut self, mut p: AudioParams, ctx: &mut ActionContext) {
         if self.params.url != p.url {
-            self.file = match p.url {
-                Some(ref st) => {
-                    let mf = MediaFile::new(ctx.media, &st);
-                    match mf {
-                        Err(e) => Some(Err(e)),
-                        Ok(mf) => {
-                            if p.chans.len() != mf.channels() {
-                                if p.chans.len() == 0 {
-                                    p.chans = (0..mf.channels())
-                                        .map(|idx| ctx.mixer.obtain_def(idx))
-                                        .map(|patch| AudioChannel { patch, .. Default::default() })
-                                        .collect::<Vec<_>>();
-                                }
-                                else if p.chans.len() < mf.channels() {
-                                    let len = p.chans.len();
-                                    p.chans.extend(::std::iter::repeat(Default::default())
-                                                             .take(mf.channels() - len));
-                                }
-                            }
-                            Some(Ok(mf))
-                        }
-                    }
-                },
+            self.url = match p.url {
+                Some(ref u) => Some(Self::parse_url(u)),
                 None => None
             };
+            self.file = self.open_file(ctx);
+            if let Some(Ok(ref mf)) = self.file {
+                if p.chans.len() != mf.channels() {
+                    if p.chans.len() == 0 {
+                        p.chans = (0..mf.channels())
+                            .map(|idx| ctx.mixer.obtain_def(idx))
+                            .map(|patch| AudioChannel { patch, .. Default::default() })
+                            .collect::<Vec<_>>();
+                    }
+                    else if p.chans.len() < mf.channels() {
+                        let len = p.chans.len();
+                        p.chans.extend(::std::iter::repeat(Default::default())
+                                       .take(mf.channels() - len));
+                    }
+                }
+            }
         }
         if self.senders.len() > 0 {
             for (i, ch) in p.chans.iter().enumerate() {
@@ -166,6 +197,12 @@ impl ActionController for Controller {
     fn verify_params(&self, ctx: &mut ActionContext) -> Vec<ParameterError> {
         let mut ret = vec![];
         if self.params.url.is_some() {
+            if let Some(Err(ref e)) = self.url {
+                return vec![ParameterError {
+                    name: "url".into(),
+                    err: format!("Invalid URL: {}", e)
+                }];
+            }
             let mf = match self.file.as_ref() {
                 Some(f) => f,
                 None => {
@@ -217,8 +254,8 @@ impl ActionController for Controller {
         ret
     }
     fn load(&mut self, params: ControllerParams) -> BackendResult<bool> {
-        let url = self.params.url.clone().unwrap();
-        let mf = MediaFile::new(params.ctx.media, &url)?;
+        let mf = self.file.take().ok_or("File mysteriously disappeared")??;
+        self.file = self.open_file(params.ctx);
         let mut senders: Vec<BufferSender> = (0..mf.channels())
             .map(|_| params.ctx.mixer.new_sender(mf.sample_rate() as u64))
             .collect();

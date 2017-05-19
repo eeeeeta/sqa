@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{Builder, Button, Widget};
+use gtk::{Builder, FileChooserAction, FileChooserButton, Widget};
 use super::{ActionUI, OpaqueAction, ActionUIMessage, UITemplate, ActionMessageInner};
 use sync::UISender;
 use uuid::Uuid;
@@ -44,7 +44,7 @@ impl ActionUIMessage for AudioMessage {
     }
 }
 pub struct AudioUI {
-    fe: FallibleEntry,
+    file: FileChooserButton,
     params: AudioParams,
     temp: UITemplate,
     cnf: MixerConf,
@@ -53,14 +53,14 @@ pub struct AudioUI {
 
 impl AudioUI {
     pub fn new(b: &Builder, uu: Uuid, tx: UISender) -> Self {
-        let fe = FallibleEntry::new();
+        let file = FileChooserButton::new("Audio file", FileChooserAction::Open);
         let mut temp = UITemplate::new(uu, tx.clone());
         let params = Default::default();
         let cnf = Default::default();
         let sb = SliderBox::new::<AudioMessage>(0, tx, uu);
-        temp.pwin.append_property("Filename", &*fe);
+        temp.pwin.append_property("File target", &file);
         temp.pwin.props_box.pack_start(&sb.cont, false, true, 5);
-        let mut ctx = AudioUI { fe, temp, params, cnf, sb };
+        let mut ctx = AudioUI { file, temp, params, cnf, sb };
         ctx.bind();
         ctx
     }
@@ -70,13 +70,18 @@ impl AudioUI {
         let ref tx = self.temp.tx;
         use self::ActionMessageInner::Audio;
         use self::AudioMessage::*;
-        self.fe.on_enter(clone!(tx; |_a| {
+        self.file.connect_file_set(clone!(tx; |fb| {
             tx.send_internal((uu, Audio(ApplyButton)));
         }));
     }
     fn on_new_parameters(&mut self, p: &AudioParams) {
         println!("{:#?}", p);
-        self.fe.set_text(p.url.as_ref().map(|x| x as &str).unwrap_or(""));
+        if let Some(ref uri) = p.url {
+            self.file.set_uri(uri);
+        }
+        else {
+            self.file.unselect_all();
+        }
         self.params = p.clone();
         if p.chans.len() != self.sb.n_sliders() {
             self.sb.cont.destroy();
@@ -102,11 +107,9 @@ impl ActionUI for AudioUI {
         let ActionParameters::Audio(ref pars) = p.params;
         self.on_new_parameters(pars);
 
-        self.fe.reset_error();
         if let PlaybackState::Unverified(ref errs) = p.state {
             for err in errs {
                 if err.name == "url" {
-                    self.fe.throw_error(&err.err);
                 }
             }
         }
@@ -116,8 +119,7 @@ impl ActionUI for AudioUI {
             use self::AudioMessage::*;
             match m {
                 x @ ApplyButton | x @ OkButton => {
-                    let url = self.fe.get_text();
-                    let url = if url == "" { None } else { Some(url.into()) };
+                    let url = self.file.get_uri();
                     let chans = self.params.chans.clone();
                     let params = AudioParams { url, chans };
                     self.temp.tx.send(Command::UpdateActionParams {
@@ -163,7 +165,7 @@ impl ActionUI for AudioUI {
                     let pc = self.params.clone();
                     self.on_new_parameters(&pc);
                     self.temp.pwin.window.hide();
-                },
+                }
             }
         }
 

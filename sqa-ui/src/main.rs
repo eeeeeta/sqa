@@ -69,6 +69,7 @@ fn main() {
     });
     println!("[+] Showing main window");
     let win: Window = b.get_object("sqa-main").unwrap();
+    win.set_title(&format!("SQA UI [{}]", sqa_backend::VERSION));
     win.show_all();
     println!("[+] Starting GTK+ event loop!");
     gtk::main();

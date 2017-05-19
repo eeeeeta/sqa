@@ -17,6 +17,7 @@ extern crate error_chain;
 extern crate chrono;
 #[macro_use]
 extern crate sqa_osc_custom_derive;
+extern crate url;
 
 pub mod codec;
 pub mod handlers;

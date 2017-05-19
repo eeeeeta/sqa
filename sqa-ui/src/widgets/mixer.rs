@@ -34,7 +34,8 @@ impl SliderBox {
     pub fn new<T: SliderMessage>(n_input: usize, tx: UISender, id: T::Identifier) -> Self {
         let cont = Box::new(Orientation::Horizontal, 5);
         if n_input == 0 {
-            let lbl = Label::new(Some("(No channels are currently defined.)"));
+            let lbl = Label::new(None);
+            lbl.set_markup("<i>(no channels are currently defined)</i>");
             lbl.set_halign(Align::Center);
             cont.pack_start(&lbl, true, true, 0);
             let sliders = Vec::new();

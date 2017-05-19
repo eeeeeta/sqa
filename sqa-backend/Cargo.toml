@@ -17,3 +17,4 @@ serde_json = "0.9"
 error-chain = "0.10"
 chrono = { version = "0.3", features = ["serde"] }
 sqa-osc-custom-derive = { path = "../sqa-osc-custom-derive" }
+url = "1.4.0"

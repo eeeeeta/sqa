@@ -3,15 +3,6 @@
 <interface>
   <requires lib="gtk+" version="3.20"/>
   <object class="GtkListStore"/>
-  <object class="GtkWindow" id="sqa-ActionController-props">
-    <property name="can_focus">False</property>
-    <child>
-      <placeholder/>
-    </child>
-    <child type="titlebar">
-      <placeholder/>
-    </child>
-  </object>
   <object class="GtkListStore" id="sqa-ActionController-store">
     <columns>
       <!-- column-name uuid -->
@@ -19,6 +10,60 @@
       <!-- column-name descrip -->
       <column type="gchararray"/>
     </columns>
+  </object>
+  <object class="GtkImage" id="sqa-ConnectionController-status_img">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="stock">gtk-connect</property>
+  </object>
+  <object class="GtkPopover" id="sqa-FallibleEntry-popover">
+    <property name="can_focus">False</property>
+    <property name="border_width">5</property>
+    <property name="position">bottom</property>
+    <property name="modal">False</property>
+    <child>
+      <object class="GtkBox">
+        <property name="visible">True</property>
+        <property name="can_focus">False</property>
+        <property name="spacing">5</property>
+        <child>
+          <object class="GtkImage" id="sqa-FallibleEntry-image">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="stock">gtk-dialog-error</property>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="position">0</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkLabel" id="sqa-FallibleEntry-label">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="halign">start</property>
+            <property name="label" translatable="yes">label</property>
+          </object>
+          <packing>
+            <property name="expand">True</property>
+            <property name="fill">True</property>
+            <property name="position">1</property>
+          </packing>
+        </child>
+      </object>
+    </child>
+  </object>
+  <object class="GtkImage" id="sqa-MessageController-closebtn">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="stock">gtk-close</property>
+    <property name="icon_size">3</property>
+  </object>
+  <object class="GtkImage" id="sqa-MessageController-simg">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="stock">gtk-dialog-error</property>
   </object>
   <object class="GtkApplicationWindow" id="sqa-main">
     <property name="can_focus">False</property>
@@ -60,6 +105,7 @@
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_Audio</property>
                                 <property name="use_underline">True</property>
+                                <accelerator key="a" signal="activate" modifiers="GDK_CONTROL_MASK | GDK_MOD1_MASK"/>
                               </object>
                             </child>
                           </object>
@@ -70,7 +116,7 @@
                       <object class="GtkMenuItem" id="sqa-ActionController-medit">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">_Edit...</property>
+                        <property name="label" translatable="yes">_Edit Separately...</property>
                         <property name="use_underline">True</property>
                         <accelerator key="e" signal="activate" modifiers="GDK_CONTROL_MASK"/>
                       </object>
@@ -139,6 +185,7 @@
           <object class="GtkPaned">
             <property name="visible">True</property>
             <property name="can_focus">True</property>
+            <property name="orientation">vertical</property>
             <property name="wide_handle">True</property>
             <child>
               <object class="GtkTreeView" id="sqa-ActionController-view">
@@ -234,8 +281,39 @@
             <property name="margin_end">10</property>
             <property name="margin_top">2</property>
             <property name="margin_bottom">2</property>
-            <property name="orientation">vertical</property>
             <property name="spacing">2</property>
+            <child>
+              <object class="GtkButton" id="sqa-MessageController-sbtn">
+                <property name="label" translatable="yes">button</property>
+                <property name="visible">True</property>
+                <property name="can_focus">True</property>
+                <property name="receives_default">True</property>
+                <property name="image">sqa-MessageController-simg</property>
+                <property name="relief">none</property>
+                <property name="always_show_image">True</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkButton" id="sqa-ConnectionController-status_btn">
+                <property name="label" translatable="yes">button</property>
+                <property name="visible">True</property>
+                <property name="can_focus">True</property>
+                <property name="receives_default">True</property>
+                <property name="image">sqa-ConnectionController-status_img</property>
+                <property name="relief">none</property>
+                <property name="always_show_image">True</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">2</property>
+              </packing>
+            </child>
           </object>
           <packing>
             <property name="expand">False</property>
@@ -249,21 +327,65 @@
       <placeholder/>
     </child>
   </object>
-  <object class="GtkPopover" id="sqa-FallibleEntry-popover">
+  <object class="GtkPopover" id="sqa-MessageController-popover">
     <property name="can_focus">False</property>
-    <property name="border_width">5</property>
-    <property name="position">bottom</property>
+    <property name="relative_to">sqa-MessageController-sbtn</property>
     <property name="modal">False</property>
     <child>
       <object class="GtkBox">
         <property name="visible">True</property>
         <property name="can_focus">False</property>
-        <property name="spacing">5</property>
+        <property name="orientation">vertical</property>
         <child>
-          <object class="GtkImage" id="sqa-FallibleEntry-image">
+          <object class="GtkBox">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
-            <property name="stock">gtk-dialog-error</property>
+            <child>
+              <object class="GtkImage">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="stock">gtk-dialog-warning</property>
+                <property name="icon_size">6</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel" id="sqa-MessageController-popover_lbl">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="halign">start</property>
+                <property name="margin_left">5</property>
+                <property name="label" translatable="yes">Warnings</property>
+                <attributes>
+                  <attribute name="weight" value="bold"/>
+                  <attribute name="scale" value="1.5"/>
+                </attributes>
+              </object>
+              <packing>
+                <property name="expand">True</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkButton" id="sqa-MessageController-cbtn">
+                <property name="visible">True</property>
+                <property name="can_focus">True</property>
+                <property name="receives_default">True</property>
+                <property name="image">sqa-MessageController-closebtn</property>
+                <property name="relief">none</property>
+                <property name="always_show_image">True</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">2</property>
+              </packing>
+            </child>
           </object>
           <packing>
             <property name="expand">False</property>
@@ -272,11 +394,13 @@
           </packing>
         </child>
         <child>
-          <object class="GtkLabel" id="sqa-FallibleEntry-label">
+          <object class="GtkListBox" id="sqa-MessageController-list">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
-            <property name="halign">start</property>
-            <property name="label" translatable="yes">label</property>
+            <property name="margin_left">5</property>
+            <property name="margin_right">5</property>
+            <property name="margin_top">5</property>
+            <property name="margin_bottom">5</property>
           </object>
           <packing>
             <property name="expand">True</property>

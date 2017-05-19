@@ -123,6 +123,7 @@ impl UIContext {
         };
         self.conn.bind(&uis);
         self.act.bind(&uis);
+        self.msg.bind(&uis);
     }
     pub fn on_event(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
