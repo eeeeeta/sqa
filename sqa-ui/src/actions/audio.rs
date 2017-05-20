@@ -57,9 +57,9 @@ impl AudioUI {
         let mut temp = UITemplate::new(uu, tx.clone());
         let params = Default::default();
         let cnf = Default::default();
-        let sb = SliderBox::new::<AudioMessage>(0, tx, uu);
+        let sb = SliderBox::new::<AudioMessage>(0, 0, &tx, uu);
         temp.pwin.append_property("File target", &file);
-        temp.pwin.props_box.pack_start(&sb.cont, false, true, 5);
+        temp.pwin.props_box.pack_start(&sb.grid, false, true, 5);
         let mut ctx = AudioUI { file, temp, params, cnf, sb };
         ctx.bind();
         ctx
@@ -83,13 +83,14 @@ impl AudioUI {
             self.file.unselect_all();
         }
         self.params = p.clone();
-        if p.chans.len() != self.sb.n_sliders() {
-            self.sb.cont.destroy();
-            self.sb = SliderBox::new::<AudioMessage>(p.chans.len(), self.temp.tx.clone(), self.temp.uu);
-            self.temp.pwin.props_box.pack_start(&self.sb.cont, false, true, 5);
+        if p.chans.len() != self.sb.n_sliders() || self.cnf.defs.len() != self.sb.n_output() {
+            println!("recreating sliders!");
+            self.sb.grid.destroy();
+            self.sb = SliderBox::new::<AudioMessage>(p.chans.len(), self.cnf.defs.len(), &self.temp.tx, self.temp.uu);
+            self.temp.pwin.props_box.pack_start(&self.sb.grid, false, true, 5);
             self.temp.pwin.props_box.show_all();
         }
-        let details = p.chans.iter()
+        let mut details = p.chans.iter()
             .map(|ch| {
                 let idx = if let Some(patch) = ch.patch {
                     println!("patch: {}, defs: {:?}", patch, self.cnf.defs);
@@ -98,6 +99,7 @@ impl AudioUI {
                 SliderDetail { vol: ch.vol as f64, patch: idx }
             })
             .collect::<Vec<_>>();
+        details.insert(0, SliderDetail { vol: p.master_vol as f64, patch: 0 });
         self.sb.update_values(details);
     }
 }
@@ -121,7 +123,8 @@ impl ActionUI for AudioUI {
                 x @ ApplyButton | x @ OkButton => {
                     let url = self.file.get_uri();
                     let chans = self.params.chans.clone();
-                    let params = AudioParams { url, chans };
+                    let master_vol = self.params.master_vol.clone();
+                    let params = AudioParams { url, chans, master_vol };
                     self.temp.tx.send(Command::UpdateActionParams {
                         uuid: self.temp.uu,
                         params: ActionParameters::Audio(params)
@@ -131,29 +134,37 @@ impl ActionUI for AudioUI {
                     }
                 },
                 VolChanged(ch, val) => {
-                    if self.params.chans.get(ch).is_some() {
-                        let mut chans = self.params.chans.clone();
-                        let url = self.params.url.clone();
-                        chans[ch].vol = val;
-                        let params = AudioParams { url, chans };
-                        self.temp.tx.send(Command::UpdateActionParams {
-                            uuid: self.temp.uu,
-                            params: ActionParameters::Audio(params)
-                        });
+                    let mut chans = self.params.chans.clone();
+                    let mut master_vol = self.params.master_vol.clone();
+                    let url = self.params.url.clone();
+                    if ch == 0 {
+                        master_vol = val;
                     }
+                    else {
+                        if chans.get(ch-1).is_some() {
+                            chans[ch-1].vol = val;
+                        }
+                    }
+                    let params = AudioParams { url, chans, master_vol };
+                    self.temp.tx.send(Command::UpdateActionParams {
+                        uuid: self.temp.uu,
+                        params: ActionParameters::Audio(params)
+                    });
                 },
                 PatchChanged(ch, patch) => {
-                    if patch == 0 { return }
-                    println!("setting patch: {}, defs: {:?}", patch, self.cnf.defs);
+                    if patch == 0 || ch == 0 { return }
+                    let ch = ch - 1;
+                    println!("setting patch for {}: {}, defs: {:?}", ch, patch, self.cnf.defs);
                     let patch = match self.cnf.defs.get(patch-1) {
                         Some(&u) => u,
                         None => return
                     };
                     if self.params.chans.get(ch).is_some() {
                         let mut chans = self.params.chans.clone();
+                        let master_vol = self.params.master_vol.clone();
                         let url = self.params.url.clone();
                         chans[ch].patch = Some(patch);
-                        let params = AudioParams { url, chans };
+                        let params = AudioParams { url, chans, master_vol };
                         println!("updating patch for chan: {:?}", params);
                         self.temp.tx.send(Command::UpdateActionParams {
                             uuid: self.temp.uu,
@@ -175,7 +186,8 @@ impl ActionUI for AudioUI {
     }
     fn on_mixer(&mut self, cnf: &MixerConf) {
         self.cnf = cnf.clone();
-        println!("new mixer conf: {:?}", self.cnf);
+        let p = self.params.clone();
+        self.on_new_parameters(&p);
     }
     fn get_container(&mut self) -> Option<Widget> {
         self.temp.get_container()

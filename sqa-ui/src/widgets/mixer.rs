@@ -1,7 +1,5 @@
 use gtk::prelude::*;
-use gtk::{Box, Orientation, Separator, Align, Label, Scale, Entry, PositionType, Inhibit};
-use std::rc::Rc;
-use std::cell::Cell;
+use gtk::{Orientation, Grid, RadioButton, Align, Label, Scale, Entry, PositionType, Inhibit};
 use glib::signal;
 use sync::{UISender, UIMessage};
 
@@ -17,119 +15,147 @@ pub struct SliderDetail {
     pub patch: usize
 }
 struct Slider {
-    bx: Box,
     lbl: Label,
     vol: Entry,
-    patch: Entry,
+    radios: Vec<RadioButton>,
     scale: Scale,
-    changed_handler: u64,
-    patch_data: Rc<Cell<usize>>
+    changed_handler: u64
 }
 pub struct SliderBox {
-    pub cont: Box,
+    pub grid: Grid,
     sliders: Vec<Slider>,
-    tx: UISender
+    n_output: usize
 }
 impl SliderBox {
-    pub fn new<T: SliderMessage>(n_input: usize, tx: UISender, id: T::Identifier) -> Self {
-        let cont = Box::new(Orientation::Horizontal, 5);
-        if n_input == 0 {
-            let lbl = Label::new(None);
-            lbl.set_markup("<i>(no channels are currently defined)</i>");
-            lbl.set_halign(Align::Center);
-            cont.pack_start(&lbl, true, true, 0);
-            let sliders = Vec::new();
-            return SliderBox { cont, sliders, tx };
-        }
-        let mut sliders = Vec::with_capacity(n_input);
-        for n in 0..n_input {
-            let bx = Box::new(Orientation::Vertical, 5);
-            let lbl = Label::new(None);
-            lbl.set_markup(&format!("<i>{}</i>", (n+1)));
-            let vol = Entry::new();
-            let patch = Entry::new();
-            let sep = Separator::new(Orientation::Horizontal);
-            let scale = Scale::new_with_range(Orientation::Vertical, -60.0, 12.0, 1.0);
-            vol.set_has_frame(false);
-            patch.set_has_frame(false);
-            lbl.set_halign(Align::Center);
-            vol.set_halign(Align::Center);
-            vol.set_alignment(0.5);
-            vol.set_width_chars(5);
-            patch.set_halign(Align::Center);
-            patch.set_alignment(0.5);
-            patch.set_width_chars(5);
-            scale.set_halign(Align::Center);
-            scale.set_draw_value(false);
-            scale.set_inverted(true);
-            scale.set_size_request(-1, 160);
-            scale.add_mark(0.0, PositionType::Right, None);
-            bx.pack_start(&lbl, false, false, 0);
-            bx.pack_start(&sep, false, false, 0);
-            bx.pack_start(&vol, false, false, 0);
-            bx.pack_start(&scale, true, true, 0);
-            scale.set_vexpand(true);
-            bx.pack_start(&patch, false, false, 0);
+    fn append_slider<T: SliderMessage>(name: &str, idx: usize, n_output: usize, grid: &Grid, grid_left: i32, id: T::Identifier, tx: &UISender) -> Slider {
+        let lbl = Label::new(None);
+        lbl.set_markup(name);
+        let vol = Entry::new();
+        let scale = Scale::new_with_range(Orientation::Vertical, -60.0, 12.0, 1.0);
+        vol.set_has_frame(false);
+        lbl.set_halign(Align::Center);
+        vol.set_halign(Align::Center);
+        vol.set_width_chars(5);
+        vol.set_alignment(0.5);
+        scale.set_halign(Align::Center);
+        scale.set_draw_value(false);
+        scale.set_inverted(true);
+        scale.set_size_request(-1, 120);
+        scale.add_mark(0.0, PositionType::Right, None);
+        scale.set_vexpand(true);
+        vol.get_style_context().unwrap().add_class("vol-entry");
+        grid.attach(&scale, grid_left, 1, 1, 1);
+        grid.attach(&vol, grid_left, 2, 1, 1);
+        grid.attach(&lbl, grid_left, 3, 1, 1);
 
-            let patch_data = Rc::new(Cell::new(0));
-            let changed_handler = scale.connect_value_changed(clone!(vol, tx; |slf| {
-                println!("scale value changed for ch {} to {}", n, slf.get_value());
-                let val = slf.get_value();
-                vol.set_text(&format!("{:.2}", val));
-                tx.send_internal(T::vol_changed(n, val, id));
-            }));
-            vol.connect_activate(clone!(scale, tx; |slf| {
-                if let Ok(val) = slf.get_text().unwrap_or("".into()).parse() {
-                    scale.set_value(val);
-                    tx.send_internal(T::vol_changed(n, val, id));
-                }
-            }));
-            vol.connect_focus_out_event(clone!(scale, tx; |slf, _e| {
-                if let Ok(val) = slf.get_text().unwrap_or("".into()).parse() {
-                    scale.set_value(val);
-                    tx.send_internal(T::vol_changed(n, val, id));
-                }
-                else {
-                    scale.set_value(scale.get_value());
-                }
-                Inhibit(false)
-            }));
-            patch.connect_activate(clone!(patch_data, tx; |slf| {
-                if let Ok(val) = slf.get_text().unwrap_or("".into()).parse() {
-                    patch_data.set(val);
-                    tx.send_internal(T::patch_changed(n, val, id));
-                }
-            }));
-            patch.connect_focus_out_event(clone!(patch_data, tx; |slf, _e| {
-                if let Ok(val) = slf.get_text().unwrap_or("".into()).parse() {
-                    patch_data.set(val);
-                    tx.send_internal(T::patch_changed(n, val, id));
+        let mut radios = vec![];
+        for n in 0..(n_output+1) {
+            if name == "master" {
+                let lbl = Label::new(None);
+                let name = if n == n_output {
+                    "?".to_string()
+                } else {
+                    format!("{}←", n+1)
+                };
+                lbl.set_markup(&name);
+                grid.attach(&lbl, grid_left, (4+n) as i32, 1, 1);
+            }
+            else {
+                let rb = if let Some(r) = radios.get(0) {
+                    RadioButton::new_from_widget(r)
+                } else {
+                    RadioButton::new(&[])
+                };
+                if n == n_output {
+                    rb.set_sensitive(false);
                 }
                 else {
-                    slf.set_text(&format!("{}", patch_data.get()));
+                    rb.connect_toggled(clone!(tx; |slf| {
+                        if slf.get_active() {
+                            tx.send_internal(T::patch_changed(idx, n+1, id));
+                        }
+                    }));
                 }
-                Inhibit(false)
-            }));
-            patch.set_text("0");
-            scale.set_value(0.0);
-            cont.pack_start(&bx, false, false, 0);
-            sliders.push(Slider { bx, lbl, vol, patch, scale, patch_data, changed_handler });
+                rb.set_halign(Align::Center);
+                grid.attach(&rb, grid_left, (4+n) as i32, 1, 1);
+                radios.push(rb);
+            }
         }
-        SliderBox { cont, sliders, tx }
+        scale.connect_value_changed(clone!(vol; |slf| {
+            let val = slf.get_value();
+            if val == -60.0 {
+                vol.set_text("-inf");
+            }
+            else {
+                let prec = if val.trunc() == val { 0 } else { 2 };
+                let sign = if val > 0.0 { "+" } else { "" };
+                vol.set_text(&format!("{}{:.*}", sign, prec, val));
+            }
+        }));
+        let changed_handler = scale.connect_value_changed(clone!(tx; |slf| {
+            let mut val = slf.get_value();
+            if val == -60.0 {
+                val = ::std::f64::NEG_INFINITY;
+            }
+            tx.send_internal(T::vol_changed(idx, val, id));
+        }));
+        vol.connect_activate(clone!(scale; |slf| {
+            if let Ok(val) = slf.get_text().unwrap_or("".into()).parse() {
+                scale.set_value(val);
+            }
+        }));
+        vol.connect_focus_out_event(clone!(scale; |slf, _e| {
+            if let Ok(val) = slf.get_text().unwrap_or("".into()).parse() {
+                scale.set_value(val);
+            }
+            else {
+                scale.set_value(scale.get_value());
+            }
+            Inhibit(false)
+        }));
+        Slider { lbl, vol, radios, scale, changed_handler }
+    }
+    pub fn new<T: SliderMessage>(n_input: usize, n_output: usize, tx: &UISender, id: T::Identifier) -> Self {
+        let grid = Grid::new();
+        grid.set_column_spacing(5);
+        grid.set_row_spacing(5);
+        let mut sliders = Vec::with_capacity(n_input);
+        sliders.push(Self::append_slider::<T>("master", 0, n_output, &grid, 1, id, &tx));
+        for n in 0..n_input {
+            sliders.push(Self::append_slider::<T>(&format!("{}", n+1), n+1, n_output, &grid, (n+2) as i32, id, &tx));
+        }
+        SliderBox { grid, sliders, n_output }
+    }
+    pub fn n_output(&self) -> usize {
+        self.n_output
     }
     pub fn n_sliders(&self) -> usize {
-        self.sliders.len()
+        self.sliders.len()-1
     }
     pub fn update_values(&mut self, values: Vec<SliderDetail>) {
         for (i, val) in values.into_iter().enumerate() {
             if let Some(slider) = self.sliders.get_mut(i) {
-                if val.patch != slider.patch_data.get() {
-                    slider.patch_data.set(val.patch);
-                    slider.patch.set_text(&format!("{}", val.patch));
+                if i != 0 {
+                    println!("patch for value {} is {}, {:?}", i, val.patch, slider.radios.get(val.patch));
+                    let rb;
+                    if val.patch == 0 {
+                        rb = &slider.radios[0];
+                    }
+                    else {
+                        if let Some(rb2) = slider.radios.get(val.patch-1) {
+                            rb = rb2;
+                        }
+                        else {
+                            rb = &slider.radios[0];
+                        }
+                    }
+                    rb.set_active(true);
                 }
                 if val.vol != slider.scale.get_value() {
+                    println!("blocking changed handler");
                     signal::signal_handler_block(&slider.scale, slider.changed_handler);
                     slider.scale.set_value(val.vol);
+                    println!("unblocking changed handler");
                     signal::signal_handler_unblock(&slider.scale, slider.changed_handler);
                 }
             }

@@ -330,7 +330,6 @@ impl ActionController {
                 self.mload.set_sensitive(activated);
                 self.mexec.set_sensitive(activated);
                 self.mdelete.set_sensitive(activated);
-                self.mcreate_audio.set_sensitive(activated);
                 if let Some(uu) = tsg.get() {
                     if let Some((u2, w)) = self.cur_widget.take() {
                         if uu == u2 {

@@ -33,6 +33,11 @@ fn main() {
     println!("an eta project <http://theta.eu.org>");
     println!("[+] Initialising GTK+");
     let _ = gtk::init().unwrap();
+    let b = Builder::new_from_string(util::INTERFACE_SRC);
+    let provider = gtk::CssProvider::new();
+    provider.load_from_data(include_str!("ui.css")).unwrap();
+    let screen = gdk::Screen::get_default().unwrap();
+    gtk::StyleContext::add_provider_for_screen(&screen, &provider, gtk::STYLE_PROVIDER_PRIORITY_USER);
     println!("[+] Initialising event loop & backend context");
     let tn = util::ThreadNotifier::new();
     let ttn = tn.clone();
@@ -52,7 +57,6 @@ fn main() {
         panic!("The future resolved! What is this sorcery?!");
     });
     println!("[+] Initialising UI context");
-    let b = Builder::new_from_string(util::INTERFACE_SRC);
     let mut ctx = UIContext {
         rx: urx,
         tx: btx,

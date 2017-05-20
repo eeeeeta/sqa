@@ -305,6 +305,13 @@ impl EngineContext {
         Ok(())
     }
     pub fn new_sender(&mut self, sample_rate: u64) -> BufferSender {
+        self.new_sender_ext(sample_rate, None)
+    }
+    pub fn new_sender_with_master<T>(&mut self, master: &Sender<T>) -> BufferSender {
+        let master_vol = master.master_vol.clone();
+        self.new_sender_ext(master.sample_rate, Some(master_vol))
+    }
+    fn new_sender_ext(&mut self, sample_rate: u64, master_vol: Option<Arc<AtomicPtr<Parameter<f32>>>>) -> BufferSender {
         let (p, c) = bounded_spsc_queue::make(STREAM_BUFFER_SIZE);
         let active = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicBool::new(false));
@@ -313,7 +320,8 @@ impl EngineContext {
         let default_volume = Box::new(Parameter::Raw(1.0));
         let default_master_vol = default_volume.clone();
         let volume = Arc::new(AtomicPtr::new(Box::into_raw(default_volume)));
-        let master_vol = Arc::new(AtomicPtr::new(Box::into_raw(default_master_vol)));
+        let master_vol = master_vol.unwrap_or(
+            Arc::new(AtomicPtr::new(Box::into_raw(default_master_vol))));
         let output_patch = Arc::new(AtomicUsize::new(::std::usize::MAX));
         let uu = Uuid::new_v4();
 

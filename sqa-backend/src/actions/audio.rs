@@ -107,9 +107,9 @@ pub struct AudioChannel {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct AudioParams {
     pub url: Option<String>,
-    pub chans: Vec<AudioChannel>
+    pub chans: Vec<AudioChannel>,
+    pub master_vol: f32
 }
-
 impl Controller {
     pub fn new() -> Self {
         Default::default()
@@ -191,6 +191,7 @@ impl ActionController for Controller {
                     s.set_volume(Box::new(Parameter::Raw(db_lin(ch.vol))));
                 }
             }
+            self.senders[0].set_master_volume(Box::new(Parameter::Raw(db_lin(p.master_vol))));
         }
         self.params = p;
     }
@@ -256,9 +257,7 @@ impl ActionController for Controller {
     fn load(&mut self, params: ControllerParams) -> BackendResult<bool> {
         let mf = self.file.take().ok_or("File mysteriously disappeared")??;
         self.file = self.open_file(params.ctx);
-        let mut senders: Vec<BufferSender> = (0..mf.channels())
-            .map(|_| params.ctx.mixer.new_sender(mf.sample_rate() as u64))
-            .collect();
+        let mut senders = params.ctx.mixer.new_senders(mf.channels(), mf.sample_rate() as u64);
         for (i, s) in senders.iter_mut().enumerate() {
             if let Some(ch) = self.params.chans.get(i) {
                 if let Some(ref ch) = ch.patch {

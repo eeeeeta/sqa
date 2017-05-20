@@ -737,7 +737,7 @@ dependencies = [
  "serde 0.9.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 0.9.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 0.9.10 (registry+https://github.com/rust-lang/crates.io-index)",
- "sqa-engine 0.2.0",
+ "sqa-engine 0.2.1",
  "sqa-ffmpeg 0.2.1",
  "sqa-osc-custom-derive 0.1.0",
  "time 0.1.37 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -753,7 +753,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "sqa-engine"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arrayvec 0.3.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "bspline 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -775,7 +775,7 @@ dependencies = [
  "ffmpeg-sys 3.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.22 (registry+https://github.com/rust-lang/crates.io-index)",
  "sample 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "sqa-engine 0.2.0",
+ "sqa-engine 0.2.1",
 ]
 
 [[package]]

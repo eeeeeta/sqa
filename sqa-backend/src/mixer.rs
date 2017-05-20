@@ -80,6 +80,16 @@ impl MixerContext {
     pub fn new_sender(&mut self, sample_rate: u64) -> BufferSender {
         self.engine.new_sender(sample_rate)
     }
+    pub fn new_senders(&mut self, n: usize, sample_rate: u64) -> Vec<BufferSender> {
+        let mut senders: Vec<BufferSender> = Vec::with_capacity(n);
+        let master = self.engine.new_sender(sample_rate);
+        let others: Vec<_> = (0..(n-1))
+            .map(|_| self.engine.new_sender_with_master(&master))
+            .collect();
+        senders.push(master);
+        senders.extend(others.into_iter());
+        senders
+    }
     pub fn obtain_channel(&self, uu: &Uuid) -> Option<usize> {
         self.channels.get(uu).map(|x| x.eid)
     }
