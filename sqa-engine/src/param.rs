@@ -14,7 +14,7 @@ pub struct FadeDetails<T> where T: Mul<f32, Output=T> + Sub<T, Output=T> + Add<T
     duration: Arc<AtomicU64>,
     active: Arc<AtomicBool>
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Parameter<T> where T: Mul<f32, Output=T> + Sub<T, Output=T> + Add<T, Output=T> + Copy + Display {
     Raw(T),
     LinearFade(FadeDetails<T>)

@@ -70,6 +70,8 @@ pub struct Sender<T> {
     output_patch: Arc<AtomicUsize>,
     /// The playback volume (rw)
     volume: Arc<AtomicPtr<Parameter<f32>>>,
+    /// The master playback volume (rw)
+    master_vol: Arc<AtomicPtr<Parameter<f32>>>,
     /// The buffer to write to (or not) - will be a `bounded_spsc_queue::Producer<f32>` or `()`.
     pub buf: T,
     /// The sample rate of this sender. Can differ from the output sample rate.
@@ -104,20 +106,39 @@ impl<T> Sender<T> {
         self.set_start_time(time);
         self.set_active(true);
     }
+    pub fn set_master_volume(&mut self, vol: Box<Parameter<f32>>) {
+        let val = Box::into_raw(vol);
+        let old_ptr = self.master_vol.swap(val, AcqRel);
+        unsafe {
+            let _: Box<Parameter<f32>> = Box::from_raw(old_ptr);
+        }
+    }
+    pub fn master_volume(&self) -> Parameter<f32> {
+        let ret;
+        unsafe {
+            let val = self.master_vol.load(Acquire);
+            ret = (*val).clone();
+            self.master_vol.store(val, Release);
+        }
+        ret
+    }
     /// Set the volume of this stream.
     pub fn set_volume(&mut self, vol: Box<Parameter<f32>>) {
         let val = Box::into_raw(vol);
-        let old_ptr = self.volume.swap(val, Relaxed);
+        let old_ptr = self.volume.swap(val, AcqRel);
         unsafe {
             let _: Box<Parameter<f32>> = Box::from_raw(old_ptr);
         }
     }
     /// Get the volume of this stream.
-    pub fn volume(&self) -> &Parameter<f32> {
-        let val = self.volume.load(Relaxed);
+    pub fn volume(&self) -> Parameter<f32> {
+        let ret;
         unsafe {
-            &*val
+            let val = self.volume.load(Acquire);
+            ret = (*val).clone();
+            self.volume.store(val, Release);
         }
+        ret
     }
     /// Get whether this stream will play samples or not.
     pub fn active(&self) -> bool {
@@ -174,6 +195,7 @@ impl<T> Sender<T> {
             start_time: self.start_time.clone(),
             output_patch: self.output_patch.clone(),
             volume: self.volume.clone(),
+            master_vol: self.master_vol.clone(),
             buf: (),
             sample_rate: self.sample_rate,
             original: false,
@@ -289,7 +311,9 @@ impl EngineContext {
         let position = Arc::new(AtomicU64::new(0));
         let start_time = Arc::new(AtomicU64::new(0));
         let default_volume = Box::new(Parameter::Raw(1.0));
+        let default_master_vol = default_volume.clone();
         let volume = Arc::new(AtomicPtr::new(Box::into_raw(default_volume)));
+        let master_vol = Arc::new(AtomicPtr::new(Box::into_raw(default_master_vol)));
         let output_patch = Arc::new(AtomicUsize::new(::std::usize::MAX));
         let uu = Uuid::new_v4();
 
@@ -302,6 +326,7 @@ impl EngineContext {
             alive: alive.clone(),
             output_patch: output_patch.clone(),
             volume: volume.clone(),
+            master_vol: master_vol.clone(),
             uuid: uu,
             half_sent: false,
             empty_sent: false
@@ -316,6 +341,7 @@ impl EngineContext {
             start_time: start_time,
             sample_rate: sample_rate,
             volume: volume.clone(),
+            master_vol: master_vol.clone(),
             original: true,
             uuid: uu
         }

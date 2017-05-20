@@ -23,6 +23,7 @@ pub struct Player {
     pub alive: Arc<AtomicBool>,
     pub output_patch: Arc<AtomicUsize>,
     pub volume: Arc<AtomicPtr<Parameter<f32>>>,
+    pub master_vol: Arc<AtomicPtr<Parameter<f32>>>,
     pub uuid: Uuid,
     pub half_sent: bool,
     pub empty_sent: bool
@@ -151,10 +152,16 @@ impl JackHandler for DeviceContext {
                 player.active.store(false, Relaxed);
                 continue;
             }
-            let vol = player.volume.load(Relaxed);
+            let volp = player.volume.load(Acquire);
+            let master_volp = player.master_vol.load(Acquire);
             let vol = unsafe {
-                (*vol).get(time)
+                (*volp).get(time)
             };
+            let master_vol = unsafe {
+                (*master_volp).get(time)
+            };
+            player.volume.store(volp, Release);
+            player.master_vol.store(master_volp, Release);
             let ch = self.chans[outpatch].as_mut().unwrap();
             if let Some(buf) = out.get_port_buffer(&ch.port) {
                 let written = time == ch.written_t;
@@ -164,11 +171,13 @@ impl JackHandler for DeviceContext {
                 for x in buf.iter_mut() {
                     if let Some(data) = player.buf.try_pop() {
                         if written {
-                            *x += data * vol;
+                            *x += data * vol * master_vol;
                         }
                         else {
-                            *x = data * vol;
+                            *x = data * vol * master_vol;
                         }
+                        if *x > 1.0 { *x = 1.0; }
+                        if *x < -1.0 { *x = -1.0; }
                         pos += 1;
                     }
                 }
