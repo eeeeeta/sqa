@@ -5,7 +5,7 @@ use sqa_engine::param::Parameter;
 use sqa_engine::sync::AudioThreadMessage;
 use sqa_ffmpeg::{Frame, MediaFile, MediaResult};
 use super::{ParameterError, ControllerParams, PlaybackState, ActionController};
-use state::{ServerMessage, ActionContext, IntSender};
+use state::{ServerMessage, Context, IntSender};
 use std::thread;
 use futures::Sink;
 use futures::sink::Wait;
@@ -127,7 +127,7 @@ impl Controller {
         }
         Ok(path)
     }
-    fn open_file(&mut self, ctx: &mut ActionContext) -> Option<MediaResult<MediaFile>> {
+    fn open_file(&mut self, ctx: &mut Context) -> Option<MediaResult<MediaFile>> {
         if let Some(ref uri2) = self.url {
             let uri;
             if let Ok(ref u) = *uri2 {
@@ -135,7 +135,7 @@ impl Controller {
             }
             else { return None; }
             let uri = uri.to_string_lossy();
-            let mf = MediaFile::new(ctx.media, &uri);
+            let mf = MediaFile::new(&mut ctx.media, &uri);
             match mf {
                 Err(e) => Some(Err(e)),
                 Ok(mf) => {
@@ -162,7 +162,7 @@ impl ActionController for Controller {
     fn get_params(&self) -> &AudioParams {
         &self.params
     }
-    fn set_params(&mut self, mut p: AudioParams, ctx: &mut ActionContext) {
+    fn set_params(&mut self, mut p: AudioParams, ctx: &mut Context) {
         if self.params.url != p.url {
             self.url = match p.url {
                 Some(ref u) => Some(Self::parse_url(u)),
@@ -195,7 +195,7 @@ impl ActionController for Controller {
         }
         self.params = p;
     }
-    fn verify_params(&self, ctx: &mut ActionContext) -> Vec<ParameterError> {
+    fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError> {
         let mut ret = vec![];
         if self.params.url.is_some() {
             if let Some(Err(ref e)) = self.url {

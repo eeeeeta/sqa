@@ -5,7 +5,7 @@ use std::any::Any;
 use uuid::Uuid;
 use std::borrow::Cow;
 use sqa_engine::sync::AudioThreadMessage;
-use state::{ActionContext};
+use state::{Context};
 use rosc::OscType;
 use futures::sync::mpsc::Sender;
 use state::IntSender;
@@ -16,6 +16,7 @@ use serde_json;
 use std::time::Duration;
 
 pub mod audio;
+pub mod fade;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ParameterError {
@@ -33,8 +34,8 @@ pub enum PlaybackState {
     Active(Duration),
     Errored(String)
 }
-pub struct ControllerParams<'a, 'b: 'a> {
-    ctx: &'a mut ActionContext<'b>,
+pub struct ControllerParams<'a> {
+    ctx: &'a mut Context,
     internal_tx: &'a IntSender,
     uuid: Uuid
 }
@@ -46,8 +47,8 @@ pub trait ActionController {
 
     fn desc(&self) -> String;
     fn get_params(&self) -> &Self::Parameters;
-    fn set_params(&mut self, Self::Parameters, ctx: &mut ActionContext);
-    fn verify_params(&self, ctx: &mut ActionContext) -> Vec<ParameterError>;
+    fn set_params(&mut self, Self::Parameters, ctx: &mut Context);
+    fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError>;
     fn load(&mut self, _ctx: ControllerParams) -> BackendResult<bool> {
         Ok(true)
     }
@@ -113,11 +114,11 @@ impl Action {
             uu: Uuid::new_v4()
         }
     }
-    pub fn accept_audio_message(&mut self, ctx: &mut ActionContext, sender: &IntSender, msg: &AudioThreadMessage) -> bool {
+    pub fn accept_audio_message(&mut self, ctx: &mut Context, sender: &IntSender, msg: &AudioThreadMessage) -> bool {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         action!(mut self.ctl).accept_audio_message(msg, cp)
     }
-    pub fn accept_load(&mut self, ctx: &mut ActionContext, sender: &IntSender, data: Box<Any>) -> BackendResult<()> {
+    pub fn accept_load(&mut self, ctx: &mut Context, sender: &IntSender, data: Box<Any>) -> BackendResult<()> {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         if let PlaybackState::Loading = self.state {
             match action!(mut self.ctl).accept_load(cp, data) {
@@ -130,7 +131,7 @@ impl Action {
         }
         Ok(())
     }
-    pub fn load(&mut self, ctx: &mut ActionContext, sender: &IntSender) -> BackendResult<()> {
+    pub fn load(&mut self, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
         self.verify_params(ctx);
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         if let PlaybackState::Inactive = self.state {
@@ -153,7 +154,7 @@ impl Action {
         }
         Ok(())
     }
-    pub fn execute(&mut self, time: u64, ctx: &mut ActionContext, sender: &IntSender) -> BackendResult<()> {
+    pub fn execute(&mut self, time: u64, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         if let PlaybackState::Loaded = self.state {
             let x = match action!(mut self.ctl).execute(time, cp) {
@@ -178,7 +179,7 @@ impl Action {
     pub fn state_change(&mut self, ps: PlaybackState) {
         self.state = ps;
     }
-    pub fn get_data(&mut self, ctx: &mut ActionContext) -> BackendResult<OpaqueAction> {
+    pub fn get_data(&mut self, ctx: &mut Context) -> BackendResult<OpaqueAction> {
         self.verify_params(ctx);
         Ok(OpaqueAction {
             state: self.state.clone(),
@@ -187,7 +188,7 @@ impl Action {
             desc: action!(self.ctl).desc()
         })
     }
-    pub fn verify_params(&mut self, ctx: &mut ActionContext) {
+    pub fn verify_params(&mut self, ctx: &mut Context) {
         use self::PlaybackState::*;
         let mut new = None;
         let mut active = false;
@@ -214,7 +215,7 @@ impl Action {
             }
         }
     }
-    pub fn set_params(&mut self, data: ActionParameters, ctx: &mut ActionContext) -> BackendResult<()> {
+    pub fn set_params(&mut self, data: ActionParameters, ctx: &mut Context) -> BackendResult<()> {
         match self.ctl {
             ActionType::Audio(ref mut a) => {
                 let ActionParameters::Audio(d) = data;

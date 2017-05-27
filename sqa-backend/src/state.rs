@@ -11,32 +11,20 @@ use sqa_engine::sync::{AudioThreadMessage};
 use sqa_ffmpeg::MediaContext;
 use mixer::{MixerContext};
 use errors::*;
+use std::mem;
 pub struct Context {
     pub remote: Remote,
     pub mixer: MixerContext,
     pub media: MediaContext,
     pub actions: HashMap<Uuid, Action>
 }
-pub struct ActionContext<'a> {
-    pub mixer: &'a mut MixerContext,
-    pub media: &'a mut MediaContext,
-    pub remote: &'a mut Remote
-}
-macro_rules! ctx_from_self {
-    ($self:expr) => {
-        ActionContext {
-            mixer: &mut $self.mixer,
-            media: &mut $self.media,
-            remote: &mut $self.remote
-        }
-    }
-}
 macro_rules! do_with_ctx {
     ($self:expr, $uu:expr, $clo:expr) => {{
-        match $self.actions.get_mut($uu) {
-            Some(a) => {
-                let ctx = ctx_from_self!($self);
-                $clo(a, ctx)
+        match $self.actions.remove($uu) {
+            Some(mut a) => {
+                let ret = $clo(&mut a);
+                $self.actions.insert(*$uu, a);
+                ret
             },
             _ => Err("No action found".into())
         }
@@ -59,11 +47,9 @@ impl ConnHandler for Context {
     fn internal(&mut self, d: &mut CD, m: ServerMessage) {
         match m {
             ServerMessage::Audio(msg) => {
-                for (_, act) in self.actions.iter_mut() {
-                    let mut ctx = ctx_from_self!(self);
-                    if act.accept_audio_message(&mut ctx, &d.internal_tx, &msg) {
-                        break;
-                    }
+                for (uu, mut act) in mem::replace(&mut self.actions, HashMap::new()).into_iter() {
+                    act.accept_audio_message(self, &d.internal_tx, &msg);
+                    self.actions.insert(uu, act);
                 }
             },
             ServerMessage::ActionStateChange(uu, ps) => {
@@ -108,11 +94,10 @@ impl ConnHandler for Context {
                     "audio" => {
                         let mut act = Action::new_audio();
                         let uu = act.uuid();
-                        let mut ctx = ctx_from_self!(self);
                         if let Some(pars) = pars {
-                            act.set_params(pars, &mut ctx);
+                            act.set_params(pars, self);
                         }
-                        Self::on_action_changed(d, &mut act, &mut ctx);
+                        self.on_action_changed(d, &mut act);
                         self.actions.insert(uu, act);
                         Ok(uu)
                     },
@@ -121,47 +106,47 @@ impl ConnHandler for Context {
                 d.respond(res)?;
             },
             ActionInfo { uuid } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
-                    let ret = a.get_data(&mut ctx).map_err(|e| e.to_string());
-                    Self::on_action_changed(d, a, &mut ctx);
+                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
+                    let ret = a.get_data(self).map_err(|e| e.to_string());
+                    self.on_action_changed(d, a);
                     ret
                 });
                 d.respond(ActionInfoRetrieved { uuid, res })?;
             },
             UpdateActionParams { uuid, params } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
-                    let ret = a.set_params(params, &mut ctx).map_err(|e| e.to_string());
-                    Self::on_action_changed(d, a, &mut ctx);
+                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
+                    let ret = a.set_params(params, self).map_err(|e| e.to_string());
+                    self.on_action_changed(d, a);
                     ret
                 });
                 d.respond(ActionParamsUpdated { uuid, res })?;
             },
             LoadAction { uuid } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
-                    let ret = a.load(&mut ctx, &d.internal_tx).map_err(|e| e.to_string());
-                    Self::on_action_changed(d, a, &mut ctx);
+                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
+                    let ret = a.load(self, &d.internal_tx).map_err(|e| e.to_string());
+                    self.on_action_changed(d, a);
                     ret
                 });
                 d.respond(ActionLoaded { uuid, res })?;
             },
             ExecuteAction { uuid } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action, mut ctx: ActionContext| {
-                    let ret = a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), &mut ctx, &d.internal_tx).map_err(|e| e.to_string());
-                    Self::on_action_changed(d, a, &mut ctx);
+                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
+                    let ret = a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), self, &d.internal_tx).map_err(|e| e.to_string());
+                    self.on_action_changed(d, a);
                     ret
                 });
                 d.respond(ActionExecuted { uuid, res })?;
             },
             ActionList => {
-                let mut ctx = ctx_from_self!(self);
                 let mut resp = HashMap::new();
-                for (uu, act) in self.actions.iter_mut() {
-                    if let Ok(data) = act.get_data(&mut ctx) {
-                        resp.insert(*uu, data);
+                for (uu, mut act) in mem::replace(&mut self.actions, HashMap::new()).into_iter() {
+                    if let Ok(data) = act.get_data(self) {
+                        resp.insert(uu, data);
                     }
                     else {
                         println!("FIXME: handle failure to get_data");
                     }
+                    self.actions.insert(uu, act);
                 }
                 d.respond(ReplyActionList { list: resp })?;
             },
@@ -198,8 +183,8 @@ impl Context {
         ctx.mixer.default_config().unwrap();
         ctx
     }
-    pub fn on_action_changed(d: &mut CD, action: &mut Action, ctx: &mut ActionContext) {
-        if let Ok(data) = action.get_data(ctx) {
+    pub fn on_action_changed(&mut self, d: &mut CD, action: &mut Action) {
+        if let Ok(data) = action.get_data(self) {
             d.broadcast(Reply::UpdateActionInfo {
                     uuid: action.uuid(),
                     data
