@@ -42,12 +42,14 @@ pub struct ControllerParams<'a> {
 pub trait OscEditable {
     fn edit(&mut self, path: &str, args: Vec<OscType>) -> BackendResult<()>;
 }
-pub trait ActionController {
+pub trait EditableAction {
     type Parameters: Serialize + Deserialize + Clone + Debug + Default;
 
-    fn desc(&self) -> String;
     fn get_params(&self) -> &Self::Parameters;
     fn set_params(&mut self, Self::Parameters, ctx: &mut Context);
+}
+pub trait ActionController {
+    fn desc(&self) -> String;
     fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError>;
     fn load(&mut self, _ctx: ControllerParams) -> BackendResult<bool> {
         Ok(true)
@@ -69,28 +71,33 @@ pub trait ActionController {
 }
 pub enum ActionType {
     Audio(audio::Controller),
+    Fade(fade::Controller),
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ActionParameters {
-    Audio(<audio::Controller as ActionController>::Parameters)
+    Audio(<audio::Controller as EditableAction>::Parameters),
+    Fade(<fade::Controller as EditableAction>::Parameters)
 }
 macro_rules! action {
     (mut $a:expr) => {{
         use self::ActionType::*;
         match $a {
-            Audio(ref mut a) => a
+            Audio(ref mut a) => a as &mut ActionController,
+            Fade(ref mut a) => a as &mut ActionController
         }
     }};
     ($a:expr) => {{
         use self::ActionType::*;
         match $a {
-            Audio(ref a) => a
+            Audio(ref a) => a as &ActionController,
+            Fade(ref a) => a as &ActionController,
         }
     }};
     (params $a:expr) => {{
         use self::ActionType::*;
         match $a {
-            Audio(ref a) => ActionParameters::Audio(a.get_params().clone())
+            Audio(ref a) => ActionParameters::Audio(a.get_params().clone()),
+            Fade(ref a) => ActionParameters::Fade(a.get_params().clone())
         }
     }};
 }
@@ -218,10 +225,15 @@ impl Action {
     pub fn set_params(&mut self, data: ActionParameters, ctx: &mut Context) -> BackendResult<()> {
         match self.ctl {
             ActionType::Audio(ref mut a) => {
-                let ActionParameters::Audio(d) = data;
-                a.set_params(d, ctx);
-                Ok(())
-            }
+                if let ActionParameters::Audio(d) = data {
+                    a.set_params(d, ctx);
+                    Ok(())
+                }
+                else {
+                    bail!("wrong type of action parameters");
+                }
+            },
+            _ => unimplemented!()
         }
     }
     pub fn message(&mut self, msg: Box<Any>) -> Result<(), Box<Error>> {

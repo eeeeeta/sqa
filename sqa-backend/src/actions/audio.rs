@@ -4,7 +4,7 @@ use sqa_engine::{PlainSender, BufferSender};
 use sqa_engine::param::Parameter;
 use sqa_engine::sync::AudioThreadMessage;
 use sqa_ffmpeg::{Frame, MediaFile, MediaResult};
-use super::{ParameterError, ControllerParams, PlaybackState, ActionController};
+use super::{ParameterError, ControllerParams, PlaybackState, ActionController, EditableAction};
 use state::{ServerMessage, Context, IntSender};
 use std::thread;
 use futures::Sink;
@@ -80,8 +80,8 @@ impl SpoolerContext {
                         println!("FIXME: spooler error {:?}", e);
                         /*
                         self.sender.send(ServerMessage::ActionStateChange(self.uuid,
-                                                                          PlaybackState::Errored(msg)))
-                            .unwrap();
+                        PlaybackState::Errored(msg)))
+                        .unwrap();
                         return;*/
                     }
                 }
@@ -148,17 +148,9 @@ impl Controller {
         }
     }
 }
-impl ActionController for Controller {
+impl EditableAction for Controller {
     type Parameters = AudioParams;
 
-    fn desc(&self) -> String {
-        if let Some(Ok(ref url)) = self.url {
-            format!("Play audio at {}", url.file_name().unwrap().to_string_lossy())
-        }
-        else {
-            format!("Play audio [invalid]")
-        }
-    }
     fn get_params(&self) -> &AudioParams {
         &self.params
     }
@@ -194,6 +186,16 @@ impl ActionController for Controller {
             self.senders[0].set_master_volume(Box::new(Parameter::Raw(db_lin(p.master_vol))));
         }
         self.params = p;
+    }
+}
+impl ActionController for Controller {
+    fn desc(&self) -> String {
+        if let Some(Ok(ref url)) = self.url {
+            format!("Play audio at {}", url.file_name().unwrap().to_string_lossy())
+        }
+        else {
+            format!("Play audio [invalid]")
+        }
     }
     fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError> {
         let mut ret = vec![];
@@ -337,6 +339,6 @@ impl ActionController for Controller {
                 false
             },
             _ => false
-        }
     }
+}
 }

@@ -1,7 +1,7 @@
 //! Fading audio cues' volumes up'n'down.
 
 use sqa_engine::param::{Parameter, FadeDetails};
-use super::{ActionController, ControllerParams, ParameterError};
+use super::{ActionController, EditableAction, ActionType, ControllerParams, ParameterError};
 use state::Context;
 use errors::BackendResult;
 use uuid::Uuid;
@@ -15,26 +15,39 @@ pub struct Controller {
     params: FadeParams,
     cur_data: Option<FadeDetails<f32>>
 }
-
-impl ActionController for Controller {
+impl EditableAction for Controller {
     type Parameters = FadeParams;
-
-    fn desc(&self) -> String {
-        format!("Fade action {:?}", self.params)
-    }
     fn get_params(&self) -> &FadeParams {
         &self.params
     }
-    fn set_params(&mut self, params: FadeParams, ctx: &mut Context) {
+    fn set_params(&mut self, params: FadeParams, _: &mut Context) {
         self.params = params;
+    }
+}
+impl ActionController for Controller {
+    fn desc(&self) -> String {
+        format!("Fade action {:?}", self.params)
     }
     fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError> {
         let mut ret = vec![];
-        if let Some(tgt) = self.params.target {
+        if let Some(tgt) = self.params.target.as_ref() {
+            if let Some(tgt) = ctx.actions.get(tgt) {
+                match tgt.ctl {
+                    ActionType::Audio(_) => {},
+                    _ => {
+                        ret.push(ParameterError {
+                            name: "target".into(),
+                            err: "You must target an audio action.".into()
+                        });
+                    }
+                }
+            }
+            else {
                 ret.push(ParameterError {
                     name: "target".into(),
                     err: "No action with that UUID is present.".into()
                 });
+            }
         }
         else {
             ret.push(ParameterError {
