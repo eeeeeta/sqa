@@ -121,6 +121,13 @@ impl Action {
             uu: Uuid::new_v4()
         }
     }
+    pub fn new_fade() -> Self {
+        Action {
+            state: PlaybackState::Inactive,
+            ctl: ActionType::Fade(fade::Controller::new()),
+            uu: Uuid::new_v4()
+        }
+    }
     pub fn accept_audio_message(&mut self, ctx: &mut Context, sender: &IntSender, msg: &AudioThreadMessage) -> bool {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         action!(mut self.ctl).accept_audio_message(msg, cp)

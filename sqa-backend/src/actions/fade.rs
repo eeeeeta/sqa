@@ -5,15 +5,24 @@ use super::{ActionController, EditableAction, ActionType, ControllerParams, Para
 use state::Context;
 use errors::BackendResult;
 use uuid::Uuid;
+use std::time::Duration;
+use std::default::Default;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct FadeParams {
     target: Option<Uuid>,
-    fades: Vec<Option<f32>>
+    fades: Vec<Option<f32>>,
+    dur: Duration
 }
+#[derive(Default)]
 pub struct Controller {
     params: FadeParams,
     cur_data: Option<FadeDetails<f32>>
+}
+impl Controller {
+    pub fn new() -> Self {
+        Default::default()
+    }
 }
 impl EditableAction for Controller {
     type Parameters = FadeParams;
@@ -65,7 +74,25 @@ impl ActionController for Controller {
         ret
     }
     fn execute(&mut self, time: u64, ctx: ControllerParams) -> BackendResult<bool> {
-
+        let tgt = ctx.ctx.actions.get_mut(self.params.target.as_ref().unwrap())
+            .ok_or("Failed to get action")?;
+        let tgt = match tgt.ctl {
+            ActionType::Audio(ref mut t) => t,
+            _ => bail!("Action was wrong type")
+        };
+        for (i, fade) in self.params.fades.iter().enumerate() {
+            if let Some(fade) = *fade {
+                if let Some(sdr) = tgt.senders.get_mut(i) {
+                    let mut fd = FadeDetails::new(sdr.volume().get(0), fade);
+                    fd.set_start_time(time);
+                    let secs_component = self.params.dur.as_secs() * ::sqa_engine::ONE_SECOND_IN_NANOSECONDS;
+                    let subsec_component = self.params.dur.subsec_nanos() as u64;
+                    fd.set_duration(secs_component + subsec_component);
+                    fd.set_active(true);
+                    sdr.set_volume(Box::new(Parameter::LinearFade(fd)));
+                }
+            }
+        }
         Ok(true)
     }
 }

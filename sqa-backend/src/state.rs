@@ -90,20 +90,23 @@ impl ConnHandler for Context {
                     },
                     _ => unreachable!()
                 }
-                let res = ActionCreated { res: match &*ty {
-                    "audio" => {
-                        let mut act = Action::new_audio();
-                        let uu = act.uuid();
-                        if let Some(pars) = pars {
-                            act.set_params(pars, self);
-                        }
-                        self.on_action_changed(d, &mut act);
-                        self.actions.insert(uu, act);
-                        Ok(uu)
-                    },
+                let act = match &*ty {
+                    "audio" => Ok(Action::new_audio()),
+                    "fade" => Ok(Action::new_fade()),
                     _ => Err("Unknown action type".into())
-                }};
-                d.respond(res)?;
+                };
+                let act = act.map(|mut act| {
+                    let uu = act.uuid();
+                    if let Some(ref pars) = pars {
+                        act.set_params(pars.clone(), self);
+                    }
+                    self.on_action_changed(d, &mut act);
+                    self.actions.insert(uu, act);
+                    uu
+                });
+                d.respond(ActionCreated {
+                    res: act
+                })?;
             },
             ActionInfo { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {

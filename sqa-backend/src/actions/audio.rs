@@ -94,7 +94,7 @@ impl SpoolerContext {
 #[derive(Default)]
 pub struct Controller {
     params: AudioParams,
-    senders: Vec<PlainSender>,
+    pub senders: Vec<PlainSender>,
     control: Option<Sender<SpoolerMessage>>,
     file: Option<MediaResult<MediaFile>>,
     url: Option<BackendResult<PathBuf>>
