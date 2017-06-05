@@ -3,7 +3,7 @@ use gtk::{Builder, FileChooserAction, FileChooserButton, Widget};
 use super::{ActionUI, OpaqueAction, ActionUIMessage, UITemplate, ActionMessageInner};
 use sync::UISender;
 use uuid::Uuid;
-use widgets::{SliderBox, FallibleEntry, SliderMessage, SliderDetail};
+use widgets::{SliderBox, Patched, PatchedSliderMessage, FallibleEntry, SliderMessage, SliderDetail};
 use sqa_backend::codec::Command;
 use sqa_backend::mixer::MixerConf;
 use sqa_backend::actions::{ActionParameters, ActionController, PlaybackState};
@@ -14,22 +14,16 @@ pub enum AudioMessage {
     ApplyButton,
     OkButton,
     CancelButton,
-    VolChanged(usize, f32),
-    PatchChanged(usize, usize)
+    Slider(usize, PatchedSliderMessage),
 }
-impl SliderMessage for AudioMessage {
+impl SliderMessage<PatchedSliderMessage> for AudioMessage {
     type Message = (Uuid, ActionMessageInner);
     type Identifier = Uuid;
 
-    fn vol_changed(ch: usize, val: f64, id: Uuid) -> Self::Message {
+    fn on_payload(ch: usize, data: PatchedSliderMessage, id: Uuid) -> Self::Message {
         use self::ActionMessageInner::*;
         use self::AudioMessage::*;
-        (id, Audio(VolChanged(ch, val as _)))
-    }
-    fn patch_changed(ch: usize, patch: usize, id: Uuid) -> Self::Message {
-        use self::ActionMessageInner::*;
-        use self::AudioMessage::*;
-        (id, Audio(PatchChanged(ch, patch)))
+        (id, Audio(Slider(ch, data)))
     }
 }
 impl ActionUIMessage for AudioMessage {
@@ -48,7 +42,7 @@ pub struct AudioUI {
     params: AudioParams,
     temp: UITemplate,
     cnf: MixerConf,
-    sb: SliderBox
+    sb: SliderBox<Patched, AudioMessage>
 }
 
 impl AudioUI {
@@ -57,7 +51,7 @@ impl AudioUI {
         let mut temp = UITemplate::new(uu, tx.clone());
         let params = Default::default();
         let cnf = Default::default();
-        let sb = SliderBox::new::<AudioMessage>(0, 0, &tx, uu);
+        let sb = SliderBox::new(0, 0, &tx, uu);
         temp.pwin.append_property("File target", &file);
         temp.pwin.props_box.pack_start(&sb.grid, false, true, 5);
         let mut ctx = AudioUI { file, temp, params, cnf, sb };
@@ -86,7 +80,7 @@ impl AudioUI {
         if p.chans.len() != self.sb.n_sliders() || self.cnf.defs.len() != self.sb.n_output() {
             println!("recreating sliders!");
             self.sb.grid.destroy();
-            self.sb = SliderBox::new::<AudioMessage>(p.chans.len(), self.cnf.defs.len(), &self.temp.tx, self.temp.uu);
+            self.sb = SliderBox::new(p.chans.len(), self.cnf.defs.len(), &self.temp.tx, self.temp.uu);
             self.temp.pwin.props_box.pack_start(&self.sb.grid, false, true, 5);
             self.temp.pwin.props_box.show_all();
         }
@@ -106,12 +100,13 @@ impl AudioUI {
 impl ActionUI for AudioUI {
     fn on_update(&mut self, p: &OpaqueAction) {
         self.temp.on_update(p);
-        let ActionParameters::Audio(ref pars) = p.params;
-        self.on_new_parameters(pars);
+        if let ActionParameters::Audio(ref pars) = p.params {
+            self.on_new_parameters(pars);
 
-        if let PlaybackState::Unverified(ref errs) = p.state {
-            for err in errs {
-                if err.name == "url" {
+            if let PlaybackState::Unverified(ref errs) = p.state {
+                for err in errs {
+                    if err.name == "url" {
+                    }
                 }
             }
         }
@@ -133,7 +128,7 @@ impl ActionUI for AudioUI {
                         self.temp.pwin.window.hide();
                     }
                 },
-                VolChanged(ch, val) => {
+                Slider(ch, PatchedSliderMessage::VolChanged(val)) => {
                     let mut chans = self.params.chans.clone();
                     let mut master_vol = self.params.master_vol.clone();
                     let url = self.params.url.clone();
@@ -151,7 +146,7 @@ impl ActionUI for AudioUI {
                         params: ActionParameters::Audio(params)
                     });
                 },
-                PatchChanged(ch, patch) => {
+                Slider(ch, PatchedSliderMessage::PatchChanged(patch)) => {
                     if patch == 0 || ch == 0 { return }
                     let ch = ch - 1;
                     println!("setting patch for {}: {}, defs: {:?}", ch, patch, self.cnf.defs);

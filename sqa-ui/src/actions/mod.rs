@@ -13,6 +13,7 @@ use sqa_backend::actions::audio::AudioParams;
 use messages::Message;
 
 pub mod audio;
+pub mod fade;
 use self::audio::AudioUI;
 pub enum ActionInternalMessage {
     Create(&'static str),
@@ -275,7 +276,9 @@ impl ActionController {
         else {
             let aui = match data.params {
                 ActionParameters::Audio(..) =>
-                    Box::new(AudioUI::new(&self.builder, data.uu, self.tx.as_ref().unwrap().clone()))
+                    Box::new(AudioUI::new(&self.builder, data.uu, self.tx.as_ref().unwrap().clone())),
+                ActionParameters::Fade(..) =>
+                    unimplemented!()
             };
             let mut act = Action {
                 inner: data,
