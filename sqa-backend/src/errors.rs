@@ -8,7 +8,8 @@ error_chain! {
         Jack(::sqa_engine::sqa_jack::errors::Error, ::sqa_engine::sqa_jack::errors::ErrorKind);
     }
     foreign_links {
-        Serde(::serde_json::Error);
+        RmpDecode(::rmp_serde::decode::Error);
+        RmpEncode(::rmp_serde::encode::Error);
         Io(::std::io::Error);
         StrParse(::std::string::ParseError);
     }

@@ -12,7 +12,6 @@ use state::IntSender;
 use errors::*;
 use serde::{Serialize, Deserialize};
 use std::fmt::Debug;
-use serde_json;
 use std::time::Duration;
 
 pub mod audio;
@@ -43,7 +42,7 @@ pub trait OscEditable {
     fn edit(&mut self, path: &str, args: Vec<OscType>) -> BackendResult<()>;
 }
 pub trait EditableAction {
-    type Parameters: Serialize + Deserialize + Clone + Debug + Default;
+    type Parameters: Serialize + for<'de> Deserialize<'de> + Clone + Debug + Default;
 
     fn get_params(&self) -> &Self::Parameters;
     fn set_params(&mut self, Self::Parameters, ctx: &mut Context);
@@ -240,7 +239,15 @@ impl Action {
                     bail!("wrong type of action parameters");
                 }
             },
-            _ => unimplemented!()
+            ActionType::Fade(ref mut a) => {
+                if let ActionParameters::Fade(d) = data {
+                    a.set_params(d, ctx);
+                    Ok(())
+                }
+                else {
+                    bail!("wrong type of action parameters");
+                }
+            }
         }
     }
     pub fn message(&mut self, msg: Box<Any>) -> Result<(), Box<Error>> {

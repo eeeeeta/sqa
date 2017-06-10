@@ -108,6 +108,14 @@
                                 <accelerator key="a" signal="activate" modifiers="GDK_CONTROL_MASK | GDK_MOD1_MASK"/>
                               </object>
                             </child>
+                            <child>
+                              <object class="GtkMenuItem" id="sqa-ActionController-mcreate_fade">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">_Fade</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
                           </object>
                         </child>
                       </object>
@@ -323,7 +331,7 @@
         </child>
       </object>
     </child>
-    <child>
+    <child type="titlebar">
       <placeholder/>
     </child>
   </object>

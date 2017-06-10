@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{self, Widget, TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack, SelectionMode, ScrolledWindow};
+use gtk::{self, Widget, TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack, ScrolledWindow};
 use gdk;
 use uuid::Uuid;
 use std::collections::HashMap;
@@ -15,6 +15,7 @@ use messages::Message;
 pub mod audio;
 pub mod fade;
 use self::audio::AudioUI;
+use self::fade::FadeUI;
 pub enum ActionInternalMessage {
     Create(&'static str),
     SelectionChanged,
@@ -22,17 +23,18 @@ pub enum ActionInternalMessage {
 }
 pub enum ActionMessageInner {
     Audio(audio::AudioMessage),
+    Fade(fade::FadeMessage),
     LoadAction,
     ExecuteAction,
     DeleteAction,
-    EditAction
+    EditAction,
+    CloseButton
 }
 pub type ActionMessage = (Uuid, ActionMessageInner);
 pub struct ActionController {
     view: TreeView,
     mixer: MixerConf,
     store: ListStore,
-    builder: Builder,
     tx: Option<UISender>,
     cur_widget: Option<(Uuid, Widget)>,
     sidebar: Stack,
@@ -41,7 +43,8 @@ pub struct ActionController {
     mdelete: MenuItem,
     mload: MenuItem,
     mexec: MenuItem,
-    mcreate_audio: MenuItem
+    mcreate_audio: MenuItem,
+    mcreate_fade: MenuItem
 }
 pub trait ActionUI {
     fn on_update(&mut self, p: &OpaqueAction);
@@ -49,17 +52,11 @@ pub trait ActionUI {
     fn edit_separately(&mut self);
     fn get_container(&mut self) -> Option<Widget>;
     fn on_mixer(&mut self, _m: &MixerConf) {}
-}
-pub trait ActionUIMessage {
-    fn apply() -> ActionMessageInner;
-    fn ok() -> ActionMessageInner;
-    fn cancel() -> ActionMessageInner;
+    fn close_window(&mut self) {}
 }
 pub struct UITemplate {
     pub pwin: PropertyWindow,
-    pub apply_btn: Button,
-    pub ok_btn: Button,
-    pub cancel_btn: Button,
+    pub close_btn: Button,
     pub load_btn: Button,
     pub execute_btn: Button,
     pub tx: UISender,
@@ -70,9 +67,7 @@ pub struct UITemplate {
 impl UITemplate {
     pub fn new(uu: Uuid, tx: UISender) -> Self {
         let mut pwin = PropertyWindow::new();
-        let apply_btn = Button::new_with_mnemonic("_Apply");
-        let ok_btn = Button::new_with_mnemonic("_OK");
-        let cancel_btn = Button::new_with_mnemonic("_Cancel");
+        let close_btn = Button::new_with_mnemonic("_Close");
         let load_btn = Button::new_with_mnemonic("_Load");
         let execute_btn = Button::new_with_mnemonic("_Execute");
         let btn_box = ButtonBox::new(Orientation::Horizontal);
@@ -80,11 +75,9 @@ impl UITemplate {
         btn_box.set_layout(ButtonBoxStyle::Spread);
         btn_box.pack_start(&load_btn, false, false, 0);
         btn_box.pack_start(&execute_btn, false, false, 0);
-        pwin.append_button(&ok_btn);
-        pwin.append_button(&cancel_btn);
-        pwin.append_button(&apply_btn);
+        pwin.append_button(&close_btn);
         pwin.props_box.pack_start(&btn_box, false, false, 0);
-        UITemplate { pwin, apply_btn, ok_btn, cancel_btn, load_btn, execute_btn, popped_out, tx, uu }
+        UITemplate { pwin, close_btn, load_btn, execute_btn, popped_out, tx, uu }
     }
     pub fn get_container(&mut self) -> Option<Widget> {
         if self.pwin.window.is_visible() {
@@ -107,23 +100,12 @@ impl UITemplate {
         }
         self.pwin.window.show_all();
     }
-    pub fn bind<T: ActionUIMessage>(&mut self) {
+    pub fn bind(&mut self) {
         let uu = self.uu;
         let ref tx = self.tx;
-        self.apply_btn.connect_clicked(clone!(tx; |_a| {
-            tx.send_internal((uu, T::apply()));
-        }));
-        self.ok_btn.connect_clicked(clone!(tx; |_a| {
-            tx.send_internal((uu, T::ok()));
-        }));
-        self.cancel_btn.connect_clicked(clone!(tx; |_a| {
-            tx.send_internal((uu, T::cancel()));
-        }));
-        self.load_btn.connect_clicked(clone!(tx; |_a| {
-            tx.send_internal((uu, ActionMessageInner::LoadAction));
-        }));
-        self.execute_btn.connect_clicked(clone!(tx; |_a| {
-            tx.send_internal((uu, ActionMessageInner::ExecuteAction));
+        use self::ActionMessageInner::*;
+        self.close_btn.connect_clicked(clone!(tx; |_a| {
+            tx.send_internal((uu, CloseButton));
         }));
     }
     pub fn on_update(&mut self, p: &OpaqueAction) {
@@ -213,13 +195,12 @@ macro_rules! action_reply_notify {
 impl ActionController {
     pub fn new(b: &Builder) -> Self {
         let actions = HashMap::new();
-        let builder = b.clone();
         let tx = None;
         let cur_widget = None;
         let mixer = Default::default();
         build!(ActionController using b
-               with actions, builder, tx, mixer, cur_widget
-               get view, store, medit, mload, mexec, mdelete, mcreate_audio, sidebar)
+               with actions, tx, mixer, cur_widget
+               get view, store, medit, mload, mexec, mdelete, mcreate_audio, mcreate_fade, sidebar)
     }
     pub fn bind(&mut self, tx: &UISender) {
         use self::ActionMessageInner::*;
@@ -238,12 +219,15 @@ impl ActionController {
         self.mcreate_audio.connect_activate(clone!(tx; |_| {
             tx.send_internal(ActionInternalMessage::Create("audio"));
         }));
+        self.mcreate_fade.connect_activate(clone!(tx; |_| {
+            tx.send_internal(ActionInternalMessage::Create("fade"));
+        }));
         let dnd_targets = vec![TargetEntry::new("text/uri-list", TargetFlags::empty(), 0)];
         self.view.drag_dest_set(gtk::DEST_DEFAULT_ALL, &dnd_targets, gdk::ACTION_COPY | gdk::ACTION_MOVE);
 
         self.view.connect_drag_data_received(clone!(tx; |_, _, _, _, data, _, _| {
             let uris = data.get_uris();
-            println!("dnd: got uris {:?}", uris);
+            debug!("dnd: got uris {:?}", uris);
             if uris.len() == 0 { return; }
             tx.send_internal(ActionInternalMessage::FilesDropped(uris));
         }));
@@ -276,9 +260,9 @@ impl ActionController {
         else {
             let aui = match data.params {
                 ActionParameters::Audio(..) =>
-                    Box::new(AudioUI::new(&self.builder, data.uu, self.tx.as_ref().unwrap().clone())),
+                    Box::new(AudioUI::new(data.uu, self.tx.as_ref().unwrap().clone())) as Box<ActionUI>,
                 ActionParameters::Fade(..) =>
-                    unimplemented!()
+                    Box::new(FadeUI::new(data.uu, self.tx.as_ref().unwrap().clone())) as Box<ActionUI>
             };
             let mut act = Action {
                 inner: data,
@@ -316,7 +300,7 @@ impl ActionController {
             ActionExecuted { res, .. } => {
                 action_reply_notify!(self, res, "Executing action", "Action executed.");
             },
-            x => println!("warn: unexpected action reply {:?}", x)
+            x => warn!("actions: unexpected action reply {:?}", x)
         }
         self.update_store();
     }
@@ -386,6 +370,7 @@ impl ActionController {
                     }
                     act.ctl.edit_separately()
                 },
+                CloseButton => act.ctl.close_window(),
                 x => act.ctl.on_message(x)
             }
         }

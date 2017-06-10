@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{Statusbar, Builder, Button, Popover, ListBox, ButtonsType, DialogFlags, MessageType, MessageDialog, Window, Label};
+use gtk::{Statusbar, Builder, Button, Popover, ListBox, Label};
 use sync::UISender;
 
 pub enum Message {
@@ -55,12 +55,12 @@ impl MessageController {
         use self::Message::*;
         match msg {
             Statusbar(st) => {
-                println!("statusbar: {}", st);
+                info!("statusbar message: {}", st);
                 let id = self.statusbar.push(self.ctxid, &st);
                 self.messages.push((id, st));
             },
             Error(st) => {
-                println!("warning: {}", st);
+                warn!("warning message: {}", st);
                 let lbl = Label::new(None);
                 lbl.set_markup(&st);
                 self.list.add(&lbl);

@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{Orientation, Grid, RadioButton, Align, Label, Scale, Entry, PositionType, Inhibit};
+use gtk::{Orientation, Grid, RadioButton, ToggleButton, Align, Label, Scale, Entry, PositionType, Inhibit};
 use glib::signal;
 use sync::{UISender, UIMessage};
 use std::marker::PhantomData;
@@ -8,27 +8,29 @@ pub enum PatchedSliderMessage {
     VolChanged(f32),
     PatchChanged(usize)
 }
+pub type FadedSliderMessage = Option<f32>;
 
-pub trait SliderMessage<T> {
+pub trait SliderMessage<T: SliderBoxType> {
     type Message: Into<UIMessage>;
     type Identifier: Copy + 'static;
 
-    fn on_payload(ch: usize, data: T, id: Self::Identifier) -> Self::Message;
+    fn on_payload(ch: usize, data: T::Message, id: Self::Identifier) -> Self::Message;
 }
 pub struct SliderDetail {
     pub vol: f64,
     pub patch: usize
 }
-pub type FadedSliderDetail = Option<f64>;
-pub struct Slider<S, T: SliderMessage<S>> {
+pub type FadedSliderDetail = Option<f32>;
+pub struct Slider<S: SliderBoxType, T: SliderMessage<S>> {
     name: String,
     idx: usize,
     id: T::Identifier,
-    lbl: Label,
     vol: Entry,
+    tb: Option<ToggleButton>,
     radios: Vec<RadioButton>,
     scale: Scale,
-    changed_handler: u64
+    changed_handler: u64,
+    clicked_handler: u64
 }
 pub struct Patched;
 pub struct Faded;
@@ -38,9 +40,9 @@ mod detail {
     pub trait SliderBoxType: Sized {
         type Detail;
         type Message;
-        fn append_slider_extra<T: SliderMessage<Self::Message>>(&mut SliderBox<Self, T>, &mut Slider<Self::Message, T>) {
+        fn append_slider_extra<T: SliderMessage<Self>>(&mut SliderBox<Self, T>, &mut Slider<Self, T>) {
         }
-        fn update_slider<T: SliderMessage<Self::Message>>(&mut SliderBox<Self, T>, usize, Self::Detail) {
+        fn update_slider<T: SliderMessage<Self>>(&mut SliderBox<Self, T>, usize, Self::Detail) {
         }
     }
 }
@@ -48,7 +50,7 @@ use self::detail::SliderBoxType;
 impl SliderBoxType for Patched {
     type Detail = SliderDetail;
     type Message = PatchedSliderMessage;
-    fn append_slider_extra<T: SliderMessage<Self::Message>>(slf: &mut SliderBox<Self, T>, slider: &mut Slider<Self::Message, T>) {
+    fn append_slider_extra<T: SliderMessage<Self>>(slf: &mut SliderBox<Self, T>, slider: &mut Slider<Self, T>) {
         let ref tx = slf.tx;
         for n in 0..(slf.n_output+1) {
             if slider.name == "master" {
@@ -122,10 +124,10 @@ impl SliderBoxType for Patched {
         }));
 
     }
-    fn update_slider<T: SliderMessage<Self::Message>>(slf: &mut SliderBox<Self, T>, i: usize, val: SliderDetail) {
+    fn update_slider<T: SliderMessage<Self>>(slf: &mut SliderBox<Self, T>, i: usize, val: SliderDetail) {
         if let Some(slider) = slf.sliders.get_mut(i) {
             if i != 0 {
-                println!("patch for value {} is {}, {:?}", i, val.patch, slider.radios.get(val.patch));
+                trace!("mixer: patch for value {} is {}, {:?}", i, val.patch, slider.radios.get(val.patch));
                 let rb;
                 if val.patch == 0 {
                     rb = &slider.radios[0];
@@ -141,10 +143,8 @@ impl SliderBoxType for Patched {
                 rb.set_active(true);
             }
             if val.vol != slider.scale.get_value() {
-                println!("blocking changed handler");
                 signal::signal_handler_block(&slider.scale, slider.changed_handler);
                 slider.scale.set_value(val.vol);
-                println!("unblocking changed handler");
                 signal::signal_handler_unblock(&slider.scale, slider.changed_handler);
             }
         }
@@ -152,25 +152,93 @@ impl SliderBoxType for Patched {
 }
 impl SliderBoxType for Faded {
     type Detail = FadedSliderDetail;
-    type Message = ();
-    fn append_slider_extra<T: SliderMessage<Self::Message>>(slf: &mut SliderBox<Self, T>, slider: &mut Slider<Self::Message, T>) {
+    type Message = FadedSliderMessage;
+    fn append_slider_extra<T: SliderMessage<Self>>(slf: &mut SliderBox<Self, T>, slider: &mut Slider<Self, T>) {
         let sctx = slider.vol.get_style_context().unwrap();
         sctx.remove_class("vol-entry");
         sctx.add_class("vol-entry-fade");
         let ref mut scale = slider.scale;
         let ref mut vol = slider.vol;
+        let tb = ToggleButton::new_with_label("ON");
+        slf.grid.attach(&tb, slf.grid_left, 4, 1, 1);
+        let ref tx = slf.tx;
+        let idx = slider.idx;
+        let id = slider.id;
+        slider.clicked_handler = tb.connect_clicked(clone!(tx; |slf| {
+            trace!("on button clicked, currently on: {}", slf.get_active());
+            if slf.get_active() {
+                tx.send_internal(T::on_payload(idx, Some(0.0), id));
+            }
+            else {
+                tx.send_internal(T::on_payload(idx, None, id));
+            }
+        }));
+        scale.connect_value_changed(clone!(vol; |slf| {
+            let val = slf.get_value();
+            if val == -60.0 {
+                vol.set_text("-inf");
+            }
+            else {
+                let prec = if val.trunc() == val { 0 } else { 2 };
+                let sign = if val > 0.0 { "+" } else { "" };
+                vol.set_text(&format!("{}{:.*}", sign, prec, val));
+            }
+        }));
+        slider.changed_handler = scale.connect_value_changed(clone!(tx; |slf| {
+            let mut val = slf.get_value() as f32;
+            if val == -60.0 {
+                val = ::std::f32::NEG_INFINITY;
+            }
+            tx.send_internal(T::on_payload(idx, Some(val as f32), id));
+        }));
+        vol.connect_activate(clone!(scale; |slf| {
+            if let Ok(val) = slf.get_text().unwrap_or("".into()).parse() {
+                scale.set_value(val);
+            }
+        }));
+        vol.connect_focus_out_event(clone!(scale; |slf, _e| {
+            if let Ok(val) = slf.get_text().unwrap_or("".into()).parse() {
+                scale.set_value(val);
+            }
+            else {
+                scale.set_value(scale.get_value());
+            }
+            Inhibit(false)
+        }));
+        slider.tb = Some(tb);
+    }
+    fn update_slider<T: SliderMessage<Self>>(slf: &mut SliderBox<Self, T>, i: usize, val: FadedSliderDetail) {
+        if let Some(slider) = slf.sliders.get_mut(i) {
+            signal::signal_handler_block(slider.tb.as_ref().unwrap(), slider.clicked_handler);
+            signal::signal_handler_block(&slider.scale, slider.changed_handler);
+            trace!("mixer: updating slider, {:?}", val);
+            if let Some(val) = val {
+                let val = val as f64;
+                if val != slider.scale.get_value() {
+                    slider.scale.set_value(val);
+                }
+                slider.tb.as_ref().unwrap().set_active(true);
+            }
+            else {
+                slider.scale.set_value(-60.0);
+                slider.vol.set_text("");
+                slider.tb.as_ref().unwrap().set_active(false);
+            }
+            signal::signal_handler_unblock(&slider.scale, slider.changed_handler);
+            signal::signal_handler_unblock(slider.tb.as_ref().unwrap(), slider.clicked_handler);
+        }
     }
 }
 
-pub struct SliderBox<T: SliderBoxType, U: SliderMessage<T::Message>> {
+pub struct SliderBox<T: SliderBoxType, U: SliderMessage<T>> {
     pub grid: Grid,
     tx: UISender,
     grid_left: i32,
-    sliders: Vec<Slider<T::Message, U>>,
+    sliders: Vec<Slider<T, U>>,
     n_output: usize,
     _ph: PhantomData<T>
 }
-impl<A, T> SliderBox<A, T> where A: SliderBoxType, T: SliderMessage<A::Message> {
+impl<A, T> SliderBox<A, T> where A: SliderBoxType, T: SliderMessage<A> {
     fn append_slider(&mut self, name: &str, idx: usize, id: T::Identifier) {
         let lbl = Label::new(None);
         lbl.set_markup(name);
@@ -192,7 +260,7 @@ impl<A, T> SliderBox<A, T> where A: SliderBoxType, T: SliderMessage<A::Message> 
         self.grid.attach(&vol, self.grid_left, 2, 1, 1);
         self.grid.attach(&lbl, self.grid_left, 3, 1, 1);
 
-        let mut slider = Slider { lbl, vol, radios: Vec::new(), scale, changed_handler: 0, name: name.to_string(), idx, id };
+        let mut slider = Slider { vol, radios: Vec::new(), scale, changed_handler: 0, clicked_handler: 0, name: name.to_string(), idx, id, tb: None };
 
         A::append_slider_extra::<T>(self, &mut slider);
 

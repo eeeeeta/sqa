@@ -4,7 +4,7 @@ use connection::{self, ConnectionState, ConnectionMessage, ConnectionUIMessage};
 use sqa_backend::mixer::MixerConf;
 use sqa_backend::codec::{Reply, Command};
 use util::ThreadNotifier;
-use tokio_core::reactor::{Handle, Remote};
+use tokio_core::reactor::Handle;
 use futures::{Poll, Async, Future, Stream};
 use messages;
 use errors;
@@ -109,7 +109,7 @@ impl Future for BackendContext {
             hdl: self.hdl.clone()
         };
         if let Err(e) = self.conn.poll(args) {
-            println!("FIXME: insert proper error handling here!\n{:?}", e);
+            error!("FIXME: insert proper error handling here!\n{:?}", e);
         }
         Ok(Async::NotReady)
     }

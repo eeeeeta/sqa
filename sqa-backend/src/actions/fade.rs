@@ -10,9 +10,10 @@ use std::default::Default;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct FadeParams {
-    target: Option<Uuid>,
-    fades: Vec<Option<f32>>,
-    dur: Duration
+    pub target: Option<Uuid>,
+    pub fades: Vec<Option<f32>>,
+    pub fade_master: Option<f32>,
+    pub dur: Duration
 }
 #[derive(Default)]
 pub struct Controller {
@@ -30,6 +31,7 @@ impl EditableAction for Controller {
         &self.params
     }
     fn set_params(&mut self, params: FadeParams, _: &mut Context) {
+        println!("pars: {:?}", params);
         self.params = params;
     }
 }
@@ -80,6 +82,17 @@ impl ActionController for Controller {
             ActionType::Audio(ref mut t) => t,
             _ => bail!("Action was wrong type")
         };
+        if let Some(fade) = self.params.fade_master {
+            if let Some(sdr) = tgt.senders.get_mut(0) {
+                let mut fd = FadeDetails::new(sdr.volume().get(0), fade);
+                fd.set_start_time(time);
+                let secs_component = self.params.dur.as_secs() * ::sqa_engine::ONE_SECOND_IN_NANOSECONDS;
+                let subsec_component = self.params.dur.subsec_nanos() as u64;
+                fd.set_duration(secs_component + subsec_component);
+                fd.set_active(true);
+                sdr.set_master_volume(Box::new(Parameter::LinearFade(fd)));
+            }
+        }
         for (i, fade) in self.params.fades.iter().enumerate() {
             if let Some(fade) = *fade {
                 if let Some(sdr) = tgt.senders.get_mut(i) {

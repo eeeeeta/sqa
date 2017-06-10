@@ -6,14 +6,14 @@ authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 [dependencies]
 tokio-core = "0.1"
 futures = "0.1"
-serde = "0.9"
-serde_derive = "0.9"
+serde = "1.0"
+rmp-serde = "0.13"
+serde_derive = "1.0"
 time = "0.1"
-uuid = { version = "0.4", features = ["v4", "serde"] }
+uuid = { version = "0.5", features = ["v4", "serde"] }
 sqa-engine = { path = "../sqa-engine" }
 sqa-ffmpeg = { path = "../sqa-ffmpeg" }
 rosc = { path = "../rosc" }
-serde_json = "0.9"
 error-chain = "0.10"
 chrono = { version = "0.3", features = ["serde"] }
 sqa-osc-custom-derive = { path = "../sqa-osc-custom-derive" }

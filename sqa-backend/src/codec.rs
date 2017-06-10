@@ -4,7 +4,6 @@ use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
 use errors::*;
 use mixer::MixerConf;
 use errors::BackendErrorKind::*;
-use serde_json;
 use actions::{ActionParameters, OpaqueAction};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -160,6 +159,7 @@ impl UdpCodec for SqaWireCodec {
     type In = RecvMessage;
     type Out = SendMessage;
     fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> ::std::io::Result<Self::In> {
+        println!("{:?}", buf);
         let pkt = match decoder::decode(buf) {
             Ok(pkt) => {
                 match pkt {

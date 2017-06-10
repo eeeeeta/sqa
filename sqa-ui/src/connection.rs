@@ -18,9 +18,7 @@ pub enum ConnectionState {
     Disconnected,
     VersionQuerySent { addr: SocketAddr },
     SubscriptionQuerySent { addr: SocketAddr, ver: String },
-    Connected { addr: SocketAddr, ver: String, last_ping: u64, last_pong: u64, last_err: Option<String> },
-    RecvFailed(String),
-    RecvThreadFailed
+    Connected { addr: SocketAddr, ver: String, last_ping: u64, last_pong: u64, last_err: Option<String> }
 }
 pub enum ConnectionUIMessage {
     ConnectClicked,
@@ -49,7 +47,7 @@ impl Context {
         }
     }
     fn notify_state_change(&mut self, args: &mut BackendContextArgs) {
-        println!("State change: {:?}", self.state);
+        debug!("State change: {:?}", self.state);
         args.send(UIMessage::ConnState(self.state.clone()));
     }
     fn send(&mut self, cmd: Command) -> errors::Result<()> {
@@ -69,7 +67,7 @@ impl Context {
     fn ping_timeout(&mut self, args: &mut BackendContextArgs) -> errors::Result<()> {
         if let ConnectionState::Connected { last_ping, last_pong, .. } = self.state {
             if last_pong < last_ping {
-                println!("Ping timeout!");
+                info!("Disconnected from server due to ping timeout.");
                 self.sock.take();
                 self.state = ConnectionState::Disconnected;
                 args.send(ConnectionUIMessage::NewlyDisconnected.into());
@@ -77,7 +75,7 @@ impl Context {
             }
             else {
                 self.send(Command::Ping)?;
-                println!("sending ping");
+                trace!("sending ping");
                 self.update_last_ping();
                 self.notify_state_change(args);
             }
@@ -143,7 +141,7 @@ impl Context {
             Connected { addr, ver, last_ping, mut last_pong, last_err } => {
                 if let Reply::Pong = msg {
                     last_pong = time::precise_time_ns();
-                    println!("got pong");
+                    trace!("got pong");
                     self.state = Connected { addr, ver, last_ping, last_pong, last_err };
                     Ok(true)
                 }
@@ -360,8 +358,7 @@ impl ConnectionController {
                 );
                 self.status_img.set_from_stock("gtk-connect", IconSize::Button.into());
                 self.status_btn.set_label(&format!("ping: {}", ping));
-            },
-            _ => {}
+            }
         }
     }
 }

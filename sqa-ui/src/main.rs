@@ -9,6 +9,8 @@ extern crate time;
 extern crate gdk;
 extern crate uuid;
 extern crate url;
+#[macro_use] extern crate log;
+extern crate fern;
 
 use gtk::prelude::*;
 use gtk::{Builder, Window};
@@ -29,16 +31,27 @@ mod connection;
 
 use sync::{UIContext, BackendContext};
 fn main() {
-    println!("SQA UI, using version {}", sqa_backend::VERSION);
-    println!("an eta project <http://theta.eu.org>");
-    println!("[+] Initialising GTK+");
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!("[{}] {} {}", record.target(), record.level(), message))
+        })
+        .level(log::LogLevelFilter::Trace)
+        .level_for("tokio_core", log::LogLevelFilter::Info)
+        .level_for("mio", log::LogLevelFilter::Info)
+        .chain(::std::io::stdout())
+        .apply()
+        .unwrap();
+
+    info!("SQA UI, using version {}", sqa_backend::VERSION);
+    info!("an eta project <http://theta.eu.org>");
+    info!("[+] Initialising GTK+");
     let _ = gtk::init().unwrap();
     let b = Builder::new_from_string(util::INTERFACE_SRC);
     let provider = gtk::CssProvider::new();
     provider.load_from_data(include_str!("ui.css")).unwrap();
     let screen = gdk::Screen::get_default().unwrap();
     gtk::StyleContext::add_provider_for_screen(&screen, &provider, gtk::STYLE_PROVIDER_PRIORITY_USER);
-    println!("[+] Initialising event loop & backend context");
+    info!("[+] Initialising event loop & backend context");
     let tn = util::ThreadNotifier::new();
     let ttn = tn.clone();
     let (btx, brx) = mpsc::unbounded();
@@ -56,7 +69,7 @@ fn main() {
         core.run(&mut ctx).unwrap();
         panic!("The future resolved! What is this sorcery?!");
     });
-    println!("[+] Initialising UI context");
+    info!("[+] Initialising UI context");
     let mut ctx = UIContext {
         rx: urx,
         tx: btx,
@@ -71,10 +84,10 @@ fn main() {
     tn.register_handler(move || {
         ctx.borrow_mut().on_event();
     });
-    println!("[+] Showing main window");
+    info!("[+] Showing main window");
     let win: Window = b.get_object("sqa-main").unwrap();
     win.set_title(&format!("SQA UI [{}]", sqa_backend::VERSION));
     win.show_all();
-    println!("[+] Starting GTK+ event loop!");
+    info!("[+] Starting GTK+ event loop!");
     gtk::main();
 }

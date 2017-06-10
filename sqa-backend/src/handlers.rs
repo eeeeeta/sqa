@@ -8,7 +8,6 @@ use tokio_core::reactor::Remote;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use time::{Duration, SteadyTime};
 use serde::Serialize;
-use serde_json;
 use rosc::{OscType, OscMessage};
 use codec::Reply;
 use errors::*;
@@ -48,16 +47,6 @@ impl<M> ConnData<M> {
     }
     pub fn respond<T: Into<OscMessage>>(&mut self, msg: T) -> IoResult<()> {
         self.framed.start_send(self.addr.msg_to(msg.into()))?;
-        Ok(())
-    }
-    pub fn reply<T>(&mut self, data: T) -> IoResult<()> where T: Serialize {
-        let j = serde_json::to_string(&data).unwrap(); // FIXME FIXME FIXME
-        let mut path = String::from("/reply");
-        path.push_str(&self.path);
-        self.framed.start_send(self.addr.msg_to(OscMessage {
-            addr: path,
-            args: Some(vec![OscType::String(j)])
-        }))?;
         Ok(())
     }
     pub fn subscribe(&mut self) {

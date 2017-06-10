@@ -50,13 +50,13 @@ fn tokens_from_message(name: Ident, Message { path, substs, sers, ident, verbs, 
             IdentType::Ser => quote! {
                 let #tok;
                 if args.len() < 1 {
-                    bail!(OSCWrongArgs("string"))
+                    bail!(OSCWrongArgs("blob"))
                 }
-                if let Some(x) = args.remove(0).string() {
-                    #tok2 = serde_json::from_str(&x)?;
+                if let Some(x) = args.remove(0).blob() {
+                    #tok2 = ::rmp_serde::from_slice(&x)?;
                 }
                 else {
-                    bail!(OSCWrongArgs("string"))
+                    bail!(OSCWrongArgs("blob"))
                 }
             },
             IdentType::Verb(ref id) => quote! {
@@ -90,8 +90,8 @@ fn tokens_from_message(name: Ident, Message { path, substs, sers, ident, verbs, 
             let path = format!(#path #(,#substs2=#substs)*);
             let mut args = vec![
                 #(
-                    OscType::String(
-                        serde_json::to_string(&#sers)
+                    OscType::Blob(
+                        ::rmp_serde::to_vec(&#sers)
                             .unwrap()
                     )
                 ),*

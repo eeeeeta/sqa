@@ -1,22 +1,19 @@
 use gtk::prelude::*;
-use gtk::{Builder, FileChooserAction, FileChooserButton, Widget};
-use super::{ActionUI, OpaqueAction, ActionUIMessage, UITemplate, ActionMessageInner};
+use gtk::{FileChooserAction, FileChooserButton, Widget};
+use super::{ActionUI, OpaqueAction, UITemplate, ActionMessageInner};
 use sync::UISender;
 use uuid::Uuid;
-use widgets::{SliderBox, Patched, PatchedSliderMessage, FallibleEntry, SliderMessage, SliderDetail};
+use widgets::{SliderBox, Patched, PatchedSliderMessage, SliderMessage, SliderDetail};
 use sqa_backend::codec::Command;
 use sqa_backend::mixer::MixerConf;
-use sqa_backend::actions::{ActionParameters, ActionController, PlaybackState};
-use sqa_backend::actions::audio::Controller as AudioController;
+use sqa_backend::actions::{ActionParameters, PlaybackState};
 use sqa_backend::actions::audio::AudioParams;
 
 pub enum AudioMessage {
-    ApplyButton,
-    OkButton,
-    CancelButton,
     Slider(usize, PatchedSliderMessage),
+    FileChanged
 }
-impl SliderMessage<PatchedSliderMessage> for AudioMessage {
+impl SliderMessage<Patched> for AudioMessage {
     type Message = (Uuid, ActionMessageInner);
     type Identifier = Uuid;
 
@@ -24,17 +21,6 @@ impl SliderMessage<PatchedSliderMessage> for AudioMessage {
         use self::ActionMessageInner::*;
         use self::AudioMessage::*;
         (id, Audio(Slider(ch, data)))
-    }
-}
-impl ActionUIMessage for AudioMessage {
-    fn apply() -> ActionMessageInner {
-        ActionMessageInner::Audio(AudioMessage::ApplyButton)
-    }
-    fn ok() -> ActionMessageInner {
-        ActionMessageInner::Audio(AudioMessage::OkButton)
-    }
-    fn cancel() -> ActionMessageInner {
-        ActionMessageInner::Audio(AudioMessage::CancelButton)
     }
 }
 pub struct AudioUI {
@@ -46,7 +32,7 @@ pub struct AudioUI {
 }
 
 impl AudioUI {
-    pub fn new(b: &Builder, uu: Uuid, tx: UISender) -> Self {
+    pub fn new(uu: Uuid, tx: UISender) -> Self {
         let file = FileChooserButton::new("Audio file", FileChooserAction::Open);
         let mut temp = UITemplate::new(uu, tx.clone());
         let params = Default::default();
@@ -59,17 +45,15 @@ impl AudioUI {
         ctx
     }
     fn bind(&mut self) {
-        self.temp.bind::<AudioMessage>();
+        self.temp.bind();
         let uu = self.temp.uu;
         let ref tx = self.temp.tx;
-        use self::ActionMessageInner::Audio;
-        use self::AudioMessage::*;
-        self.file.connect_file_set(clone!(tx; |fb| {
-            tx.send_internal((uu, Audio(ApplyButton)));
+        self.file.connect_file_set(clone!(tx; |_| {
+            tx.send_internal((uu, ActionMessageInner::Audio(AudioMessage::FileChanged)));
         }));
     }
     fn on_new_parameters(&mut self, p: &AudioParams) {
-        println!("{:#?}", p);
+        trace!("audio: new parameters {:?}", p);
         if let Some(ref uri) = p.url {
             self.file.set_uri(uri);
         }
@@ -78,7 +62,7 @@ impl AudioUI {
         }
         self.params = p.clone();
         if p.chans.len() != self.sb.n_sliders() || self.cnf.defs.len() != self.sb.n_output() {
-            println!("recreating sliders!");
+            trace!("audio: recreating sliders!");
             self.sb.grid.destroy();
             self.sb = SliderBox::new(p.chans.len(), self.cnf.defs.len(), &self.temp.tx, self.temp.uu);
             self.temp.pwin.props_box.pack_start(&self.sb.grid, false, true, 5);
@@ -87,7 +71,6 @@ impl AudioUI {
         let mut details = p.chans.iter()
             .map(|ch| {
                 let idx = if let Some(patch) = ch.patch {
-                    println!("patch: {}, defs: {:?}", patch, self.cnf.defs);
                     self.cnf.defs.iter().position(|&p| p == patch).map(|x| x+1).unwrap_or(0)
                 } else { 0 };
                 SliderDetail { vol: ch.vol as f64, patch: idx }
@@ -95,6 +78,13 @@ impl AudioUI {
             .collect::<Vec<_>>();
         details.insert(0, SliderDetail { vol: p.master_vol as f64, patch: 0 });
         self.sb.update_values(details);
+    }
+    fn apply_changes(&mut self) {
+        trace!("audio: sending update {:?}", self.params);
+        self.temp.tx.send(Command::UpdateActionParams {
+            uuid: self.temp.uu,
+            params: ActionParameters::Audio(self.params.clone())
+        });
     }
 }
 impl ActionUI for AudioUI {
@@ -111,66 +101,41 @@ impl ActionUI for AudioUI {
             }
         }
     }
+    fn close_window(&mut self) {
+        self.temp.pwin.window.hide();
+    }
     fn on_message(&mut self, m: ActionMessageInner) {
         if let ActionMessageInner::Audio(m) = m {
             use self::AudioMessage::*;
             match m {
-                x @ ApplyButton | x @ OkButton => {
-                    let url = self.file.get_uri();
-                    let chans = self.params.chans.clone();
-                    let master_vol = self.params.master_vol.clone();
-                    let params = AudioParams { url, chans, master_vol };
-                    self.temp.tx.send(Command::UpdateActionParams {
-                        uuid: self.temp.uu,
-                        params: ActionParameters::Audio(params)
-                    });
-                    if let OkButton = x {
-                        self.temp.pwin.window.hide();
-                    }
+                FileChanged => {
+                    self.params.url = self.file.get_uri();
+                    self.apply_changes();
                 },
                 Slider(ch, PatchedSliderMessage::VolChanged(val)) => {
-                    let mut chans = self.params.chans.clone();
-                    let mut master_vol = self.params.master_vol.clone();
-                    let url = self.params.url.clone();
+                    trace!("audio: slider, ch {} val {}", ch, val);
                     if ch == 0 {
-                        master_vol = val;
+                        self.params.master_vol = val;
                     }
                     else {
-                        if chans.get(ch-1).is_some() {
-                            chans[ch-1].vol = val;
+                        if self.params.chans.get(ch-1).is_some() {
+                            self.params.chans[ch-1].vol = val;
                         }
                     }
-                    let params = AudioParams { url, chans, master_vol };
-                    self.temp.tx.send(Command::UpdateActionParams {
-                        uuid: self.temp.uu,
-                        params: ActionParameters::Audio(params)
-                    });
+                    self.apply_changes();
                 },
                 Slider(ch, PatchedSliderMessage::PatchChanged(patch)) => {
                     if patch == 0 || ch == 0 { return }
                     let ch = ch - 1;
-                    println!("setting patch for {}: {}, defs: {:?}", ch, patch, self.cnf.defs);
+                    trace!("audio: setting patch for {}: {}, defs: {:?}", ch, patch, self.cnf.defs);
                     let patch = match self.cnf.defs.get(patch-1) {
                         Some(&u) => u,
                         None => return
                     };
                     if self.params.chans.get(ch).is_some() {
-                        let mut chans = self.params.chans.clone();
-                        let master_vol = self.params.master_vol.clone();
-                        let url = self.params.url.clone();
-                        chans[ch].patch = Some(patch);
-                        let params = AudioParams { url, chans, master_vol };
-                        println!("updating patch for chan: {:?}", params);
-                        self.temp.tx.send(Command::UpdateActionParams {
-                            uuid: self.temp.uu,
-                            params: ActionParameters::Audio(params)
-                        });
+                        self.params.chans[ch].patch = Some(patch);
+                        self.apply_changes();
                     }
-                },
-                CancelButton => {
-                    let pc = self.params.clone();
-                    self.on_new_parameters(&pc);
-                    self.temp.pwin.window.hide();
                 }
             }
         }

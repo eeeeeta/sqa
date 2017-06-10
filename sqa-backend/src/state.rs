@@ -117,6 +117,7 @@ impl ConnHandler for Context {
                 d.respond(ActionInfoRetrieved { uuid, res })?;
             },
             UpdateActionParams { uuid, params } => {
+                println!("uap: {:?}", params);
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
                     let ret = a.set_params(params, self).map_err(|e| e.to_string());
                     self.on_action_changed(d, a);
