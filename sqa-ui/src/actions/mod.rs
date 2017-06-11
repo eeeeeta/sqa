@@ -19,7 +19,9 @@ use self::fade::FadeUI;
 pub enum ActionInternalMessage {
     Create(&'static str),
     SelectionChanged,
-    FilesDropped(Vec<String>)
+    FilesDropped(Vec<String>),
+    BeginSelection(Uuid),
+    CancelSelection
 }
 pub enum ActionMessageInner {
     Audio(audio::AudioMessage),
@@ -28,9 +30,14 @@ pub enum ActionMessageInner {
     ExecuteAction,
     DeleteAction,
     EditAction,
-    CloseButton
+    CloseButton,
 }
 pub type ActionMessage = (Uuid, ActionMessageInner);
+struct SelectionDetails {
+    initiator: Uuid,
+    prev: Option<Uuid>,
+    cursor: Option<gdk::Cursor>
+}
 pub struct ActionController {
     view: TreeView,
     mixer: MixerConf,
@@ -38,7 +45,9 @@ pub struct ActionController {
     tx: Option<UISender>,
     cur_widget: Option<(Uuid, Widget)>,
     sidebar: Stack,
-    actions: HashMap<Uuid, Action>,
+    ctls: HashMap<Uuid, Box<ActionUI>>,
+    opas: HashMap<Uuid, OpaqueAction>,
+    cur_sel: Option<SelectionDetails>,
     medit: MenuItem,
     mdelete: MenuItem,
     mload: MenuItem,
@@ -53,6 +62,9 @@ pub trait ActionUI {
     fn get_container(&mut self) -> Option<Widget>;
     fn on_mixer(&mut self, _m: &MixerConf) {}
     fn close_window(&mut self) {}
+    fn on_action_list(&mut self, _l: &HashMap<Uuid, OpaqueAction>) {}
+    fn on_selection_finished(&mut self, _sel: Uuid) {}
+    fn on_selection_cancelled(&mut self) {}
 }
 pub struct UITemplate {
     pub pwin: PropertyWindow,
@@ -130,7 +142,7 @@ impl TreeSelectGetter {
     }
 }
 pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {
-    use self::PlaybackState::*;
+use self::PlaybackState::*;
     match p.state {
         Inactive => pwin.update_header(
             "gtk-media-stop",
@@ -165,10 +177,6 @@ pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {
         _ => {}
     }
 }
-pub struct Action {
-    inner: OpaqueAction,
-    ctl: Box<ActionUI>
-}
 macro_rules! bind_action_menu_items {
     ($self:ident, $tx:ident, $tsg:ident, $($name:ident => $res:ident),*) => {
         $(
@@ -194,12 +202,14 @@ macro_rules! action_reply_notify {
 }
 impl ActionController {
     pub fn new(b: &Builder) -> Self {
-        let actions = HashMap::new();
+        let ctls = HashMap::new();
+        let opas = HashMap::new();
         let tx = None;
         let cur_widget = None;
+        let cur_sel = None;
         let mixer = Default::default();
         build!(ActionController using b
-               with actions, tx, mixer, cur_widget
+               with ctls, opas, tx, mixer, cur_widget, cur_sel
                get view, store, medit, mload, mexec, mdelete, mcreate_audio, mcreate_fade, sidebar)
     }
     pub fn bind(&mut self, tx: &UISender) {
@@ -234,14 +244,14 @@ impl ActionController {
 
         tx.send_internal(ActionInternalMessage::SelectionChanged);
     }
-    fn update_store(&mut self) {
+    fn update_store(&mut self, sel: Option<Uuid>) {
         let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
-        let sel = tsg.get();
+        let sel = if sel.is_some() { sel } else { tsg.get() };
         self.store.clear();
-        for (uu, action) in self.actions.iter() {
+        for (uu, action) in self.opas.iter() {
             let iter = self.store.insert_with_values(None, &[0, 1], &[
                 &uu.to_string(),
-                &action.inner.desc
+                &action.desc
             ]);
             if let Some(u2) = sel {
                 if *uu == u2 {
@@ -251,26 +261,24 @@ impl ActionController {
         }
     }
     fn on_action_info(&mut self, uu: Uuid, data: OpaqueAction) {
-        if self.actions.get_mut(&uu).is_some() {
+        if self.opas.get_mut(&uu).is_some() {
             // FIXME(rust): the borrow checker forbids if let here, because bad desugaring.
-            let act = self.actions.get_mut(&uu).unwrap();
-            mem::replace(&mut act.inner, data);
-            act.ctl.on_update(&act.inner);
+            let opa = self.opas.get_mut(&uu).unwrap();
+            let ctl = self.ctls.get_mut(&uu).unwrap();
+            mem::replace(opa, data);
+            ctl.on_update(&opa);
         }
         else {
-            let aui = match data.params {
+            let mut aui = match data.params {
                 ActionParameters::Audio(..) =>
                     Box::new(AudioUI::new(data.uu, self.tx.as_ref().unwrap().clone())) as Box<ActionUI>,
                 ActionParameters::Fade(..) =>
                     Box::new(FadeUI::new(data.uu, self.tx.as_ref().unwrap().clone())) as Box<ActionUI>
             };
-            let mut act = Action {
-                inner: data,
-                ctl: aui
-            };
-            act.ctl.on_update(&act.inner);
-            act.ctl.on_mixer(&self.mixer);
-            self.actions.insert(uu, act);
+            aui.on_update(&data);
+            aui.on_mixer(&self.mixer);
+            self.ctls.insert(uu, aui);
+            self.opas.insert(uu, data);
         }
     }
     pub fn on_action_reply(&mut self, r: Reply) {
@@ -278,12 +286,14 @@ impl ActionController {
         match r {
             UpdateActionInfo { uuid, data } => self.on_action_info(uuid, data),
             UpdateActionDeleted { uuid } => {
-                self.actions.remove(&uuid);
+                self.opas.remove(&uuid);
+                self.ctls.remove(&uuid);
                 self.tx.as_mut().unwrap()
                     .send_internal(Message::Statusbar("Action deleted.".into()));
             },
             ReplyActionList { list } => {
-                self.actions.clear();
+                self.opas.clear();
+                self.ctls.clear();
                 for (uu, oa) in list {
                     self.on_action_info(uu, oa);
                 }
@@ -302,7 +312,10 @@ impl ActionController {
             },
             x => warn!("actions: unexpected action reply {:?}", x)
         }
-        self.update_store();
+        for (_, ctl) in self.ctls.iter_mut() {
+            ctl.on_action_list(&self.opas);
+        }
+        self.update_store(None);
     }
     pub fn on_internal(&mut self, msg: ActionInternalMessage) {
         use self::ActionInternalMessage::*;
@@ -312,6 +325,16 @@ impl ActionController {
             },
             SelectionChanged => {
                 let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
+                if let Some(c) = tsg.get() {
+                    if let Some(sel) = self.cur_sel.take() {
+                        let pwin = self.view.get_parent_window().unwrap();
+                        pwin.set_cursor(sel.cursor.as_ref());
+                        self.update_store(sel.prev);
+                        if let Some(act) = self.ctls.get_mut(&sel.initiator) {
+                            act.on_selection_finished(c);
+                        }
+                    }
+                }
                 let activated = tsg.get().is_some();
                 self.medit.set_sensitive(activated);
                 self.mload.set_sensitive(activated);
@@ -325,8 +348,8 @@ impl ActionController {
                         }
                         self.sidebar.remove(&w);
                     }
-                    if let Some(act) = self.actions.get_mut(&uu) {
-                        if let Some(w) = act.ctl.get_container() {
+                    if let Some(act) = self.ctls.get_mut(&uu) {
+                        if let Some(w) = act.get_container() {
                             self.sidebar.add_named(&w, "action");
                             w.show_all();
                             self.sidebar.set_visible_child(&w);
@@ -349,11 +372,38 @@ impl ActionController {
                         .send(Command::CreateActionWithParams { typ: "audio".into(), params });
                 }
             },
+            BeginSelection(uu) => {
+                let pwin = self.view.get_parent_window().unwrap();
+                if let Some(sel) = self.cur_sel.take() {
+                    pwin.set_cursor(sel.cursor.as_ref());
+                    warn!("BeginSelection called twice, old initiator {} new {}", sel.initiator, uu);
+                }
+                let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
+                let disp = self.view.get_display().unwrap();
+                let xhair = gdk::Cursor::new_from_name(&disp, "crosshair");
+                let old_c = pwin.get_cursor();
+                self.cur_sel = Some(SelectionDetails {
+                    initiator: uu,
+                    prev: tsg.get(),
+                    cursor: old_c
+                });
+                pwin.set_cursor(&xhair);
+            },
+            CancelSelection => {
+                if let Some(sel) = self.cur_sel.take() {
+                    let pwin = self.view.get_parent_window().unwrap();
+                    pwin.set_cursor(sel.cursor.as_ref());
+                    self.update_store(sel.prev);
+                    if let Some(act) = self.ctls.get_mut(&sel.initiator) {
+                        act.on_selection_cancelled();
+                    }
+                }
+            }
         }
     }
     pub fn on_action_msg(&mut self, msg: ActionMessage) {
         let tx = self.tx.as_mut().unwrap();
-        if let Some(act) = self.actions.get_mut(&msg.0) {
+        if let Some(ctl) = self.ctls.get_mut(&msg.0) {
             use self::ActionMessageInner::*;
             match msg.1 {
                 LoadAction => tx.send(Command::LoadAction { uuid: msg.0 }),
@@ -368,16 +418,16 @@ impl ActionController {
                             self.cur_widget = Some((uu, w));
                         }
                     }
-                    act.ctl.edit_separately()
+                    ctl.edit_separately()
                 },
-                CloseButton => act.ctl.close_window(),
-                x => act.ctl.on_message(x)
+                CloseButton => ctl.close_window(),
+                x => ctl.on_message(x)
             }
         }
     }
     pub fn on_mixer(&mut self, conf: MixerConf) {
-        for (_, act) in self.actions.iter_mut() {
-            act.ctl.on_mixer(&conf);
+        for (_, ctl) in self.ctls.iter_mut() {
+            ctl.on_mixer(&conf);
         }
         self.mixer = conf;
     }
