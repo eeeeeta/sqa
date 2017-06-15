@@ -1,7 +1,8 @@
 use gtk::prelude::*;
 use gtk::{Button, Widget};
 use super::{ActionMessageInner, ActionInternalMessage, ActionMessage, OpaqueAction, UISender, ActionUI, UITemplate};
-use widgets::{SliderBox, Faded, SliderMessage, FadedSliderMessage};
+use std::time::Duration;
+use widgets::{SliderBox, Faded, DurationEntry, DurationEntryMessage, SliderMessage, FadedSliderMessage};
 use uuid::Uuid;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -10,8 +11,10 @@ use sqa_backend::codec::Command;
 use sqa_backend::actions::ActionParameters;
 use sqa_backend::actions::fade::FadeParams;
 
+#[derive(Clone)]
 pub enum FadeMessage {
-    Slider(usize, FadedSliderMessage)
+    Slider(usize, FadedSliderMessage),
+    DurationModified(Duration)
 }
 impl SliderMessage<Faded> for FadeMessage {
     type Message = ActionMessage;
@@ -23,11 +26,21 @@ impl SliderMessage<Faded> for FadeMessage {
         (id, Fade(Slider(ch, data)))
     }
 }
+impl DurationEntryMessage for FadeMessage {
+    type Message = ActionMessage;
+    type Identifier = Uuid;
 
+    fn on_payload(dur: Duration, id: Uuid) -> Self::Message {
+        use self::ActionMessageInner::*;
+        use self::FadeMessage::*;
+        (id, Fade(DurationModified(dur)))
+    }
+}
 pub struct FadeUI {
     temp: UITemplate,
     sel: Button,
     params: FadeParams,
+    dur: DurationEntry,
     sb: SliderBox<Faded, FadeMessage>,
     selecting: Rc<Cell<bool>>,
     actionlist: HashMap<Uuid, OpaqueAction>,
@@ -38,12 +51,14 @@ impl FadeUI {
         let mut temp = UITemplate::new(uu, tx.clone());
         let sb = SliderBox::new(0, 0, &tx, uu);
         let params = Default::default();
+        let dur = DurationEntry::new();
         let sel = Button::new_with_label("[choose...]");
         let selecting = Rc::new(Cell::new(false));
         let actionlist = HashMap::new();
         temp.pwin.append_property("Target", &sel);
+        temp.pwin.append_property("Duration", &*dur);
         temp.pwin.props_box.pack_start(&sb.grid, false, true, 5);
-        let mut ctx = FadeUI { temp, params, sb, sel, tx, selecting, actionlist };
+        let mut ctx = FadeUI { temp, params, sb, sel, tx, selecting, actionlist, dur };
         ctx.bind();
         ctx
     }
@@ -52,6 +67,7 @@ impl FadeUI {
         let ref tx = self.tx;
         let ref selecting = self.selecting;
         let uu = self.temp.uu;
+        self.dur.bind::<FadeMessage>(tx, uu);
         self.sel.connect_clicked(clone!(tx, selecting; |slf| {
             if selecting.get() {
                 tx.send_internal(ActionInternalMessage::CancelSelection);
@@ -77,6 +93,7 @@ impl FadeUI {
         else {
             self.sel.set_label("[choose...]");
         }
+        self.dur.set(p.dur);
         if p.fades.len() != self.sb.n_sliders() {
             self.sb.grid.destroy();
             self.sb = SliderBox::new(p.fades.len(), 0, &self.temp.tx, self.temp.uu);
@@ -115,6 +132,11 @@ impl ActionUI for FadeUI {
                     else if let Some(v) = self.params.fades.get_mut(ch-1) {
                         *v = val;
                     }
+                    self.apply_changes();
+                },
+                DurationModified(dur) => {
+                    self.params.dur = dur;
+                    trace!("dur cb: new dur {:?}", dur);
                     self.apply_changes();
                 }
             }

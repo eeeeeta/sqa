@@ -23,6 +23,7 @@ pub enum ActionInternalMessage {
     BeginSelection(Uuid),
     CancelSelection
 }
+#[derive(Clone)]
 pub enum ActionMessageInner {
     Audio(audio::AudioMessage),
     Fade(fade::FadeMessage),

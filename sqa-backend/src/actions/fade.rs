@@ -7,6 +7,7 @@ use errors::BackendResult;
 use uuid::Uuid;
 use std::time::Duration;
 use std::default::Default;
+use super::audio::db_lin;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct FadeParams {
@@ -31,7 +32,6 @@ impl EditableAction for Controller {
         &self.params
     }
     fn set_params(&mut self, params: FadeParams, _: &mut Context) {
-        println!("pars: {:?}", params);
         self.params = params;
     }
 }
@@ -66,8 +66,8 @@ impl ActionController for Controller {
                 err: "No target is specified.".into()
             });
         }
-        if self.params.fades.iter().fold(true, |acc, elem|
-                                         if elem.is_some() && !acc { true } else { acc }) {
+        if self.params.fade_master.is_none() &&  self.params.fades.iter().fold(true, |acc, elem|
+                                         if elem.is_some() && !acc { true } else { acc }){
             ret.push(ParameterError {
                 name: "fades".into(),
                 err: "Nothing is being faded.".into()
@@ -84,7 +84,7 @@ impl ActionController for Controller {
         };
         if let Some(fade) = self.params.fade_master {
             if let Some(sdr) = tgt.senders.get_mut(0) {
-                let mut fd = FadeDetails::new(sdr.volume().get(0), fade);
+                let mut fd = FadeDetails::new(sdr.volume().get(0), db_lin(fade));
                 fd.set_start_time(time);
                 let secs_component = self.params.dur.as_secs() * ::sqa_engine::ONE_SECOND_IN_NANOSECONDS;
                 let subsec_component = self.params.dur.subsec_nanos() as u64;
@@ -96,7 +96,7 @@ impl ActionController for Controller {
         for (i, fade) in self.params.fades.iter().enumerate() {
             if let Some(fade) = *fade {
                 if let Some(sdr) = tgt.senders.get_mut(i) {
-                    let mut fd = FadeDetails::new(sdr.volume().get(0), fade);
+                    let mut fd = FadeDetails::new(sdr.volume().get(0), db_lin(fade));
                     fd.set_start_time(time);
                     let secs_component = self.params.dur.as_secs() * ::sqa_engine::ONE_SECOND_IN_NANOSECONDS;
                     let subsec_component = self.params.dur.subsec_nanos() as u64;

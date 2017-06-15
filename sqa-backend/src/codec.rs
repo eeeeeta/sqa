@@ -159,7 +159,6 @@ impl UdpCodec for SqaWireCodec {
     type In = RecvMessage;
     type Out = SendMessage;
     fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> ::std::io::Result<Self::In> {
-        println!("{:?}", buf);
         let pkt = match decoder::decode(buf) {
             Ok(pkt) => {
                 match pkt {

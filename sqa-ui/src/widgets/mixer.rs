@@ -4,6 +4,7 @@ use glib::signal;
 use sync::{UISender, UIMessage};
 use std::marker::PhantomData;
 
+#[derive(Clone)]
 pub enum PatchedSliderMessage {
     VolChanged(f32),
     PatchChanged(usize)

@@ -9,6 +9,7 @@ use sqa_backend::mixer::MixerConf;
 use sqa_backend::actions::{ActionParameters, PlaybackState};
 use sqa_backend::actions::audio::AudioParams;
 
+#[derive(Clone)]
 pub enum AudioMessage {
     Slider(usize, PatchedSliderMessage),
     FileChanged
