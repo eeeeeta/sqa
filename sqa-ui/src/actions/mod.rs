@@ -1,19 +1,20 @@
 use gtk::prelude::*;
-use gtk::{self, Widget, TreeView, ListStore, Button, ButtonBox, ButtonBoxStyle, Orientation, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack, ScrolledWindow};
+use gtk::{self, Widget, TreeView, ListStore, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack};
 use gdk;
 use uuid::Uuid;
 use std::collections::HashMap;
 use std::mem;
 use sync::UISender;
-use widgets::PropertyWindow;
 use sqa_backend::codec::{Command, Reply};
 use sqa_backend::mixer::MixerConf;
-use sqa_backend::actions::{ActionParameters, PlaybackState, OpaqueAction};
+use sqa_backend::actions::{ActionParameters, OpaqueAction};
 use sqa_backend::actions::audio::AudioParams;
 use messages::Message;
 
 pub mod audio;
 pub mod fade;
+pub mod template;
+pub use self::template::UITemplate;
 use self::audio::AudioUI;
 use self::fade::FadeUI;
 pub enum ActionInternalMessage {
@@ -21,7 +22,8 @@ pub enum ActionInternalMessage {
     SelectionChanged,
     FilesDropped(Vec<String>),
     BeginSelection(Uuid),
-    CancelSelection
+    CancelSelection,
+    ChangeCurPage(Option<u32>)
 }
 #[derive(Clone)]
 pub enum ActionMessageInner {
@@ -54,7 +56,8 @@ pub struct ActionController {
     mload: MenuItem,
     mexec: MenuItem,
     mcreate_audio: MenuItem,
-    mcreate_fade: MenuItem
+    mcreate_fade: MenuItem,
+    cur_page: Option<u32>
 }
 pub trait ActionUI {
     fn on_update(&mut self, p: &OpaqueAction);
@@ -66,65 +69,9 @@ pub trait ActionUI {
     fn on_action_list(&mut self, _l: &HashMap<Uuid, OpaqueAction>) {}
     fn on_selection_finished(&mut self, _sel: Uuid) {}
     fn on_selection_cancelled(&mut self) {}
-}
-pub struct UITemplate {
-    pub pwin: PropertyWindow,
-    pub close_btn: Button,
-    pub load_btn: Button,
-    pub execute_btn: Button,
-    pub tx: UISender,
-    pub popped_out: bool,
-    pub uu: Uuid
+    fn change_cur_page(&mut self, Option<u32>);
 }
 
-impl UITemplate {
-    pub fn new(uu: Uuid, tx: UISender) -> Self {
-        let mut pwin = PropertyWindow::new();
-        let close_btn = Button::new_with_mnemonic("_Close");
-        let load_btn = Button::new_with_mnemonic("_Load");
-        let execute_btn = Button::new_with_mnemonic("_Execute");
-        let btn_box = ButtonBox::new(Orientation::Horizontal);
-        let popped_out = false;
-        btn_box.set_layout(ButtonBoxStyle::Spread);
-        btn_box.pack_start(&load_btn, false, false, 0);
-        btn_box.pack_start(&execute_btn, false, false, 0);
-        pwin.append_button(&close_btn);
-        pwin.props_box.pack_start(&btn_box, false, false, 0);
-        UITemplate { pwin, close_btn, load_btn, execute_btn, popped_out, tx, uu }
-    }
-    pub fn get_container(&mut self) -> Option<Widget> {
-        if self.pwin.window.is_visible() {
-            None
-        }
-        else {
-            if !self.popped_out {
-                self.pwin.props_box_box.remove(&self.pwin.props_box);
-                self.popped_out = true;
-            }
-            let swin = ScrolledWindow::new(None, None);
-            swin.add(&self.pwin.props_box);
-            Some(swin.upcast())
-        }
-    }
-    pub fn edit_separately(&mut self) {
-        if self.popped_out {
-            self.popped_out = false;
-            self.pwin.props_box_box.pack_start(&self.pwin.props_box, true, true, 0);
-        }
-        self.pwin.window.show_all();
-    }
-    pub fn bind(&mut self) {
-        let uu = self.uu;
-        let ref tx = self.tx;
-        use self::ActionMessageInner::*;
-        self.close_btn.connect_clicked(clone!(tx; |_a| {
-            tx.send_internal((uu, CloseButton));
-        }));
-    }
-    pub fn on_update(&mut self, p: &OpaqueAction) {
-        playback_state_update(p, &mut self.pwin);
-    }
-}
 #[derive(Clone)]
 struct TreeSelectGetter {
     sel: TreeSelection,
@@ -140,42 +87,6 @@ impl TreeSelectGetter {
             }
         }
         None
-    }
-}
-pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {
-use self::PlaybackState::*;
-    match p.state {
-        Inactive => pwin.update_header(
-            "gtk-media-stop",
-            "Inactive",
-            &p.desc
-        ),
-        Unverified(ref errs) => pwin.update_header(
-            "gtk-dialog-error",
-            "Incomplete",
-            format!("{} errors are present.", errs.len())
-        ),
-        Loading => pwin.update_header(
-            "gtk-refresh",
-            "Loading",
-            &p.desc
-        ),
-        Loaded => pwin.update_header(
-            "gtk-home",
-            "Loaded",
-            &p.desc
-        ),
-        Paused => pwin.update_header(
-            "gtk-media-pause",
-            "Paused",
-            &p.desc
-        ),
-        Active(ref dur) => pwin.update_header(
-            "gtk-media-play",
-            format!("Active ({}s)", dur.as_secs()),
-            &p.desc
-        ),
-        _ => {}
     }
 }
 macro_rules! bind_action_menu_items {
@@ -206,11 +117,12 @@ impl ActionController {
         let ctls = HashMap::new();
         let opas = HashMap::new();
         let tx = None;
+        let cur_page = None;
         let cur_widget = None;
         let cur_sel = None;
         let mixer = Default::default();
         build!(ActionController using b
-               with ctls, opas, tx, mixer, cur_widget, cur_sel
+               with ctls, opas, tx, mixer, cur_widget, cur_sel, cur_page
                get view, store, medit, mload, mexec, mdelete, mcreate_audio, mcreate_fade, sidebar)
     }
     pub fn bind(&mut self, tx: &UISender) {
@@ -356,6 +268,7 @@ impl ActionController {
                             self.sidebar.set_visible_child(&w);
                             self.cur_widget = Some((uu, w));
                         }
+                        act.change_cur_page(self.cur_page);
                     }
                 }
                 else {
@@ -399,6 +312,9 @@ impl ActionController {
                         act.on_selection_cancelled();
                     }
                 }
+            },
+            ChangeCurPage(cp) => {
+                self.cur_page = cp;
             }
         }
     }

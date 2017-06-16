@@ -39,8 +39,10 @@ impl AudioUI {
         let params = Default::default();
         let cnf = Default::default();
         let sb = SliderBox::new(0, 0, &tx, uu);
-        temp.pwin.append_property("File target", &file);
-        temp.pwin.props_box.pack_start(&sb.grid, false, true, 5);
+        temp.notebk_tabs[0].append_property("File target", &file);
+        let patch = temp.add_tab();
+        patch.label.set_markup("Levels &amp; Patch");
+        patch.container.pack_start(&sb.grid, false, true, 5);
         let mut ctx = AudioUI { file, temp, params, cnf, sb };
         ctx.bind();
         ctx
@@ -66,8 +68,8 @@ impl AudioUI {
             trace!("audio: recreating sliders!");
             self.sb.grid.destroy();
             self.sb = SliderBox::new(p.chans.len(), self.cnf.defs.len(), &self.temp.tx, self.temp.uu);
-            self.temp.pwin.props_box.pack_start(&self.sb.grid, false, true, 5);
-            self.temp.pwin.props_box.show_all();
+            self.temp.notebk_tabs[1].container.pack_start(&self.sb.grid, false, true, 5);
+            self.temp.notebk_tabs[1].container.show_all();
         }
         let mut details = p.chans.iter()
             .map(|ch| {
@@ -152,5 +154,8 @@ impl ActionUI for AudioUI {
     }
     fn get_container(&mut self) -> Option<Widget> {
         self.temp.get_container()
+    }
+    fn change_cur_page(&mut self, cp: Option<u32>) {
+        self.temp.change_cur_page(cp)
     }
 }

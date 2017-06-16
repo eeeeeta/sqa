@@ -55,9 +55,13 @@ impl FadeUI {
         let sel = Button::new_with_label("[choose...]");
         let selecting = Rc::new(Cell::new(false));
         let actionlist = HashMap::new();
-        temp.pwin.append_property("Target", &sel);
-        temp.pwin.append_property("Duration", &*dur);
-        temp.pwin.props_box.pack_start(&sb.grid, false, true, 5);
+        let patch = temp.add_tab();
+        let fade = temp.add_tab();
+        patch.label.set_markup("Levels &amp; Patch");
+        fade.label.set_markup("Fade Properties");
+        temp.notebk_tabs[0].append_property("Target", &sel);
+        fade.append_property("Duration", &*dur);
+        patch.container.pack_start(&sb.grid, false, true, 5);
         let mut ctx = FadeUI { temp, params, sb, sel, tx, selecting, actionlist, dur };
         ctx.bind();
         ctx
@@ -97,8 +101,8 @@ impl FadeUI {
         if p.fades.len() != self.sb.n_sliders() {
             self.sb.grid.destroy();
             self.sb = SliderBox::new(p.fades.len(), 0, &self.temp.tx, self.temp.uu);
-            self.temp.pwin.props_box.pack_start(&self.sb.grid, false, true, 5);
-            self.temp.pwin.props_box.show_all();
+            self.temp.notebk_tabs[1].container.pack_start(&self.sb.grid, false, true, 5);
+            self.temp.notebk_tabs[1].container.show_all();
         }
         let mut fades = p.fades.clone();
         fades.insert(0, p.fade_master.clone());
@@ -168,5 +172,8 @@ impl ActionUI for FadeUI {
         self.actionlist = l.clone();
         let p = self.params.clone();
         self.on_new_parameters(&p);
+    }
+    fn change_cur_page(&mut self, cp: Option<u32>) {
+        self.temp.change_cur_page(cp)
     }
 }
