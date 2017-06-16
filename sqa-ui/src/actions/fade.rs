@@ -88,7 +88,7 @@ impl FadeUI {
         self.params = p.clone();
         if let Some(uu) = p.target {
             if let Some(opa) = self.actionlist.get(&uu) {
-                self.sel.set_label(&opa.desc);
+                self.sel.set_label(&opa.display_name());
             }
             else {
                 self.sel.set_label(&format!("{}", uu));

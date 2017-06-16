@@ -105,11 +105,26 @@ pub struct OpaqueAction {
     pub state: PlaybackState,
     pub params: ActionParameters,
     pub desc: String,
+    pub meta: ActionMetadata,
     pub uu: Uuid
+}
+impl OpaqueAction {
+    pub fn display_name(&self) -> &str {
+        match self.meta.name {
+            Some(ref dsc) => dsc,
+            None => &self.desc
+        }
+    }
+}
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct ActionMetadata {
+    pub name: Option<String>,
+    pub prewait: Duration
 }
 pub struct Action {
     state: PlaybackState,
     ctl: ActionType,
+    meta: ActionMetadata,
     uu: Uuid
 }
 impl Action {
@@ -117,14 +132,16 @@ impl Action {
         Action {
             state: PlaybackState::Inactive,
             ctl: ActionType::Audio(audio::Controller::new()),
-            uu: Uuid::new_v4()
+            uu: Uuid::new_v4(),
+            meta: Default::default()
         }
     }
     pub fn new_fade() -> Self {
         Action {
             state: PlaybackState::Inactive,
             ctl: ActionType::Fade(fade::Controller::new()),
-            uu: Uuid::new_v4()
+            uu: Uuid::new_v4(),
+            meta: Default::default()
         }
     }
     pub fn accept_audio_message(&mut self, ctx: &mut Context, sender: &IntSender, msg: &AudioThreadMessage) -> bool {
@@ -198,6 +215,7 @@ impl Action {
             state: self.state.clone(),
             params: action!(params self.ctl),
             uu: self.uu,
+            meta: self.meta.clone(),
             desc: action!(self.ctl).desc()
         })
     }
@@ -227,6 +245,9 @@ impl Action {
                 self.state = Unverified(vec)
             }
         }
+    }
+    pub fn set_meta(&mut self, data: ActionMetadata) {
+        self.meta = data; /* neat */
     }
     pub fn set_params(&mut self, data: ActionParameters, ctx: &mut Context) -> BackendResult<()> {
         match self.ctl {

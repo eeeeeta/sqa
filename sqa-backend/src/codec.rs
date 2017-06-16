@@ -4,7 +4,7 @@ use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
 use errors::*;
 use mixer::MixerConf;
 use errors::BackendErrorKind::*;
-use actions::{ActionParameters, OpaqueAction};
+use actions::{ActionParameters, ActionMetadata, OpaqueAction};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -28,6 +28,8 @@ pub enum Command {
     ActionInfo { #[subst] uuid: Uuid },
     #[oscpath = "/action/{uuid}/update"]
     UpdateActionParams { #[subst] uuid: Uuid, #[ser] params: ActionParameters },
+    #[oscpath = "/action/{uuid}/updatemeta"]
+    UpdateActionMetadata { #[subst] uuid: Uuid, #[ser] meta: ActionMetadata },
     #[oscpath = "/action/{uuid}/delete"]
     DeleteAction { #[subst] uuid: Uuid },
 /*
@@ -43,7 +45,7 @@ pub enum Command {
     #[oscpath = "/mixer/config"]
     GetMixerConf,
     #[oscpath = "/mixer/config/set"]
-    SetMixerConf { #[ser] conf: MixerConf }
+    SetMixerConf { #[ser] conf: MixerConf },
 }
 impl Into<OscMessage> for Command {
     fn into(self) -> OscMessage {
@@ -68,6 +70,8 @@ pub enum Reply {
     ActionInfoRetrieved { #[subst] uuid: Uuid, #[ser] res: Result<OpaqueAction, String> },
     #[oscpath = "/reply/action/{uuid}/update"]
     ActionParamsUpdated { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
+    #[oscpath = "/reply/action/{uuid}/updatemeta"]
+    ActionMetadataUpdated { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/action/{uuid}/delete"]
     ActionDeleted { #[subst] uuid: Uuid, #[ser] deleted: bool },
     #[oscpath = "/reply/action/{uuid}/load"]

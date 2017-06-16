@@ -59,7 +59,9 @@ impl ConnHandler for Context {
             },
             ServerMessage::ActionCustom(uu, msg) => {
                 if let Some(act) = self.actions.get_mut(&uu) {
-                    act.message(msg);
+                    if let Err(e) = act.message(msg) {
+                        println!("error in some dead code, what? {:?}", e);
+                    }
                 }
             },
             _ => {}
@@ -123,6 +125,14 @@ impl ConnHandler for Context {
                     ret
                 });
                 d.respond(ActionParamsUpdated { uuid, res })?;
+            },
+            UpdateActionMetadata { uuid, meta } => {
+                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
+                    let ret = a.set_meta(meta);
+                    self.on_action_changed(d, a);
+                    Ok(ret)
+                });
+                d.respond(ActionMetadataUpdated { uuid, res })?;
             },
             LoadAction { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {

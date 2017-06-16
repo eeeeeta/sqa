@@ -33,6 +33,7 @@ pub enum ActionMessageInner {
     ExecuteAction,
     DeleteAction,
     EditAction,
+    ChangeName(Option<String>),
     CloseButton,
 }
 pub type ActionMessage = (Uuid, ActionMessageInner);
@@ -164,7 +165,7 @@ impl ActionController {
         for (uu, action) in self.opas.iter() {
             let iter = self.store.insert_with_values(None, &[0, 1], &[
                 &uu.to_string(),
-                &action.desc
+                &action.display_name()
             ]);
             if let Some(u2) = sel {
                 if *uu == u2 {
@@ -336,6 +337,13 @@ impl ActionController {
                         }
                     }
                     ctl.edit_separately()
+                },
+                ChangeName(name) => {
+                    if let Some(opa) = self.opas.get(&msg.0) {
+                        let mut meta = opa.meta.clone();
+                        meta.name = name;
+                        tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: meta });
+                    }
                 },
                 CloseButton => ctl.close_window(),
                 x => ctl.on_message(x)

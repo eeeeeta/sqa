@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{Button, ButtonBox, ButtonBoxStyle, Box, Label, Orientation, Notebook, Widget, ScrolledWindow};
+use gtk::{Button, ButtonBox, ButtonBoxStyle, Box, Label, Orientation, Notebook, Widget, ScrolledWindow, Entry};
 use widgets::PropertyWindow;
 use sync::UISender;
 use uuid::Uuid;
@@ -30,6 +30,7 @@ pub struct UITemplate {
     pub close_btn: Button,
     pub load_btn: Button,
     pub execute_btn: Button,
+    pub name_ent: Entry,
     pub tx: UISender,
     pub popped_out: bool,
     pub uu: Uuid
@@ -44,6 +45,7 @@ impl UITemplate {
             execute_btn: Button::new_with_mnemonic("_Execute"),
             notebk: Notebook::new(),
             notebk_tabs: Vec::new(),
+            name_ent: Entry::new(),
             popped_out: false,
             tx, uu
         };
@@ -55,6 +57,7 @@ impl UITemplate {
         let basics_tab = ret.add_tab();
         basics_tab.label.set_markup("Basics");
         basics_tab.container.pack_start(&btn_box, false, false, 0);
+        basics_tab.append_property("Name", &ret.name_ent);
         ret.pwin.props_box.pack_start(&ret.notebk, true, true, 0);
         ret
     }
@@ -110,18 +113,30 @@ impl UITemplate {
         self.notebk.connect_switch_page(clone!(tx; |_, _, pg| {
             tx.send_internal(super::ActionInternalMessage::ChangeCurPage(Some(pg)));
         }));
+        self.name_ent.connect_changed(clone!(tx; |slf| {
+            let mut txt = slf.get_text();
+            if txt.is_some() {
+                if txt.as_ref().unwrap() == "" {
+                    txt = None;
+                }
+            }
+            tx.send_internal((uu, ChangeName(txt)));
+        }));
     }
     pub fn on_update(&mut self, p: &OpaqueAction) {
         playback_state_update(p, &mut self.pwin);
+        self.name_ent.set_placeholder_text(&p.desc as &str);
+        self.name_ent.set_text(p.meta.name.as_ref().map(|s| s as &str).unwrap_or(""));
     }
 }
 pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {
-use self::PlaybackState::*;
+    use self::PlaybackState::*;
+    let desc = p.display_name();
     match p.state {
         Inactive => pwin.update_header(
             "gtk-media-stop",
             "Inactive",
-            &p.desc
+            desc
         ),
         Unverified(ref errs) => pwin.update_header(
             "gtk-dialog-error",
@@ -131,22 +146,22 @@ use self::PlaybackState::*;
         Loading => pwin.update_header(
             "gtk-refresh",
             "Loading",
-            &p.desc
+            desc
         ),
         Loaded => pwin.update_header(
             "gtk-home",
             "Loaded",
-            &p.desc
+            desc
         ),
         Paused => pwin.update_header(
             "gtk-media-pause",
             "Paused",
-            &p.desc
+            desc
         ),
         Active(ref dur) => pwin.update_header(
             "gtk-media-play",
             format!("Active ({}s)", dur.as_secs()),
-            &p.desc
+            desc
         ),
         _ => {}
     }
