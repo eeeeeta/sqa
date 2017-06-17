@@ -11,8 +11,8 @@ use super::audio::db_lin;
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct FadeParams {
     pub target: Option<Uuid>,
-    pub fades: Vec<Option<f32>>,
-    pub fade_master: Option<f32>,
+    pub fades: Vec<(bool, f32)>,
+    pub fade_master: (bool, f32),
     pub dur: Duration
 }
 #[derive(Default)]
@@ -36,7 +36,7 @@ impl EditableAction for Controller {
                 if let ActionType::Audio(ref ctl) = tgt.ctl {
                     if ctl.params.chans.len() > params.fades.len() {
                         let len = params.fades.len();
-                        params.fades.extend(::std::iter::repeat(None)
+                        params.fades.extend(::std::iter::repeat((false, 0.0))
                                             .take(ctl.params.chans.len() - len));
                     }
                 }
@@ -83,8 +83,8 @@ impl ActionController for Controller {
                 err: "No target is specified.".into()
             });
         }
-        if self.params.fade_master.is_none() && self.params.fades.iter().fold(true, |acc, elem|
-                                         if elem.is_some() && !acc { true } else { acc }){
+        if !self.params.fade_master.0 && self.params.fades.iter().fold(true, |acc, elem|
+                                         if elem.0 && !acc { true } else { acc }){
             ret.push(ParameterError {
                 name: "fades".into(),
                 err: "Nothing is being faded.".into()
@@ -101,9 +101,9 @@ impl ActionController for Controller {
         };
         let tgt = tgt.rd.as_mut()
             .ok_or("Target isn't running or loaded")?;
-        if let Some(fade) = self.params.fade_master {
+        if self.params.fade_master.0 {
             if let Some(sdr) = tgt.senders.get_mut(0) {
-                let mut fd = FadeDetails::new(sdr.volume().get(0), db_lin(fade));
+                let mut fd = FadeDetails::new(sdr.master_volume().get(time), db_lin(self.params.fade_master.1));
                 fd.set_start_time(time);
                 let secs_component = self.params.dur.as_secs() * ::sqa_engine::ONE_SECOND_IN_NANOSECONDS;
                 let subsec_component = self.params.dur.subsec_nanos() as u64;
@@ -112,10 +112,10 @@ impl ActionController for Controller {
                 sdr.set_master_volume(Box::new(Parameter::LinearFade(fd)));
             }
         }
-        for (i, fade) in self.params.fades.iter().enumerate() {
-            if let Some(fade) = *fade {
+        for (i, &(enabled, fade)) in self.params.fades.iter().enumerate() {
+            if enabled {
                 if let Some(sdr) = tgt.senders.get_mut(i) {
-                    let mut fd = FadeDetails::new(sdr.volume().get(0), db_lin(fade));
+                    let mut fd = FadeDetails::new(sdr.volume().get(time), db_lin(fade));
                     fd.set_start_time(time);
                     let secs_component = self.params.dur.as_secs() * ::sqa_engine::ONE_SECOND_IN_NANOSECONDS;
                     let subsec_component = self.params.dur.subsec_nanos() as u64;

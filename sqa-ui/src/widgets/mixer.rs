@@ -9,7 +9,7 @@ pub enum PatchedSliderMessage {
     VolChanged(f32),
     PatchChanged(usize)
 }
-pub type FadedSliderMessage = Option<f32>;
+pub type FadedSliderMessage = (bool, f32);
 
 pub trait SliderMessage<T: SliderBoxType> {
     type Message: Into<UIMessage>;
@@ -21,7 +21,7 @@ pub struct SliderDetail {
     pub vol: f64,
     pub patch: usize
 }
-pub type FadedSliderDetail = Option<f32>;
+pub type FadedSliderDetail = (bool, f32);
 pub struct Slider<S: SliderBoxType, T: SliderMessage<S>> {
     name: String,
     idx: usize,
@@ -172,13 +172,17 @@ impl SliderBoxType for Faded {
         let ref tx = slf.tx;
         let idx = slider.idx;
         let id = slider.id;
-        slider.clicked_handler = tb.connect_clicked(clone!(tx; |slf| {
+        slider.clicked_handler = tb.connect_clicked(clone!(tx, scale; |slf| {
             trace!("on button clicked, currently on: {}", slf.get_active());
+            let mut val = scale.get_value() as f32;
+            if val == -60.0 {
+                val = ::std::f32::NEG_INFINITY;
+            }
             if slf.get_active() {
-                tx.send_internal(T::on_payload(idx, Some(0.0), id));
+                tx.send_internal(T::on_payload(idx, (true, val), id));
             }
             else {
-                tx.send_internal(T::on_payload(idx, None, id));
+                tx.send_internal(T::on_payload(idx, (false, val), id));
             }
         }));
         scale.connect_value_changed(clone!(vol; |slf| {
@@ -197,7 +201,7 @@ impl SliderBoxType for Faded {
             if val == -60.0 {
                 val = ::std::f32::NEG_INFINITY;
             }
-            tx.send_internal(T::on_payload(idx, Some(val as f32), id));
+            tx.send_internal(T::on_payload(idx, (true, val), id));
         }));
         vol.connect_activate(clone!(scale; |slf| {
             if let Ok(val) = slf.get_text().unwrap_or("".into()).parse() {
@@ -215,26 +219,28 @@ impl SliderBoxType for Faded {
         }));
         slider.tb = Some(tb);
     }
-    fn update_slider<T: SliderMessage<Self>>(slf: &mut SliderBox<Self, T>, i: usize, val: FadedSliderDetail) {
+    fn update_slider<T: SliderMessage<Self>>(slf: &mut SliderBox<Self, T>, i: usize, (enabled, val): FadedSliderDetail) {
         if let Some(slider) = slf.sliders.get_mut(i) {
             signal::signal_handler_block(slider.tb.as_ref().unwrap(), slider.clicked_handler);
             signal::signal_handler_block(&slider.scale, slider.changed_handler);
             trace!("mixer: updating slider, {:?}", val);
-            if let Some(val) = val {
-                let val = val as f64;
-                if val != slider.scale.get_value() {
-                    slider.scale.set_value(val);
-                }
+            let val = val as f64;
+            if val != slider.scale.get_value() {
+                slider.scale.set_value(val);
+            }
+            if enabled {
                 slider.tb.as_ref().unwrap().set_active(true);
                 let sctx = slider.vol.get_style_context().unwrap();
                 sctx.add_class("vol-entry-fade-enabled");
+                let sctx = slider.scale.get_style_context().unwrap();
+                sctx.remove_class("scale-fade-disabled");
             }
             else {
-                slider.scale.set_value(-60.0);
-                slider.vol.set_text("");
                 slider.tb.as_ref().unwrap().set_active(false);
                 let sctx = slider.vol.get_style_context().unwrap();
                 sctx.remove_class("vol-entry-fade-enabled");
+                let sctx = slider.scale.get_style_context().unwrap();
+                sctx.add_class("scale-fade-disabled");
             }
             signal::signal_handler_unblock(&slider.scale, slider.changed_handler);
             signal::signal_handler_unblock(slider.tb.as_ref().unwrap(), slider.clicked_handler);
