@@ -48,7 +48,7 @@ pub trait EditableAction {
     fn set_params(&mut self, Self::Parameters, ctx: &mut Context);
 }
 pub trait ActionController {
-    fn desc(&self) -> String;
+    fn desc(&self, ctx: &Context) -> String;
     fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError>;
     fn load(&mut self, _ctx: ControllerParams) -> BackendResult<bool> {
         Ok(true)
@@ -77,28 +77,31 @@ pub enum ActionParameters {
     Audio(<audio::Controller as EditableAction>::Parameters),
     Fade(<fade::Controller as EditableAction>::Parameters)
 }
-macro_rules! action {
-    (mut $a:expr) => {{
-        use self::ActionType::*;
-        match $a {
-            Audio(ref mut a) => a as &mut ActionController,
-            Fade(ref mut a) => a as &mut ActionController
-        }
-    }};
-    ($a:expr) => {{
-        use self::ActionType::*;
-        match $a {
-            Audio(ref a) => a as &ActionController,
-            Fade(ref a) => a as &ActionController,
-        }
-    }};
-    (params $a:expr) => {{
-        use self::ActionType::*;
-        match $a {
-            Audio(ref a) => ActionParameters::Audio(a.get_params().clone()),
-            Fade(ref a) => ActionParameters::Fade(a.get_params().clone())
-        }
-    }};
+#[macro_use]
+pub mod macros {
+    macro_rules! action {
+        (mut $a:expr) => {{
+            use self::ActionType::*;
+            match $a {
+                Audio(ref mut a) => a as &mut ActionController,
+                Fade(ref mut a) => a as &mut ActionController
+            }
+        }};
+        ($a:expr) => {{
+            use self::ActionType::*;
+            match $a {
+                Audio(ref a) => a as &ActionController,
+                Fade(ref a) => a as &ActionController,
+            }
+        }};
+        (params $a:expr) => {{
+            use self::ActionType::*;
+            match $a {
+                Audio(ref a) => ActionParameters::Audio(a.get_params().clone()),
+                Fade(ref a) => ActionParameters::Fade(a.get_params().clone())
+            }
+        }};
+    }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OpaqueAction {
@@ -216,7 +219,7 @@ impl Action {
             params: action!(params self.ctl),
             uu: self.uu,
             meta: self.meta.clone(),
-            desc: action!(self.ctl).desc()
+            desc: action!(self.ctl).desc(ctx)
         })
     }
     pub fn verify_params(&mut self, ctx: &mut Context) {

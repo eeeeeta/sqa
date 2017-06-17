@@ -8,7 +8,6 @@ use uuid::Uuid;
 use std::time::Duration;
 use std::default::Default;
 use super::audio::db_lin;
-
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct FadeParams {
     pub target: Option<Uuid>,
@@ -36,8 +35,15 @@ impl EditableAction for Controller {
     }
 }
 impl ActionController for Controller {
-    fn desc(&self) -> String {
-        format!("Fade action {:?}", self.params)
+    fn desc(&self, ctx: &Context) -> String {
+        if let Some(tgt) = self.params.target.as_ref() {
+            if let Some(tgt) = ctx.actions.get(tgt) {
+                if let ActionType::Audio(ref ctl) = tgt.ctl {
+                    return format!("Fade {}", tgt.meta.name.as_ref().unwrap_or(&ctl.desc(ctx)));
+                }
+            }
+        }
+        format!("Fade [invalid]")
     }
     fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError> {
         let mut ret = vec![];

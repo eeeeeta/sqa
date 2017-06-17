@@ -3,11 +3,29 @@
 <interface>
   <requires lib="gtk+" version="3.20"/>
   <object class="GtkListStore"/>
+  <object class="GtkImage" id="image-state-column">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="stock">gtk-media-forward</property>
+  </object>
+  <object class="GtkImage" id="image-type-column">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="stock">gtk-info</property>
+  </object>
   <object class="GtkListStore" id="sqa-ActionController-store">
     <columns>
       <!-- column-name uuid -->
       <column type="gchararray"/>
       <!-- column-name descrip -->
+      <column type="gchararray"/>
+      <!-- column-name icon-state -->
+      <column type="gchararray"/>
+      <!-- column-name icon-type -->
+      <column type="gchararray"/>
+      <!-- column-name duration -->
+      <column type="gchararray"/>
+      <!-- column-name cue -->
       <column type="gchararray"/>
     </columns>
   </object>
@@ -86,7 +104,7 @@
                 <property name="label" translatable="yes">_Action</property>
                 <property name="use_underline">True</property>
                 <child type="submenu">
-                  <object class="GtkMenu">
+                  <object class="GtkMenu" id="sqa-ActionController-menu">
                     <property name="visible">True</property>
                     <property name="can_focus">False</property>
                     <child>
@@ -114,6 +132,7 @@
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_Fade</property>
                                 <property name="use_underline">True</property>
+                                <accelerator key="f" signal="activate" modifiers="GDK_CONTROL_MASK | GDK_MOD1_MASK"/>
                               </object>
                             </child>
                           </object>
@@ -135,6 +154,7 @@
                         <property name="can_focus">False</property>
                         <property name="label" translatable="yes">_Delete</property>
                         <property name="use_underline">True</property>
+                        <accelerator key="Delete" signal="activate"/>
                       </object>
                     </child>
                     <child>
@@ -205,26 +225,59 @@
                 </child>
                 <child>
                   <object class="GtkTreeViewColumn">
-                    <property name="resizable">True</property>
-                    <property name="sizing">autosize</property>
-                    <property name="title" translatable="yes">UUID</property>
+                    <property name="widget">image-state-column</property>
                     <child>
-                      <object class="GtkCellRendererText"/>
+                      <object class="GtkCellRendererPixbuf"/>
                       <attributes>
-                        <attribute name="text">0</attribute>
+                        <attribute name="icon-name">2</attribute>
                       </attributes>
                     </child>
                   </object>
                 </child>
                 <child>
                   <object class="GtkTreeViewColumn">
-                    <property name="resizable">True</property>
+                    <property name="widget">image-type-column</property>
+                    <child>
+                      <object class="GtkCellRendererPixbuf"/>
+                      <attributes>
+                        <attribute name="icon-name">3</attribute>
+                      </attributes>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkTreeViewColumn">
                     <property name="sizing">autosize</property>
                     <property name="title" translatable="yes">Description</property>
+                    <property name="expand">True</property>
                     <child>
                       <object class="GtkCellRendererText"/>
                       <attributes>
-                        <attribute name="text">1</attribute>
+                        <attribute name="markup">1</attribute>
+                      </attributes>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkTreeViewColumn">
+                    <property name="title" translatable="yes">Q</property>
+                    <property name="alignment">1</property>
+                    <child>
+                      <object class="GtkCellRendererText"/>
+                      <attributes>
+                        <attribute name="markup">5</attribute>
+                      </attributes>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkTreeViewColumn">
+                    <property name="title" translatable="yes">Duration</property>
+                    <property name="alignment">1</property>
+                    <child>
+                      <object class="GtkCellRendererText"/>
+                      <attributes>
+                        <attribute name="markup">4</attribute>
                       </attributes>
                     </child>
                   </object>

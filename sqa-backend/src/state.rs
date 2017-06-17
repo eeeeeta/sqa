@@ -152,14 +152,17 @@ impl ConnHandler for Context {
             },
             ActionList => {
                 let mut resp = HashMap::new();
-                for (uu, mut act) in mem::replace(&mut self.actions, HashMap::new()).into_iter() {
-                    if let Ok(data) = act.get_data(self) {
-                        resp.insert(uu, data);
-                    }
-                    else {
-                        println!("FIXME: handle failure to get_data");
-                    }
-                    self.actions.insert(uu, act);
+                let uus = self.actions.iter().map(|(x, _)| x.clone()).collect::<Vec<_>>();
+                for uu in uus {
+                    let _: Result<(), String> = do_with_ctx!(self, &uu, |a: &mut Action| {
+                        if let Ok(data) = a.get_data(self) {
+                            resp.insert(uu, data);
+                        }
+                        else {
+                            println!("FIXME: handle failure to get_data");
+                        }
+                        Ok(())
+                    });
                 }
                 d.respond(ReplyActionList { list: resp })?;
             },

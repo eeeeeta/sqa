@@ -1,6 +1,7 @@
 use gtk::prelude::*;
-use gtk::{Button, ButtonBox, ButtonBoxStyle, Box, Label, Orientation, Notebook, Widget, ScrolledWindow, Entry};
+use gtk::{Button, ButtonBox, ButtonBoxStyle, Box, Label, Image, Orientation, Notebook, Widget, ScrolledWindow, Entry, ListBox, SelectionMode};
 use widgets::PropertyWindow;
+use std::collections::HashMap;
 use sync::UISender;
 use uuid::Uuid;
 use sqa_backend::actions::{PlaybackState, OpaqueAction};
@@ -26,13 +27,14 @@ impl ActionTab {
 pub struct UITemplate {
     pub pwin: PropertyWindow,
     pub notebk: Notebook,
-    pub notebk_tabs: Vec<ActionTab>,
+    pub notebk_tabs: HashMap<&'static str, ActionTab>,
     pub close_btn: Button,
     pub load_btn: Button,
     pub execute_btn: Button,
     pub name_ent: Entry,
     pub tx: UISender,
     pub popped_out: bool,
+    pub errors_list: ListBox,
     pub uu: Uuid
 }
 
@@ -44,8 +46,9 @@ impl UITemplate {
             load_btn: Button::new_with_mnemonic("_Load"),
             execute_btn: Button::new_with_mnemonic("_Execute"),
             notebk: Notebook::new(),
-            notebk_tabs: Vec::new(),
+            notebk_tabs: HashMap::new(),
             name_ent: Entry::new(),
+            errors_list: ListBox::new(),
             popped_out: false,
             tx, uu
         };
@@ -54,24 +57,32 @@ impl UITemplate {
         btn_box.pack_start(&ret.load_btn, false, false, 0);
         btn_box.pack_start(&ret.execute_btn, false, false, 0);
         ret.pwin.append_button(&ret.close_btn);
-        let basics_tab = ret.add_tab();
-        basics_tab.label.set_markup("Basics");
+        let basics_tab = ret.add_tab("Basics");
+        let errors_tab = ret.add_tab("Errors");
         basics_tab.container.pack_start(&btn_box, false, false, 0);
         basics_tab.append_property("Name", &ret.name_ent);
+        errors_tab.container.pack_start(&ret.errors_list, false, false, 0);
+        ret.errors_list.set_selection_mode(SelectionMode::None);
         ret.pwin.props_box.pack_start(&ret.notebk, true, true, 0);
         ret
     }
-    pub fn add_tab(&mut self) -> ActionTab {
+    pub fn add_tab(&mut self, id: &'static str) -> ActionTab {
         let bx = Box::new(Orientation::Vertical, 0);
         bx.set_margin_left(5);
         bx.set_margin_right(5);
         bx.set_margin_top(5);
         bx.set_margin_bottom(5);
         let lbl = Label::new(None);
+        lbl.set_markup(id);
         let at = ActionTab { container: bx, label: lbl };
         self.notebk.insert_page(&at.container, Some(&at.label), None);
-        self.notebk_tabs.push(at.clone());
+        self.notebk_tabs.insert(id, at.clone());
+        trace!("inserting tab '{}' for act {}", id, self.uu);
         at
+    }
+    pub fn get_tab(&self, id: &'static str) -> &ActionTab {
+        trace!("getting tab '{}' for act {}", id, self.uu);
+        self.notebk_tabs.get(id).expect(&format!("failed to get tab '{}' for act {}", id, self.uu))
     }
     pub fn get_container(&mut self) -> Option<Widget> {
         if self.pwin.window.is_visible() {
@@ -127,6 +138,24 @@ impl UITemplate {
         playback_state_update(p, &mut self.pwin);
         self.name_ent.set_placeholder_text(&p.desc as &str);
         self.name_ent.set_text(p.meta.name.as_ref().map(|s| s as &str).unwrap_or(""));
+        for child in self.errors_list.get_children() {
+            self.errors_list.remove(&child);
+        }
+        if let PlaybackState::Unverified(ref errs) = p.state {
+            self.get_tab("Errors").label.set_markup(&format!("Errors ({})", errs.len()));
+            for err in errs {
+                let bx = Box::new(Orientation::Horizontal, 5);
+                let img = Image::new_from_icon_name("gtk-dialog-error", 4);
+                let lbl = Label::new(None);
+                lbl.set_markup(&format!("{}: {}", err.name, err.err));
+                bx.pack_start(&img, false, false, 0);
+                bx.pack_start(&lbl, false, false, 0);
+                self.errors_list.add(&bx);
+            }
+        }
+        else {
+            self.get_tab("Errors").label.set_markup("Errors");
+        }
     }
 }
 pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {

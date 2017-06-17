@@ -189,7 +189,7 @@ impl EditableAction for Controller {
     }
 }
 impl ActionController for Controller {
-    fn desc(&self) -> String {
+    fn desc(&self, ctx: &Context) -> String {
         if let Some(Ok(ref url)) = self.url {
             format!("Play audio at {}", url.file_name().unwrap().to_string_lossy())
         }

@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{self, Widget, TreeView, ListStore, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack};
+use gtk::{self, Widget, Menu, TreeView, ListStore, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack};
 use gdk;
 use uuid::Uuid;
 use std::collections::HashMap;
@@ -7,7 +7,7 @@ use std::mem;
 use sync::UISender;
 use sqa_backend::codec::{Command, Reply};
 use sqa_backend::mixer::MixerConf;
-use sqa_backend::actions::{ActionParameters, OpaqueAction};
+use sqa_backend::actions::{ActionParameters, PlaybackState, OpaqueAction};
 use sqa_backend::actions::audio::AudioParams;
 use messages::Message;
 
@@ -52,6 +52,7 @@ pub struct ActionController {
     ctls: HashMap<Uuid, Box<ActionUI>>,
     opas: HashMap<Uuid, OpaqueAction>,
     cur_sel: Option<SelectionDetails>,
+    menu: Menu,
     medit: MenuItem,
     mdelete: MenuItem,
     mload: MenuItem,
@@ -124,7 +125,7 @@ impl ActionController {
         let mixer = Default::default();
         build!(ActionController using b
                with ctls, opas, tx, mixer, cur_widget, cur_sel, cur_page
-               get view, store, medit, mload, mexec, mdelete, mcreate_audio, mcreate_fade, sidebar)
+               get view, store, menu, medit, mload, mexec, mdelete, mcreate_audio, mcreate_fade, sidebar)
     }
     pub fn bind(&mut self, tx: &UISender) {
         use self::ActionMessageInner::*;
@@ -137,6 +138,15 @@ impl ActionController {
             mload => LoadAction,
             mdelete => DeleteAction
         }
+        let menu = self.menu.clone();
+        self.view.connect_button_press_event(move |_, eb| {
+            if eb.get_button() == 3 {
+                if let ::gdk::EventType::ButtonPress = eb.get_event_type() {
+                    menu.popup_easy(eb.get_button(), eb.get_time());
+                }
+            }
+            Inhibit(false)
+        });
         self.view.get_selection().connect_changed(clone!(tx; |_| {
             tx.send_internal(ActionInternalMessage::SelectionChanged);
         }));
@@ -163,9 +173,30 @@ impl ActionController {
         let sel = if sel.is_some() { sel } else { tsg.get() };
         self.store.clear();
         for (uu, action) in self.opas.iter() {
-            let iter = self.store.insert_with_values(None, &[0, 1], &[
+            let typ = match action.params {
+                ActionParameters::Audio(_) => "audio-x-generic",
+                ActionParameters::Fade(_) => "audio-volume-medium-symbolic"
+            };
+            use self::PlaybackState::*;
+            let state = match action.state {
+                Inactive => "",
+                Unverified(_) => "gtk-dialog-warning",
+                Loaded => "gtk-home",
+                Loading => "gtk-refresh",
+                Paused => "gtk-media-pause",
+                Active(_) => "gtk-media-play",
+                Errored(_) => "gtk-dialog-error"
+            };
+            let iter = self.store.insert_with_values(None, &[
+                0, // uuid
+                1, // description
+                2, // icon-state (playback state icon)
+                3, // icon-type (action type icon)
+            ], &[
                 &uu.to_string(),
-                &action.display_name()
+                &action.display_name(),
+                &state,
+                &typ
             ]);
             if let Some(u2) = sel {
                 if *uu == u2 {
@@ -219,7 +250,10 @@ impl ActionController {
                 action_reply_notify!(self, res, "Loading action", "Action loaded.");
             },
             ActionParamsUpdated { res, .. } => {
-                action_reply_notify!(self, res, "Modifying action", "Action modified.");
+                if let Err(e) = res {
+                    let msg = Message::Error(format!("Modifying action failed: {}", e));
+                    self.tx.as_mut().unwrap().send_internal(msg);
+                }
             },
             ActionExecuted { res, .. } => {
                 action_reply_notify!(self, res, "Executing action", "Action executed.");

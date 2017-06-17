@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{Button, Widget};
+use gtk::{Button, Widget, Image, Align};
 use super::{ActionMessageInner, ActionInternalMessage, ActionMessage, OpaqueAction, UISender, ActionUI, UITemplate};
 use std::time::Duration;
 use widgets::{SliderBox, Faded, DurationEntry, DurationEntryMessage, SliderMessage, FadedSliderMessage};
@@ -55,13 +55,14 @@ impl FadeUI {
         let sel = Button::new_with_label("[choose...]");
         let selecting = Rc::new(Cell::new(false));
         let actionlist = HashMap::new();
-        let patch = temp.add_tab();
-        let fade = temp.add_tab();
-        patch.label.set_markup("Levels &amp; Patch");
-        fade.label.set_markup("Fade Properties");
-        temp.notebk_tabs[0].append_property("Target", &sel);
+        let patch = temp.add_tab("Levels &amp; Patch");
+        let fade = temp.add_tab("Fade Properties");
+        temp.get_tab("Basics").append_property("Target", &sel);
         fade.append_property("Duration", &*dur);
         patch.container.pack_start(&sb.grid, false, true, 5);
+        sel.set_halign(Align::Start);
+        sel.set_always_show_image(true);
+        sel.set_image(&Image::new_from_stock("gtk-find", 4));
         let mut ctx = FadeUI { temp, params, sb, sel, tx, selecting, actionlist, dur };
         ctx.bind();
         ctx
@@ -101,8 +102,9 @@ impl FadeUI {
         if p.fades.len() != self.sb.n_sliders() {
             self.sb.grid.destroy();
             self.sb = SliderBox::new(p.fades.len(), 0, &self.temp.tx, self.temp.uu);
-            self.temp.notebk_tabs[1].container.pack_start(&self.sb.grid, false, true, 5);
-            self.temp.notebk_tabs[1].container.show_all();
+            let tab = self.temp.get_tab("Levels &amp; Patch");
+            tab.container.pack_start(&self.sb.grid, false, true, 5);
+            tab.container.show_all();
         }
         let mut fades = p.fades.clone();
         fades.insert(0, p.fade_master.clone());
