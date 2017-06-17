@@ -30,8 +30,13 @@ pub enum PlaybackState {
     Loaded,
     Loading,
     Paused,
-    Active(Duration),
+    Active(Option<DurationInfo>),
     Errored(String)
+}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DurationInfo {
+    pub start_time: u64,
+    pub est_duration: Duration
 }
 pub struct ControllerParams<'a> {
     ctx: &'a mut Context,
@@ -61,7 +66,10 @@ pub trait ActionController {
     }
     fn reset(&mut self, _ctx: ControllerParams) {
     }
-    fn duration(&self) -> Option<Duration> {
+    fn estimated_duration(&self) -> Duration {
+        Duration::from_millis(0)
+    }
+    fn duration_info(&self) -> Option<DurationInfo> {
         None
     }
     fn accept_audio_message(&mut self, _msg: &AudioThreadMessage, _ctx: ControllerParams) -> bool {
@@ -116,6 +124,12 @@ impl OpaqueAction {
         match self.meta.name {
             Some(ref dsc) => dsc,
             None => &self.desc
+        }
+    }
+    pub fn typ(&self) -> &str {
+        match self.params {
+            ActionParameters::Audio(_) => "audio",
+            ActionParameters::Fade(_) => "fade"
         }
     }
 }
@@ -187,6 +201,15 @@ impl Action {
         }
         Ok(())
     }
+    pub fn reset(&mut self, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
+        let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
+        action!(mut self.ctl).reset(cp);
+        self.state = PlaybackState::Inactive;
+        Ok(())
+    }
+    pub fn set_uuid(&mut self, uu: Uuid) {
+        self.uu = uu;
+    }
     pub fn execute(&mut self, time: u64, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         if let PlaybackState::Loaded = self.state {
@@ -201,7 +224,7 @@ impl Action {
                 self.state = PlaybackState::Inactive;
             }
             else {
-                self.state = PlaybackState::Active(Duration::from_millis(0));
+                self.state = PlaybackState::Active(None);
             }
         }
         else {
@@ -232,13 +255,8 @@ impl Action {
             _ => {}
         }
         if active {
-            let dur = action!(self.ctl).duration();
-            if let Some(dur) = dur {
-                self.state = PlaybackState::Active(dur);
-            }
-            else {
-                self.state = PlaybackState::Active(Duration::from_millis(0));
-            }
+            let st = action!(self.ctl).duration_info();
+            self.state = PlaybackState::Active(st);
         }
         else if let Some(vec) = new {
             if vec.len() == 0 {

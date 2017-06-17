@@ -1,6 +1,7 @@
 use gtk::prelude::*;
 use gtk::{Button, Widget, Image, Align};
 use super::{ActionMessageInner, ActionInternalMessage, ActionMessage, OpaqueAction, UISender, ActionUI, UITemplate};
+use connection::UndoableChange;
 use std::time::Duration;
 use widgets::{SliderBox, Faded, DurationEntry, DurationEntryMessage, SliderMessage, FadedSliderMessage};
 use uuid::Uuid;
@@ -110,11 +111,18 @@ impl FadeUI {
         fades.insert(0, p.fade_master.clone());
         self.sb.update_values(fades);
     }
-    fn apply_changes(&mut self) {
+    fn apply_changes<T: Into<String>>(&mut self, before: FadeParams, desc: T) {
         trace!("fade: sending update {:?}", self.params);
-        self.temp.tx.send(Command::UpdateActionParams {
-            uuid: self.temp.uu,
-            params: ActionParameters::Fade(self.params.clone())
+        self.temp.tx.send(UndoableChange {
+            undo: Command::UpdateActionParams {
+                uuid: self.temp.uu,
+                params: ActionParameters::Fade(before)
+            },
+            redo: Command::UpdateActionParams {
+                uuid: self.temp.uu,
+                params: ActionParameters::Fade(self.params.clone()),
+            },
+            desc: desc.into()
         });
     }
 }
@@ -131,6 +139,7 @@ impl ActionUI for FadeUI {
             use self::FadeMessage::*;
             match m {
                 Slider(ch, val) => {
+                    let before = self.params.clone();
                     if ch == 0 {
                         trace!("fade: slider cb: ch {} val {:?}", ch, val);
                         self.params.fade_master = val;
@@ -138,12 +147,13 @@ impl ActionUI for FadeUI {
                     else if let Some(v) = self.params.fades.get_mut(ch-1) {
                         *v = val;
                     }
-                    self.apply_changes();
+                    self.apply_changes(before, "change slider value");
                 },
                 DurationModified(dur) => {
+                    let before = self.params.clone();
                     self.params.dur = dur;
                     trace!("dur cb: new dur {:?}", dur);
-                    self.apply_changes();
+                    self.apply_changes(before, "change fade duration");
                 }
             }
         }
@@ -158,9 +168,10 @@ impl ActionUI for FadeUI {
         self.temp.get_container()
     }
     fn on_selection_finished(&mut self, sel: Uuid) {
+        let before = self.params.clone();
         trace!("selected {}", sel);
         self.params.target = Some(sel);
-        self.apply_changes();
+        self.apply_changes(before, "change fade target");
         self.selecting.set(false);
     }
     fn on_selection_cancelled(&mut self) {

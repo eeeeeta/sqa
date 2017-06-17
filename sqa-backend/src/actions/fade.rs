@@ -30,7 +30,18 @@ impl EditableAction for Controller {
     fn get_params(&self) -> &FadeParams {
         &self.params
     }
-    fn set_params(&mut self, params: FadeParams, _: &mut Context) {
+    fn set_params(&mut self, mut params: FadeParams, ctx: &mut Context) {
+        if let Some(tgt) = self.params.target.as_ref() {
+            if let Some(tgt) = ctx.actions.get(tgt) {
+                if let ActionType::Audio(ref ctl) = tgt.ctl {
+                    if ctl.params.chans.len() > params.fades.len() {
+                        let len = params.fades.len();
+                        params.fades.extend(::std::iter::repeat(None)
+                                            .take(ctl.params.chans.len() - len));
+                    }
+                }
+            }
+        }
         self.params = params;
     }
 }
@@ -72,7 +83,7 @@ impl ActionController for Controller {
                 err: "No target is specified.".into()
             });
         }
-        if self.params.fade_master.is_none() &&  self.params.fades.iter().fold(true, |acc, elem|
+        if self.params.fade_master.is_none() && self.params.fades.iter().fold(true, |acc, elem|
                                          if elem.is_some() && !acc { true } else { acc }){
             ret.push(ParameterError {
                 name: "fades".into(),
@@ -88,6 +99,8 @@ impl ActionController for Controller {
             ActionType::Audio(ref mut t) => t,
             _ => bail!("Action was wrong type")
         };
+        let tgt = tgt.rd.as_mut()
+            .ok_or("Target isn't running or loaded")?;
         if let Some(fade) = self.params.fade_master {
             if let Some(sdr) = tgt.senders.get_mut(0) {
                 let mut fd = FadeDetails::new(sdr.volume().get(0), db_lin(fade));

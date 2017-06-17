@@ -1,6 +1,6 @@
 use futures::sync::mpsc;
 use std::sync::mpsc as smpsc;
-use connection::{self, ConnectionState, ConnectionMessage, ConnectionUIMessage};
+use connection::{self, ConnectionState, UndoableChange, ConnectionMessage, ConnectionUIMessage};
 use sqa_backend::mixer::MixerConf;
 use sqa_backend::codec::{Reply, Command};
 use util::ThreadNotifier;
@@ -25,6 +25,11 @@ pub enum BackendMessage {
 impl From<Command> for BackendMessage {
     fn from(c: Command) -> BackendMessage {
         BackendMessage::Connection(ConnectionMessage::Send(c))
+    }
+}
+impl From<UndoableChange> for BackendMessage {
+    fn from(c: UndoableChange) -> BackendMessage {
+        BackendMessage::Connection(ConnectionMessage::Perform(c))
     }
 }
 message_impls!(

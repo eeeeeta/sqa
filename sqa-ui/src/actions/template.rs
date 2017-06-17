@@ -31,6 +31,7 @@ pub struct UITemplate {
     pub close_btn: Button,
     pub load_btn: Button,
     pub execute_btn: Button,
+    pub reset_btn: Button,
     pub name_ent: Entry,
     pub tx: UISender,
     pub popped_out: bool,
@@ -45,6 +46,7 @@ impl UITemplate {
             close_btn: Button::new_with_mnemonic("_Close"),
             load_btn: Button::new_with_mnemonic("_Load"),
             execute_btn: Button::new_with_mnemonic("_Execute"),
+            reset_btn: Button::new_with_mnemonic("_Reset"),
             notebk: Notebook::new(),
             notebk_tabs: HashMap::new(),
             name_ent: Entry::new(),
@@ -53,13 +55,20 @@ impl UITemplate {
             tx, uu
         };
         let btn_box = ButtonBox::new(Orientation::Horizontal);
-        btn_box.set_layout(ButtonBoxStyle::Spread);
-        btn_box.pack_start(&ret.load_btn, false, false, 0);
-        btn_box.pack_start(&ret.execute_btn, false, false, 0);
+        btn_box.set_layout(ButtonBoxStyle::End);
+        btn_box.pack_start(&ret.load_btn, false, false, 5);
+        btn_box.pack_start(&ret.execute_btn, false, false, 5);
+        btn_box.pack_start(&ret.reset_btn, false, false, 5);
+        ret.load_btn.set_always_show_image(true);
+        ret.load_btn.set_image(&Image::new_from_stock("gtk-home", 4));
+        ret.execute_btn.set_always_show_image(true);
+        ret.execute_btn.set_image(&Image::new_from_stock("gtk-media-play", 4));
+        ret.reset_btn.set_always_show_image(true);
+        ret.reset_btn.set_image(&Image::new_from_stock("gtk-refresh", 4));
         ret.pwin.append_button(&ret.close_btn);
         let basics_tab = ret.add_tab("Basics");
         let errors_tab = ret.add_tab("Errors");
-        basics_tab.container.pack_start(&btn_box, false, false, 0);
+        basics_tab.append_property("Controls", &btn_box);
         basics_tab.append_property("Name", &ret.name_ent);
         errors_tab.container.pack_start(&ret.errors_list, false, false, 0);
         ret.errors_list.set_selection_mode(SelectionMode::None);
@@ -112,14 +121,17 @@ impl UITemplate {
         let uu = self.uu;
         let ref tx = self.tx;
         use super::ActionMessageInner::*;
-        self.close_btn.connect_clicked(clone!(tx; |_a| {
+        self.close_btn.connect_clicked(clone!(tx; |_| {
             tx.send_internal((uu, CloseButton));
         }));
-        self.load_btn.connect_clicked(clone!(tx; |_a| {
+        self.load_btn.connect_clicked(clone!(tx; |_| {
             tx.send_internal((uu, LoadAction));
         }));
-        self.execute_btn.connect_clicked(clone!(tx; |_a| {
+        self.execute_btn.connect_clicked(clone!(tx; |_| {
             tx.send_internal((uu, ExecuteAction));
+        }));
+        self.reset_btn.connect_clicked(clone!(tx; |_| {
+            tx.send_internal((uu, ResetAction));
         }));
         self.notebk.connect_switch_page(clone!(tx; |_, _, pg| {
             tx.send_internal(super::ActionInternalMessage::ChangeCurPage(Some(pg)));
@@ -134,6 +146,15 @@ impl UITemplate {
             tx.send_internal((uu, ChangeName(txt)));
         }));
     }
+    pub fn box_for_errors_list(msg: &str) -> Box {
+        let bx = Box::new(Orientation::Horizontal, 5);
+        let img = Image::new_from_icon_name("gtk-dialog-error", 4);
+        let lbl = Label::new(None);
+        lbl.set_markup(msg);
+        bx.pack_start(&img, false, false, 0);
+        bx.pack_start(&lbl, false, false, 0);
+        bx
+    }
     pub fn on_update(&mut self, p: &OpaqueAction) {
         playback_state_update(p, &mut self.pwin);
         self.name_ent.set_placeholder_text(&p.desc as &str);
@@ -144,14 +165,26 @@ impl UITemplate {
         if let PlaybackState::Unverified(ref errs) = p.state {
             self.get_tab("Errors").label.set_markup(&format!("Errors ({})", errs.len()));
             for err in errs {
-                let bx = Box::new(Orientation::Horizontal, 5);
-                let img = Image::new_from_icon_name("gtk-dialog-error", 4);
-                let lbl = Label::new(None);
-                lbl.set_markup(&format!("{}: {}", err.name, err.err));
-                bx.pack_start(&img, false, false, 0);
-                bx.pack_start(&lbl, false, false, 0);
+                let bx = Self::box_for_errors_list(&format!("{}: {}", err.name, err.err));
                 self.errors_list.add(&bx);
+                bx.show_all();
             }
+        }
+        else if let PlaybackState::Errored(ref err) = p.state {
+            self.get_tab("Errors").label.set_markup("Errors (!!)");
+            let bx = Self::box_for_errors_list(
+                &format!("The following fatal error occurred, causing the action to stop:\n\t{}\nBecause of this, this action is in an inconsistent state and must be reset to continue.", err));
+            let reset_btn = Button::new_with_mnemonic("_Reset");
+            reset_btn.set_always_show_image(true);
+            reset_btn.set_image(&Image::new_from_stock("gtk-refresh", 4));
+            let tx = self.tx.clone();
+            let uu = self.uu;
+            reset_btn.connect_clicked(move |_| {
+                tx.send_internal((uu, super::ActionMessageInner::ResetAction));
+            });
+            bx.pack_end(&reset_btn, false, false, 0);
+            self.errors_list.add(&bx);
+            bx.show_all();
         }
         else {
             self.get_tab("Errors").label.set_markup("Errors");
@@ -187,9 +220,9 @@ pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {
             "Paused",
             desc
         ),
-        Active(ref dur) => pwin.update_header(
+        Active(_) => pwin.update_header(
             "gtk-media-play",
-            format!("Active ({}s)", dur.as_secs()),
+            "Active",
             desc
         ),
         _ => {}

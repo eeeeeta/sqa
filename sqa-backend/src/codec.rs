@@ -20,8 +20,6 @@ pub enum Command {
     Subscribe,
     #[oscpath = "/actions/{typ}/new"]
     CreateAction { #[subst] typ: String },
-    #[oscpath = "/actions/{typ}/new/withparams"]
-    CreateActionWithParams { #[subst] typ: String, #[ser] params: ActionParameters },
     #[oscpath = "/actionlist"]
     ActionList,
     #[oscpath = "/action/{uuid}"]
@@ -30,6 +28,12 @@ pub enum Command {
     UpdateActionParams { #[subst] uuid: Uuid, #[ser] params: ActionParameters },
     #[oscpath = "/action/{uuid}/updatemeta"]
     UpdateActionMetadata { #[subst] uuid: Uuid, #[ser] meta: ActionMetadata },
+    #[oscpath = "/action/{uuid}/revive/{typ}"]
+    ReviveAction { #[subst] uuid: Uuid, #[subst] typ: String, #[ser] meta: ActionMetadata, #[ser] params: ActionParameters },
+    #[oscpath = "/action/{uuid}/create/{typ}"]
+    CreateActionWithUuid { #[subst] typ: String, #[subst] uuid: Uuid },
+    #[oscpath = "/action/{uuid}/create_extra/{typ}"]
+    CreateActionWithExtras { #[subst] typ: String, #[subst] uuid: Uuid, #[ser] params: ActionParameters },
     #[oscpath = "/action/{uuid}/delete"]
     DeleteAction { #[subst] uuid: Uuid },
 /*
@@ -42,6 +46,8 @@ pub enum Command {
     LoadAction { #[subst] uuid: Uuid },
     #[oscpath = "/action/{uuid}/execute"]
     ExecuteAction { #[subst] uuid: Uuid },
+    #[oscpath = "/action/{uuid}/reset"]
+    ResetAction { #[subst] uuid: Uuid },
     #[oscpath = "/mixer/config"]
     GetMixerConf,
     #[oscpath = "/mixer/config/set"]
@@ -78,6 +84,8 @@ pub enum Reply {
     ActionLoaded { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/action/{uuid}/execute"]
     ActionExecuted { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
+    #[oscpath = "/reply/action/{uuid}/reset"]
+    ActionReset { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/mixer/config"]
     MixerConfSet { #[ser] res: Result<(), String> },
     #[oscpath = "/reply/actionlist"]

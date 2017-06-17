@@ -28,10 +28,10 @@ pub struct Slider<S: SliderBoxType, T: SliderMessage<S>> {
     id: T::Identifier,
     vol: Entry,
     tb: Option<ToggleButton>,
-    radios: Vec<RadioButton>,
+    radios: Vec<(RadioButton, u64)>,
     scale: Scale,
     changed_handler: u64,
-    clicked_handler: u64
+    clicked_handler: u64,
 }
 pub struct Patched;
 pub struct Faded;
@@ -65,18 +65,19 @@ impl SliderBoxType for Patched {
                 slf.grid.attach(&lbl, slf.grid_left, (4+n) as i32, 1, 1);
             }
             else {
-                let rb = if let Some(r) = slider.radios.get(0) {
+                let rb = if let Some(&(ref r, _)) = slider.radios.get(0) {
                     RadioButton::new_from_widget(r)
                 } else {
                     RadioButton::new(&[])
                 };
+                let mut handler_id = 0;
                 if n == slf.n_output {
                     rb.set_sensitive(false);
                 }
                 else {
                     let idx = slider.idx;
                     let id = slider.id;
-                    rb.connect_toggled(clone!(tx; |rb| {
+                    handler_id = rb.connect_toggled(clone!(tx; |rb| {
                         if rb.get_active() {
                             tx.send_internal(T::on_payload(idx, PatchedSliderMessage::PatchChanged(n+1), id));
                         }
@@ -84,7 +85,7 @@ impl SliderBoxType for Patched {
                 }
                 rb.set_halign(Align::Center);
                 slf.grid.attach(&rb, slf.grid_left, (4+n) as i32, 1, 1);
-                slider.radios.push(rb);
+                slider.radios.push((rb, handler_id));
             }
         }
         let ref mut scale = slider.scale;
@@ -129,19 +130,25 @@ impl SliderBoxType for Patched {
         if let Some(slider) = slf.sliders.get_mut(i) {
             if i != 0 {
                 trace!("mixer: patch for value {} is {}, {:?}", i, val.patch, slider.radios.get(val.patch));
+                for &(ref rb, hid) in slider.radios.iter().take(slider.radios.len()-1) {
+                    signal::signal_handler_block(rb, hid);
+                }
                 let rb;
                 if val.patch == 0 {
-                    rb = &slider.radios[0];
+                    rb = &slider.radios[0].0;
                 }
                 else {
-                    if let Some(rb2) = slider.radios.get(val.patch-1) {
+                    if let Some(&(ref rb2, _)) = slider.radios.get(val.patch-1) {
                         rb = rb2;
                     }
                     else {
-                        rb = &slider.radios[0];
+                        rb = &slider.radios[0].0;
                     }
                 }
                 rb.set_active(true);
+                for &(ref rb, hid) in slider.radios.iter().take(slider.radios.len()-1) {
+                    signal::signal_handler_unblock(rb, hid);
+                }
             }
             if val.vol != slider.scale.get_value() {
                 signal::signal_handler_block(&slider.scale, slider.changed_handler);
@@ -219,11 +226,15 @@ impl SliderBoxType for Faded {
                     slider.scale.set_value(val);
                 }
                 slider.tb.as_ref().unwrap().set_active(true);
+                let sctx = slider.vol.get_style_context().unwrap();
+                sctx.add_class("vol-entry-fade-enabled");
             }
             else {
                 slider.scale.set_value(-60.0);
                 slider.vol.set_text("");
                 slider.tb.as_ref().unwrap().set_active(false);
+                let sctx = slider.vol.get_style_context().unwrap();
+                sctx.remove_class("vol-entry-fade-enabled");
             }
             signal::signal_handler_unblock(&slider.scale, slider.changed_handler);
             signal::signal_handler_unblock(slider.tb.as_ref().unwrap(), slider.clicked_handler);

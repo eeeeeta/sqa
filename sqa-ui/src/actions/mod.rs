@@ -1,5 +1,6 @@
 use gtk::prelude::*;
 use gtk::{self, Widget, Menu, TreeView, ListStore, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack};
+use connection::UndoableChange;
 use gdk;
 use uuid::Uuid;
 use std::collections::HashMap;
@@ -32,6 +33,7 @@ pub enum ActionMessageInner {
     LoadAction,
     ExecuteAction,
     DeleteAction,
+    ResetAction,
     EditAction,
     ChangeName(Option<String>),
     CloseButton,
@@ -94,7 +96,7 @@ impl TreeSelectGetter {
 macro_rules! bind_action_menu_items {
     ($self:ident, $tx:ident, $tsg:ident, $($name:ident => $res:ident),*) => {
         $(
-            $self.$name.connect_activate(clone!($tx, $tsg; |_s| {
+            $self.$name.connect_activate(clone!($tx, $tsg; |_| {
                 if let Some(uu) = $tsg.get() {
                     $tx.send_internal((uu, $res));
                 }
@@ -269,7 +271,13 @@ impl ActionController {
         use self::ActionInternalMessage::*;
         match msg {
             Create(typ) => {
-                self.tx.as_mut().unwrap().send(Command::CreateAction { typ: typ.into() });
+                let uuid = Uuid::new_v4();
+                let msg = UndoableChange {
+                    undo: Command::DeleteAction { uuid },
+                    redo: Command::CreateActionWithUuid { typ: typ.into(), uuid },
+                    desc: format!("create {} action", typ)
+                };
+                self.tx.as_mut().unwrap().send(msg);
             },
             SelectionChanged => {
                 let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
@@ -315,10 +323,15 @@ impl ActionController {
             FilesDropped(files) => {
                 for file in files {
                     let mut params: AudioParams = Default::default();
-                    params.url = Some(file.into());
+                    params.url = Some(file.clone().into());
                     let params = ActionParameters::Audio(params);
-                    self.tx.as_mut().unwrap()
-                        .send(Command::CreateActionWithParams { typ: "audio".into(), params });
+                    let uuid = Uuid::new_v4();
+                    let msg = UndoableChange {
+                        undo: Command::DeleteAction { uuid },
+                        redo: Command::CreateActionWithExtras { typ: "audio".into(), params: params, uuid },
+                        desc: format!("drop file {}", file)
+                    };
+                    self.tx.as_mut().unwrap().send(msg);
                 }
             },
             BeginSelection(uu) => {
@@ -360,7 +373,20 @@ impl ActionController {
             match msg.1 {
                 LoadAction => tx.send(Command::LoadAction { uuid: msg.0 }),
                 ExecuteAction => tx.send(Command::ExecuteAction { uuid: msg.0 }),
-                DeleteAction => tx.send(Command::DeleteAction { uuid: msg.0 }),
+                ResetAction => tx.send(Command::ResetAction { uuid: msg.0 }),
+                DeleteAction => {
+                    let opa = self.opas.get_mut(&msg.0).unwrap();
+                    tx.send(UndoableChange {
+                        undo: Command::ReviveAction {
+                            uuid: msg.0,
+                            typ: opa.typ().into(),
+                            params: opa.params.clone(),
+                            meta: opa.meta.clone(),
+                        },
+                        redo: Command::DeleteAction { uuid: msg.0 },
+                        desc: "delete action".into()
+                    });
+                },
                 EditAction => {
                     if let Some((uu, w)) = self.cur_widget.take() {
                         if uu == msg.0 {
@@ -376,7 +402,11 @@ impl ActionController {
                     if let Some(opa) = self.opas.get(&msg.0) {
                         let mut meta = opa.meta.clone();
                         meta.name = name;
-                        tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: meta });
+                        tx.send(UndoableChange {
+                            undo: Command::UpdateActionMetadata { uuid: msg.0, meta: opa.meta.clone() },
+                            redo: Command::UpdateActionMetadata { uuid: msg.0, meta: meta },
+                            desc: "change action name".into()
+                        });
                     }
                 },
                 CloseButton => ctl.close_window(),

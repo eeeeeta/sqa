@@ -4,7 +4,7 @@ use sqa_engine::{PlainSender, BufferSender};
 use sqa_engine::param::Parameter;
 use sqa_engine::sync::AudioThreadMessage;
 use sqa_ffmpeg::{Frame, MediaFile, MediaResult};
-use super::{ParameterError, ControllerParams, PlaybackState, ActionController, EditableAction};
+use super::{ParameterError, ControllerParams, DurationInfo, PlaybackState, ActionController, EditableAction};
 use state::{ServerMessage, Context, IntSender};
 use std::thread;
 use futures::Sink;
@@ -91,11 +91,15 @@ impl SpoolerContext {
         }
     }
 }
+pub struct RunningData {
+    control: Sender<SpoolerMessage>,
+    durinfo: DurationInfo,
+    pub senders: Vec<PlainSender>
+}
 #[derive(Default)]
 pub struct Controller {
-    params: AudioParams,
-    pub senders: Vec<PlainSender>,
-    control: Option<Sender<SpoolerMessage>>,
+    pub params: AudioParams,
+    pub rd: Option<RunningData>,
     file: Option<MediaResult<MediaFile>>,
     url: Option<BackendResult<PathBuf>>
 }
@@ -177,13 +181,13 @@ impl EditableAction for Controller {
                 }
             }
         }
-        if self.senders.len() > 0 {
+        if let Some(ref mut rd) = self.rd {
             for (i, ch) in p.chans.iter().enumerate() {
-                if let Some(s) = self.senders.get_mut(i) {
+                if let Some(s) = rd.senders.get_mut(i) {
                     s.set_volume(Box::new(Parameter::Raw(db_lin(ch.vol))));
                 }
             }
-            self.senders[0].set_master_volume(Box::new(Parameter::Raw(db_lin(p.master_vol))));
+            rd.senders[0].set_master_volume(Box::new(Parameter::Raw(db_lin(p.master_vol))));
         }
         self.params = p;
     }
@@ -269,6 +273,7 @@ impl ActionController for Controller {
                 }
             }
         }
+        let dur = mf.duration().to_std().unwrap();
         let plains: Vec<PlainSender> = senders.iter()
             .map(|s| s.make_plain())
             .collect();
@@ -283,47 +288,57 @@ impl ActionController for Controller {
         thread::spawn(move || {
             sctx.spool();
         });
-        self.senders = plains;
-        self.control = Some(tx);
+        self.rd = Some(RunningData {
+            senders: plains,
+            control: tx,
+            durinfo: DurationInfo {
+                start_time: 0,
+                est_duration: dur
+            }
+        });
         Ok(true)
     }
     fn execute(&mut self, time: u64, _: ControllerParams) -> BackendResult<bool> {
-        for (i, sender) in self.senders.iter_mut().enumerate() {
-            if let Some(ch) = self.params.chans.get(i) {
-                sender.set_volume(Box::new(Parameter::Raw(db_lin(ch.vol))));
+        if let Some(ref mut rd) = self.rd {
+            rd.durinfo.start_time = time;
+            for (i, sender) in rd.senders.iter_mut().enumerate() {
+                if let Some(ch) = self.params.chans.get(i) {
+                    sender.set_volume(Box::new(Parameter::Raw(db_lin(ch.vol))));
+                }
+                sender.set_start_time(time);
+                sender.set_active(true);
             }
-            sender.set_start_time(time);
-            sender.set_active(true);
         }
         Ok(true)
     }
     fn pause(&mut self, _: ControllerParams) {
-        for sender in self.senders.iter_mut() {
-            sender.set_active(false);
+        if let Some(ref mut rd) = self.rd {
+            for sender in rd.senders.iter_mut() {
+                sender.set_active(false);
+            }
         }
     }
     fn reset(&mut self, _: ControllerParams) {
-        for _ in self.senders.drain(..) {}
-        if let Some(c) = self.control.take() {
-            c.send(SpoolerMessage::Quit);
+        if let Some(rd) = self.rd.take() {
+            let _ = rd.control.send(SpoolerMessage::Quit);
         }
     }
-    fn duration(&self) -> Option<Duration> {
-        if let Some(s) = self.senders.get(0) {
-            if let Ok(d) = s.position().to_std() {
-                return Some(d);
-            }
+    fn duration_info(&self) -> Option<DurationInfo> {
+        if let Some(ref rd) = self.rd {
+            Some(rd.durinfo.clone())
         }
-        None
+        else {
+            None
+        }
     }
     fn accept_audio_message(&mut self, msg: &AudioThreadMessage, ctx: ControllerParams) -> bool {
         use self::AudioThreadMessage::*;
         match *msg {
             PlayerBufHalf(uu) | PlayerBufEmpty(uu) => {
-                for sender in self.senders.iter() {
-                    if sender.uuid() == uu {
-                        if let Some(c) = self.control.as_mut() {
-                            if let Err(e) = c.send(SpoolerMessage::Wakeup) {
+                if let Some(ref mut rd) = self.rd {
+                    for sender in rd.senders.iter() {
+                        if sender.uuid() == uu {
+                            if let Err(e) = rd.control.send(SpoolerMessage::Wakeup) {
                                 let msg = format!("Failed to wakeup spooler thread: {:?}", e);
                                 let fut = ctx.internal_tx.clone().send(
                                     ServerMessage::ActionWarning(ctx.uuid,
@@ -332,8 +347,8 @@ impl ActionController for Controller {
                                     fut.map_err(|_| ()).map(|_| ())
                                 });
                             }
+                            return true;
                         }
-                        return true;
                     }
                 }
                 false
