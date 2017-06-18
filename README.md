@@ -27,3 +27,15 @@ Also, as mentioned above, giving back to the Rust community and all that.
 
 Want to follow along with the development of SQA? Check out [pro.theta.eu.org](http://pro.theta.eu.org), where I blog about its
 ongoing development ([here's the first post](http://pro.theta.eu.org/2016/12/21/sqa-devlog-0.html)).
+
+## licensing
+
+sqa-backend and sqa-ui are both licensed under the [GNU GPL version 3](https://www.gnu.org/licenses/gpl-3.0.en.html).
+Essentially, this means that you have to share your changes if you distribute modified versions of SQA
+(as well as enforcing some other freedom-related protections). This is done in the hope that SQA will remain
+free and open-source software.
+
+However, the libraries used by and created for SQA, sqa-jack, sqa-ffmpeg, sqa-engine, and sqa-osc-custom-derive,
+are licensed under the [Creative Commons Zero](https://creativecommons.org/share-your-work/public-domain/cc0)
+license. This means that you can do whatever the hell you want with these libraries.
+

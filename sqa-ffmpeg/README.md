@@ -12,4 +12,4 @@ Currently, this library only supports extracting audio data, and may be unsuitab
 These will be used in [SQA](https://github.com/eeeeeta/sqa) in "the future" (by the time you're reading this, they may already
 be used...), hence the title.
 
-Licensed under the [Unlicense](http://unlicense.org/).
+Licensed under CC0.

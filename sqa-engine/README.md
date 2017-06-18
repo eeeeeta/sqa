@@ -7,4 +7,4 @@ Still in development, and subject to violent, earth-shattering change. See the [
 This will be used in [SQA](https://github.com/eeeeeta/sqa) in "the future" (by the time you're reading this, it may already
 be used...), hence the title.
 
-Licensed under the GPLv3.
+Licensed under CC0.

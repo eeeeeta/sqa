@@ -1,12 +1,12 @@
 [package]
 name = "sqa-jack"
-version = "0.5.1"
+version = "0.5.2"
 description = "JACK bindings for Rust (part of the SQA project)"
 documentation = "https://docs.rs/sqa-jack"
 repository = "https://github.com/eeeeeta/sqa"
 readme = "README.md"
 keywords = ["jack", "audio", "sqa"]
-license = "Unlicense"
+license = "CC0-1.0"
 authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 
 [dependencies]
