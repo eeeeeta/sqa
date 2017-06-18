@@ -37,17 +37,17 @@ pub use uuid::Uuid;
 pub use sqa_jack as jack;
 /// The maximum amount of streams that can play concurrently.
 ///
-/// Can be increased to 512 with the `512-players` feature.
-#[cfg(not(feature = "512-players"))]
+/// Can be increased to 512 with the `players-512` feature.
+#[cfg(not(feature = "players-512"))]
 pub const MAX_PLAYERS: usize = 256;
-#[cfg(feature = "512-players")]
+#[cfg(feature = "players-512")]
 pub const MAX_PLAYERS: usize = 512;
 /// The maximum amount of channels that can be created.
 ///
-/// Can be increased to 128 with the `128-channels` feature.
-#[cfg(not(feature = "128-channels"))]
+/// Can be increased to 128 with the `channels-128` feature.
+#[cfg(not(feature = "channels-128"))]
 pub const MAX_CHANS: usize = 64;
-#[cfg(feature = "128-channels")]
+#[cfg(feature = "channels-128")]
 pub const MAX_CHANS: usize = 128;
 /// The size of a stream's buffer, in samples.
 pub const STREAM_BUFFER_SIZE: usize = 100_000;

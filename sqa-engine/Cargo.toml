@@ -6,7 +6,7 @@ repository = "https://github.com/eeeeeta/sqa-engine"
 readme = "README.md"
 keywords = ["audio", "sqa"]
 license = "CC0-1.0"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 
 [dependencies]
@@ -22,5 +22,5 @@ bspline = "0.2.2"
 
 [features]
 
-512-players = []
-128-channels = []
+players-512 = []
+channels-128 = []
