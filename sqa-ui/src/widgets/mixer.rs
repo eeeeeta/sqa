@@ -68,7 +68,7 @@ impl SliderBoxType for Patched {
                 let rb = if let Some(&(ref r, _)) = slider.radios.get(0) {
                     RadioButton::new_from_widget(r)
                 } else {
-                    RadioButton::new(&[])
+                    RadioButton::new()
                 };
                 let mut handler_id = 0;
                 if n == slf.n_output {

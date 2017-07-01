@@ -1,5 +1,6 @@
 use gtk::prelude::*;
 use gtk::{self, Widget, Menu, TreeView, ListStore, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack};
+use gdk::WindowExt;
 use connection::UndoableChange;
 use gdk;
 use uuid::Uuid;

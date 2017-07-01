@@ -1,4 +1,5 @@
 use gtk::Adjustment;
+use gtk::prelude::*;
 
 pub static INTERFACE_SRC: &str = include_str!("ui.glade");
 #[derive(Clone)]
