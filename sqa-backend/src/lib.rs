@@ -1,5 +1,5 @@
 #![recursion_limit = "1024"]
-#![feature(slice_patterns, advanced_slice_patterns, retain_hash_collection)]
+#![feature(slice_patterns, advanced_slice_patterns)]
 extern crate futures;
 extern crate tokio_core;
 extern crate serde;
@@ -24,6 +24,7 @@ pub mod actions;
 pub mod state;
 pub mod errors;
 pub mod mixer;
+pub mod save;
 
 pub static VERSION: &str = "indev";
 

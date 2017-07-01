@@ -52,6 +52,10 @@ pub enum Command {
     GetMixerConf,
     #[oscpath = "/mixer/config/set"]
     SetMixerConf { #[ser] conf: MixerConf },
+    #[oscpath = "/system/save"]
+    MakeSavefile { #[verbatim = "string"] save_to: String },
+    #[oscpath = "/system/load"]
+    LoadSavefile { #[verbatim = "string"] load_from: String, #[verbatim = "bool"] force: bool },
 }
 impl Into<OscMessage> for Command {
     fn into(self) -> OscMessage {
@@ -97,6 +101,10 @@ pub enum Reply {
     UpdateActionDeleted { #[subst] uuid: Uuid },
     #[oscpath = "/update/mixer/config"]
     UpdateMixerConf { #[ser] conf: MixerConf },
+    #[oscpath = "/reply/system/save"]
+    SavefileMade { #[ser] res: Result<(), String> },
+    #[oscpath = "/reply/system/load"]
+    SavefileLoaded { #[ser] res: Result<(), String> }
 }
 impl Into<OscMessage> for Reply {
     fn into(self) -> OscMessage {

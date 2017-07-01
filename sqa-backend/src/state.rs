@@ -6,11 +6,12 @@ use uuid::Uuid;
 use handlers::{ConnHandler, ConnData};
 use codec::{Command, Reply};
 use std::collections::HashMap;
-use actions::{Action, OpaqueAction, PlaybackState};
+use actions::{Action, OpaqueAction, ActionParameters, ActionMetadata, PlaybackState};
 use sqa_engine::sync::{AudioThreadMessage};
 use sqa_ffmpeg::MediaContext;
 use mixer::{MixerContext};
 use errors::*;
+use save::Savefile;
 use std::mem;
 pub struct Context {
     pub remote: Remote,
@@ -38,7 +39,7 @@ pub enum ServerMessage {
     ActionWarning(Uuid, String)
 }
 pub type IntSender = ::futures::sync::mpsc::Sender<ServerMessage>;
-type CD = ConnData<ServerMessage>;
+pub type CD = ConnData<ServerMessage>;
 impl ConnHandler for Context {
     type Message = ServerMessage;
     fn init(&mut self, d: &mut CD) {
@@ -108,37 +109,13 @@ impl ConnHandler for Context {
                     },
                     _ => unreachable!()
                 }
-                let mut act = match &*ty {
-                    "audio" => Ok(Action::new_audio()),
-                    "fade" => Ok(Action::new_fade()),
-                    _ => Err("Unknown action type".into())
-                };
-                if let Some(uu) = old_uu {
-                    if self.actions.get(&uu).is_some() {
-                        act = Err("UUID already exists!".into())
-                    }
-                }
-                let act = act.map(|mut act| {
-                    if let Some(uu) = old_uu {
-                        act.set_uuid(uu);
-                    }
-                    if let Some(ref met) = met {
-                        act.set_meta(met.clone());
-                    }
-                    let uu = act.uuid();
-                    if let Some(ref pars) = pars {
-                        act.set_params(pars.clone(), self);
-                    }
-                    self.on_action_changed(d, &mut act);
-                    self.actions.insert(uu, act);
-                    uu
-                });
-                d.respond(ActionCreated {
-                    res: act
+                let broadcast = met.is_some();
+                let act = self.create_action(&ty, pars, met, old_uu, &mut Some(d));
+                d.respond(Reply::ActionCreated {
+                    res: act.map_err(|e| e.to_string())
                 })?;
-                if met.is_some() {
-                    let resp = self.refresh_action_list();
-                    d.broadcast(ReplyActionList { list: resp })?;
+                if broadcast {
+                    self.on_all_actions_changed(d);
                 }
             },
             ActionInfo { uuid } => {
@@ -190,15 +167,13 @@ impl ConnHandler for Context {
                 d.respond(ActionExecuted { uuid, res })?;
             },
             ActionList => {
-                let resp = self.refresh_action_list();
-                d.respond(ReplyActionList { list: resp })?;
+                self.on_all_actions_changed(d);
             },
             DeleteAction { uuid } => {
                 if self.actions.remove(&uuid).is_some() {
                     d.respond(ActionDeleted { uuid, deleted: true })?;
                     d.broadcast(UpdateActionDeleted { uuid })?;
-                    let resp = self.refresh_action_list();
-                    d.broadcast(ReplyActionList { list: resp })?;
+                    self.on_all_actions_changed(d);
                 }
                 else {
                     d.respond(ActionDeleted { uuid, deleted: false })?;
@@ -211,6 +186,14 @@ impl ConnHandler for Context {
                 d.respond(MixerConfSet {res: self.mixer.process_config(conf)
                                         .map_err(|e| e.to_string())})?;
                 d.respond(UpdateMixerConf { conf: self.mixer.obtain_config() })?;
+            },
+            MakeSavefile { save_to } => {
+                let res = Savefile::save_to_file(self, &save_to);
+                d.respond(SavefileMade { res: res.map_err(|e| e.to_string()) })?;
+            },
+            LoadSavefile { load_from, force } => {
+                let res = Savefile::apply_from_file(self, &load_from, Some(d), force);
+                d.respond(SavefileLoaded { res: res.map_err(|e| e.to_string()) })?;
             },
             _ => {}
         };
@@ -246,10 +229,46 @@ impl Context {
     }
     pub fn on_action_changed(&mut self, d: &mut CD, action: &mut Action) {
         if let Ok(data) = action.get_data(self) {
-            d.broadcast(Reply::UpdateActionInfo {
-                    uuid: action.uuid(),
-                    data
-            });
+            if let Err(e) = d.broadcast(Reply::UpdateActionInfo {
+                uuid: action.uuid(),
+                data
+            }) {
+                println!("fixme: error in on_action_changed: {:?}", e);
+            }
         }
+    }
+    pub fn on_all_actions_changed(&mut self, d: &mut CD) {
+        let resp = self.refresh_action_list();
+        if let Err(e) = d.broadcast(Reply::ReplyActionList { list: resp }) {
+            println!("fixme: error in on_all_actions_changed: {:?}", e);
+        }
+    }
+    pub fn create_action(&mut self, ty: &str, pars: Option<ActionParameters>, met: Option<ActionMetadata>, old_uu: Option<Uuid>, d: &mut Option<&mut CD>) -> BackendResult<Uuid> {
+        let mut act = match &*ty {
+            "audio" => Action::new_audio(),
+            "fade" => Action::new_fade(),
+            x => bail!("Unknown action type: {}", x)
+        };
+        if let Some(uu) = old_uu {
+            if self.actions.get(&uu).is_some() {
+                bail!("UUID {} already exists!", uu);
+            }
+        }
+        if let Some(uu) = old_uu {
+            act.set_uuid(uu);
+        }
+        if let Some(ref met) = met {
+            act.set_meta(met.clone());
+        }
+        let uu = act.uuid();
+        if let Some(ref pars) = pars {
+            // FIXME: we should ideally send something here
+            if let Err(e) = act.set_params(pars.clone(), self) {
+                println!("fixme: set_params failed in create_action: {:?}", e);
+            }
+        }
+        if let Some(ref mut d) = *d { self.on_action_changed(d, &mut act); }
+        self.actions.insert(uu, act);
+        Ok(uu)
     }
 }
