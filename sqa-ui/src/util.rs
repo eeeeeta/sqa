@@ -50,6 +50,15 @@ macro_rules! build {
             $o { $($i),* $(,$f)* }
     }}
 }
+macro_rules! bind_menu_items {
+    ($self:ident, $tx:ident, $($name:ident => $res:expr),*) => {
+        $(
+            $self.$name.connect_activate(clone!($tx; |_| {
+                    $tx.send_internal($res);
+            }));
+        )*
+    }
+}
 macro_rules! message_impls {
     ($msg:ident, $($variant:ident, $ty:ty),*) => {
         $(
@@ -60,6 +69,21 @@ macro_rules! message_impls {
             }
         )*
     }
+}
+macro_rules! action_reply_notify {
+    ($self:ident, $res:ident, $failmsg:expr, $successmsg:expr) => {{
+        let msg;
+        let mut ok = true;
+        if let Err(e) = $res {
+            msg = Message::Error(format!(concat!($failmsg, " failed: {}"), e));
+            ok = false;
+        }
+        else {
+            msg = Message::Statusbar($successmsg.into());
+        }
+        $self.tx.as_mut().unwrap().send_internal(msg);
+        ok
+    }}
 }
 macro_rules! clone {
     (@param _) => ( _ );

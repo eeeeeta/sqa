@@ -28,6 +28,7 @@ mod sync;
 mod messages;
 mod actions;
 mod connection;
+mod save;
 
 use sync::{UIContext, BackendContext};
 fn main() {
@@ -57,6 +58,7 @@ fn main() {
     let (btx, brx) = mpsc::unbounded();
     let (utx, urx) = smpsc::channel();
     let tutx = utx.clone();
+    let win: Window = b.get_object("sqa-main").unwrap();
     thread::spawn(move || {
         let mut core = Core::new().unwrap();
         let mut ctx = BackendContext {
@@ -77,7 +79,8 @@ fn main() {
         stx: utx,
         conn: connection::ConnectionController::new(&b),
         act: actions::ActionController::new(&b),
-        msg: messages::MessageController::new(&b)
+        msg: messages::MessageController::new(&b),
+        save: save::SaveController::new(&b, win.clone())
     };
     ctx.bind_all();
     let ctx = RefCell::new(ctx);
@@ -85,7 +88,6 @@ fn main() {
         ctx.borrow_mut().on_event();
     });
     info!("[+] Showing main window");
-    let win: Window = b.get_object("sqa-main").unwrap();
     win.set_title(&format!("SQA UI [{}]", sqa_backend::VERSION));
     win.show_all();
     info!("[+] Starting GTK+ event loop!");

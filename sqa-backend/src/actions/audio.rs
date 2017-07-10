@@ -118,7 +118,7 @@ impl Controller {
     pub fn new() -> Self {
         Default::default()
     }
-    fn parse_url(st: &str) -> BackendResult<PathBuf> {
+    pub fn parse_url(st: &str) -> BackendResult<PathBuf> {
         let url = Url::parse(st)?;
         if url.scheme() != "file" {
             bail!(format!("The URL scheme {} is not yet supported; only file:// URLs currently work.", url.scheme()));

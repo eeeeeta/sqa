@@ -9,6 +9,7 @@ use futures::{Poll, Async, Future, Stream};
 use messages;
 use errors;
 use actions;
+use save;
 
 pub enum UIMessage {
     ConnState(ConnectionState),
@@ -17,7 +18,8 @@ pub enum UIMessage {
     ActionMessage(actions::ActionMessage),
     ActionInternal(actions::ActionInternalMessage),
     UpdatedMixerConf(MixerConf),
-    Message(messages::Message)
+    Message(messages::Message),
+    Save(save::SaveMessage)
 }
 pub enum BackendMessage {
     Connection(ConnectionMessage)
@@ -40,7 +42,8 @@ message_impls!(
     ActionMessage, actions::ActionMessage,
     ActionInternal, actions::ActionInternalMessage,
     UpdatedMixerConf, MixerConf,
-    Message, messages::Message
+    Message, messages::Message,
+    Save, save::SaveMessage
 );
 message_impls!(
     BackendMessage,
@@ -61,7 +64,8 @@ pub struct UIContext {
     pub tx: mpsc::UnboundedSender<BackendMessage>,
     pub conn: connection::ConnectionController,
     pub act: actions::ActionController,
-    pub msg: messages::MessageController
+    pub msg: messages::MessageController,
+    pub save: save::SaveController
 }
 #[derive(Clone)]
 pub struct UISender {
@@ -129,6 +133,7 @@ impl UIContext {
         self.conn.bind(&uis);
         self.act.bind(&uis);
         self.msg.bind(&uis);
+        self.save.bind(&uis);
     }
     pub fn on_event(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
@@ -140,7 +145,8 @@ impl UIContext {
                 ActionInternal(msg) => self.act.on_internal(msg),
                 ActionMessage(msg) => self.act.on_action_msg(msg),
                 UpdatedMixerConf(cnf) => self.act.on_mixer(cnf),
-                Message(msg) => self.msg.on_message(msg)
+                Message(msg) => self.msg.on_message(msg),
+                Save(msg) => self.save.on_message(msg)
             }
         }
     }

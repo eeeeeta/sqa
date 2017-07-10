@@ -10,6 +10,7 @@ use widgets::{PropertyWindow, FallibleEntry};
 use errors;
 use messages::Message;
 use time;
+use save::SaveMessage;
 use std::mem;
 use std::time::Duration;
 
@@ -189,6 +190,10 @@ impl Context {
             },
             UpdateMixerConf { conf } => {
                 args.send(UIMessage::UpdatedMixerConf(conf));
+            },
+            x @ SavefileMade {..} |
+            x @ SavefileLoaded {..} => {
+                args.send(UIMessage::Save(SaveMessage::External(x)));
             },
             _ => {}
         }

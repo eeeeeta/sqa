@@ -105,18 +105,6 @@ macro_rules! bind_action_menu_items {
         )*
     }
 }
-macro_rules! action_reply_notify {
-    ($self:ident, $res:ident, $failmsg:expr, $successmsg:expr) => {
-        let msg;
-        if let Err(e) = $res {
-            msg = Message::Error(format!(concat!($failmsg, " failed: {}"), e));
-        }
-        else {
-            msg = Message::Statusbar($successmsg.into());
-        }
-        $self.tx.as_mut().unwrap().send_internal(msg);
-    }
-}
 impl ActionController {
     pub fn new(b: &Builder) -> Self {
         let ctls = HashMap::new();
