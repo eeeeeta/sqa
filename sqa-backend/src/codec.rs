@@ -4,13 +4,14 @@ use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
 use errors::*;
 use mixer::MixerConf;
 use errors::BackendErrorKind::*;
+use undo::UndoContext;
 use actions::{ActionParameters, ActionMetadata, OpaqueAction};
 use std::collections::HashMap;
 use uuid::Uuid;
 
 type OscResult<T> = BackendResult<T>;
 
-#[derive(OscSerde, Debug, Clone)]
+#[derive(OscSerde, Serialize, Deserialize, Debug, Clone)]
 pub enum Command {
     #[oscpath = "/ping"]
     Ping,
@@ -25,7 +26,7 @@ pub enum Command {
     #[oscpath = "/action/{uuid}"]
     ActionInfo { #[subst] uuid: Uuid },
     #[oscpath = "/action/{uuid}/update"]
-    UpdateActionParams { #[subst] uuid: Uuid, #[ser] params: ActionParameters },
+    UpdateActionParams { #[subst] uuid: Uuid, #[ser] params: ActionParameters, #[ser] desc: Option<String> },
     #[oscpath = "/action/{uuid}/updatemeta"]
     UpdateActionMetadata { #[subst] uuid: Uuid, #[ser] meta: ActionMetadata },
     #[oscpath = "/action/{uuid}/revive/{typ}"]
@@ -56,6 +57,12 @@ pub enum Command {
     MakeSavefile { #[verbatim = "string"] save_to: String },
     #[oscpath = "/system/load"]
     LoadSavefile { #[verbatim = "string"] load_from: String, #[verbatim = "bool"] force: bool },
+    #[oscpath = "/system/undo"]
+    Undo,
+    #[oscpath = "/system/redo"]
+    Redo,
+    #[oscpath = "/system/undoctx"]
+    GetUndoContext
 }
 impl Into<OscMessage> for Command {
     fn into(self) -> OscMessage {
@@ -104,7 +111,9 @@ pub enum Reply {
     #[oscpath = "/reply/system/save"]
     SavefileMade { #[ser] res: Result<(), String> },
     #[oscpath = "/reply/system/load"]
-    SavefileLoaded { #[ser] res: Result<(), String> }
+    SavefileLoaded { #[ser] res: Result<(), String> },
+    #[oscpath = "/reply/system/undoctx"]
+    ReplyUndoContext { #[ser] ctx: UndoContext }
 }
 impl Into<OscMessage> for Reply {
     fn into(self) -> OscMessage {

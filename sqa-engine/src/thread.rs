@@ -79,6 +79,7 @@ impl DeviceContext {
                 }
             },
             AudioThreadCommand::AddChannel(p) => {
+                /* NOTE: This code must mirror the code in lib.rs */
                 let ch = DeviceChannel { port: p, written_t: 0, zeroed_t: 0 };
                 if let Some(ix) = self.holes.remove(0) {
                     self.chans[ix] = Some(ch);
@@ -88,6 +89,7 @@ impl DeviceContext {
                 }
             },
             AudioThreadCommand::RemoveChannel(ch) => {
+                /* NOTE: This code must mirror the code in lib.rs */
                 self.chans.push(None);
                 self.chans.swap_remove(ch);
                 self.holes.push(ch);

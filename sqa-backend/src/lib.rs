@@ -25,6 +25,7 @@ pub mod state;
 pub mod errors;
 pub mod mixer;
 pub mod save;
+pub mod undo;
 
 pub static VERSION: &str = "indev";
 

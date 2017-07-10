@@ -1,7 +1,6 @@
 use gtk::prelude::*;
 use gtk::{FileChooserAction, FileChooserButton, Widget};
 use super::{ActionUI, OpaqueAction, UITemplate, ActionMessageInner};
-use connection::UndoableChange;
 use sync::UISender;
 use uuid::Uuid;
 use widgets::{SliderBox, Patched, PatchedSliderMessage, SliderMessage, SliderDetail};
@@ -83,18 +82,12 @@ impl AudioUI {
         details.insert(0, SliderDetail { vol: p.master_vol as f64, patch: 0 });
         self.sb.update_values(details);
     }
-    fn apply_changes<T: Into<String>>(&mut self, before: AudioParams, desc: T) {
+    fn apply_changes<T: Into<String>>(&mut self, desc: T) {
         trace!("audio: sending update {:?}", self.params);
-        self.temp.tx.send(UndoableChange {
-            undo: Command::UpdateActionParams {
-                uuid: self.temp.uu,
-                params: ActionParameters::Audio(before)
-            },
-            redo: Command::UpdateActionParams {
-                uuid: self.temp.uu,
-                params: ActionParameters::Audio(self.params.clone()),
-            },
-            desc: desc.into()
+        self.temp.tx.send(Command::UpdateActionParams {
+            uuid: self.temp.uu,
+            params: ActionParameters::Audio(self.params.clone()),
+            desc: Some(desc.into())
         });
     }
 }
@@ -120,12 +113,10 @@ impl ActionUI for AudioUI {
             use self::AudioMessage::*;
             match m {
                 FileChanged => {
-                    let before = self.params.clone();
                     self.params.url = self.file.get_uri();
-                    self.apply_changes(before, "change audio file target");
+                    self.apply_changes("change audio file target");
                 },
                 Slider(ch, PatchedSliderMessage::VolChanged(val)) => {
-                    let before = self.params.clone();
                     trace!("audio: slider, ch {} val {}", ch, val);
                     if ch == 0 {
                         self.params.master_vol = val;
@@ -135,10 +126,9 @@ impl ActionUI for AudioUI {
                             self.params.chans[ch-1].vol = val;
                         }
                     }
-                    self.apply_changes(before, "change slider value");
+                    self.apply_changes("change slider value");
                 },
                 Slider(ch, PatchedSliderMessage::PatchChanged(patch)) => {
-                    let before = self.params.clone();
                     if patch == 0 || ch == 0 { return }
                     let ch = ch - 1;
                     trace!("audio: setting patch for {}: {}, defs: {:?}", ch, patch, self.cnf.defs);
@@ -148,7 +138,7 @@ impl ActionUI for AudioUI {
                     };
                     if self.params.chans.get(ch).is_some() {
                         self.params.chans[ch].patch = Some(patch);
-                        self.apply_changes(before, "change patch");
+                        self.apply_changes("change patch");
                     }
                 }
             }

@@ -151,7 +151,7 @@ impl SaveController {
                     SavefileMade { res } => {
                         let pth = format!("Saved to {}.",
                                           self.cur_file.as_ref().map(|x| x as &str).unwrap_or("???"));
-                        if !action_reply_notify!(self, res, "Saving", &pth) {
+                        if !action_reply_notify!(self, res, "Saving", pth) {
                             self.cur_file = None;
                         }
                     },

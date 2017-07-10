@@ -279,22 +279,25 @@ impl EngineContext {
         self.length.load(Relaxed)
     }
     pub fn new_channel(&mut self, name: &str) -> EngineResult<usize> {
+        /* NOTE: This code must mirror the code in thread.rs */
         let port = self.conn.register_port(name, PORT_IS_OUTPUT | PORT_IS_TERMINAL)?;
         if (self.chans.len() - self.holes.len()) == self.chans.capacity() - 1 {
             Err(ErrorKind::LimitExceeded)?
         }
         let ret;
         if let Some(ix) = self.holes.remove(0) {
+            self.chans[ix] = Some(port);
             ret = ix;
         }
         else {
             ret = self.chans.len();
+            self.chans.push(Some(port));
         }
         self.control.push(thread::AudioThreadCommand::AddChannel(port.clone()));
-        self.chans.push(Some(port));
         Ok(ret)
     }
     pub fn remove_channel(&mut self, idx: usize) -> EngineResult<()> {
+        /* NOTE: This code must mirror the code in thread.rs */
         if idx >= self.chans.len() || self.holes.contains(&idx) {
             Err(ErrorKind::NoSuchChannel)?
         }

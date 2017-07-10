@@ -1,6 +1,7 @@
 use tokio_core::net::{UdpFramed, UdpSocket};
 use tokio_core::reactor::{Timeout};
 use sqa_backend::codec::{SqaClientCodec, Reply, Command};
+use sqa_backend::undo::{UndoState};
 use gtk::prelude::*;
 use gtk::{Button, Builder, MenuItem, IconSize, Image};
 use std::net::SocketAddr;
@@ -32,98 +33,13 @@ pub enum ConnectionMessage {
     Disconnect,
     Connect(SocketAddr),
     Send(Command),
-    Perform(UndoableChange),
-    Undo,
-    Redo
 }
-#[derive(Debug)]
-pub struct UndoableChange {
-    pub undo: Command,
-    pub redo: Command,
-    pub desc: String
-}
-#[derive(Clone, Debug)]
-pub struct UndoState {
-    pub undo: Option<String>,
-    pub redo: Option<String>
-}
-pub struct UndoContext {
-    changes: Vec<UndoableChange>,
-    idx: Option<usize>
-}
-impl UndoContext {
-    pub fn new() -> Self {
-        let gutter = UndoableChange {
-            undo: Command::Ping,
-            redo: Command::Ping,
-            desc: "nothing".into()
-        };
-        UndoContext {
-            changes: vec![gutter],
-            idx: None
-        }
-    }
-    pub fn register_change(&mut self, ch: UndoableChange) {
-        trace!("registering undoable change {:?}", ch);
-        if let Some(idx) = self.idx {
-            trace!("obliterating redoability");
-            self.changes.drain((idx+1)..);
-            self.idx = None;
-        }
-        self.changes.push(ch);
-    }
-    fn indexes(&self) -> (Option<usize>, Option<usize>) {
-        let (mut undo, mut redo) = (None, None);
-        let idx = self.idx.unwrap_or(self.changes.len()-1);
-        if self.changes.get(idx+1).is_some() {
-            redo = Some(idx+1);
-        }
-        if self.changes[idx].desc != "nothing" {
-            undo = Some(idx);
-        }
-        (undo, redo)
-    }
-    pub fn undo(&mut self) -> Option<Command> {
-        let (undo, _) = self.indexes();
-        trace!("attempting to undo, idx {:?}", self.idx);
-        if let Some(idx) = undo {
-            self.idx = Some(idx-1);
-            Some(self.changes[idx].undo.clone())
-        }
-        else {
-            None
-        }
-    }
-    pub fn redo(&mut self) -> Option<Command> {
-        let (_, redo) = self.indexes();
-        trace!("attempting to redo, idx {:?}", self.idx);
-        if let Some(idx) = redo {
-            if idx == self.changes.len()-1 {
-                self.idx = None;
-            }
-            else {
-                self.idx = Some(idx);
-            }
-            Some(self.changes[idx].redo.clone())
-        }
-        else {
-            None
-        }
-    }
-    pub fn state(&self) -> UndoState {
-        let (undo, redo) = self.indexes();
-        UndoState {
-            undo: undo.and_then(|idx| self.changes.get(idx)).map(|x| x.desc.clone()),
-            redo: redo.and_then(|idx| self.changes.get(idx)).map(|x| x.desc.clone())
-        }
-    }
-}
+
 pub struct Context {
     state: ConnectionState,
     messages: Vec<ConnectionMessage>,
     sock: Option<UdpFramed<SqaClientCodec>>,
     timeout: Option<Timeout>,
-    uc: UndoContext
 }
 impl Context {
     pub fn new() -> Self {
@@ -132,7 +48,6 @@ impl Context {
             messages: vec![],
             sock: None,
             timeout: None,
-            uc: UndoContext::new()
         }
     }
     fn notify_state_change(&mut self, args: &mut BackendContextArgs) {
@@ -191,6 +106,9 @@ impl Context {
             UpdateMixerConf { conf } => {
                 args.send(UIMessage::UpdatedMixerConf(conf));
             },
+            ReplyUndoContext { ctx } => {
+                args.send(ConnectionUIMessage::UndoState(ctx.state()).into());
+            },
             x @ SavefileMade {..} |
             x @ SavefileLoaded {..} => {
                 args.send(UIMessage::Save(SaveMessage::External(x)));
@@ -222,6 +140,7 @@ impl Context {
                     self.state = Connected { addr, ver, last_ping, last_err, last_pong };
                     self.ping_timeout(args)?;
                     self.send(Command::GetMixerConf)?;
+                    self.send(Command::GetUndoContext)?;
                     self.send(Command::ActionList)?;
                     args.send(ConnectionUIMessage::NewlyConnected.into());
                     Ok(true)
@@ -274,38 +193,6 @@ impl Context {
                 }
                 else {
                     args.send(Message::Error("Not connected, but tried to send messages.".into()).into());
-                }
-                Ok(false)
-            },
-            Perform(ua) => {
-                if let ConnectionState::Connected { .. } = self.state {
-                    self.send(ua.redo.clone())?;
-                    self.uc.register_change(ua);
-                    args.send(ConnectionUIMessage::UndoState(self.uc.state()).into());
-                }
-                else {
-                    args.send(Message::Error("Not connected, but tried to send messages.".into()).into());
-                }
-                Ok(false)
-            },
-            x @ Undo | x @ Redo => {
-                if let ConnectionState::Connected { .. } = self.state {
-                    let (act, msg) = match x {
-                        Undo => (self.uc.undo(), "undo"),
-                        Redo => (self.uc.redo(), "redo"),
-                        _ => unreachable!()
-                    };
-                    if let Some(act) = act {
-                        self.send(act)?;
-                        args.send(Message::Statusbar(format!("Action {}ne.", msg)).into());
-                        args.send(ConnectionUIMessage::UndoState(self.uc.state()).into());
-                    }
-                    else {
-                        args.send(Message::Error(format!("Nothing to {}.", msg)).into());
-                    }
-                }
-                else {
-                    args.send(Message::Error("Not connected, but tried to undo/redo.".into()).into());
                 }
                 Ok(false)
             },
@@ -408,10 +295,10 @@ impl ConnectionController {
             tx.send_internal(ConnectionUIMessage::Show);
         }));
         self.mundo.connect_activate(clone!(tx; |_| {
-            tx.send(ConnectionMessage::Undo);
+            tx.send(Command::Undo);
         }));
         self.mredo.connect_activate(clone!(tx; |_| {
-            tx.send(ConnectionMessage::Redo);
+            tx.send(Command::Redo);
         }));
         self.tx = Some(tx.clone());
     }

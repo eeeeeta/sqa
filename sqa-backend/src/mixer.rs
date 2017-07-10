@@ -95,6 +95,17 @@ impl MixerContext {
     }
     pub fn process_config(&mut self, conf: MixerConf) -> BackendResult<()> {
         let mut touched = vec![];
+        /* Trying to create two ports with the same name will make JACK unhappy.
+         * To avoid this, we remove channels that don't match UUIDs but do match names
+         * now. */
+        for (uu, ch) in &self.channels {
+            for nch in &conf.channels {
+                if ch.name == nch.name && ch.uuid != nch.uuid {
+                    self.engine.remove_channel(ch.eid)?;
+                    touched.push(*uu);
+                }
+            }
+        }
         for mut ch in conf.channels {
             /* The following weird structure is brought to you by the borrow checker */
             let x = if let Some(ref mut c2) = self.channels.get_mut(&ch.uuid) {

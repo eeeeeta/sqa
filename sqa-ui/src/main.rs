@@ -90,6 +90,10 @@ fn main() {
     info!("[+] Showing main window");
     win.set_title(&format!("SQA UI [{}]", sqa_backend::VERSION));
     win.show_all();
+    win.connect_delete_event(|_, _| {
+        gtk::main_quit();
+        Inhibit(false)
+    });
     info!("[+] Starting GTK+ event loop!");
     gtk::main();
 }

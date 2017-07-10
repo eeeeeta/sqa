@@ -7,6 +7,7 @@ use mixer::MixerConf;
 use std::collections::HashMap;
 use errors::*;
 use state::{CD, Context};
+use undo::UndoContext;
 use std::mem;
 use rmp_serde;
 use std::fs::File;
@@ -31,7 +32,8 @@ impl From<OpaqueAction> for SavedAction {
 pub struct Savefile {
     ver: String,
     actions: HashMap<Uuid, SavedAction>,
-    mixer_conf: MixerConf
+    mixer_conf: MixerConf,
+    undo: UndoContext
 }
 impl Savefile {
     pub fn save_to_file(ctx: &mut Context, path: &str) -> BackendResult<()> {
@@ -61,8 +63,9 @@ impl Savefile {
             actions.insert(uu, data?.into());
         }
         let mixer_conf = ctx.mixer.obtain_config();
+        let undo = ctx.undo.clone();
         let ver = SAVEFILE_VERSION.into();
-        Ok(Self { ver, actions, mixer_conf })
+        Ok(Self { ver, actions, mixer_conf, undo })
     }
     pub fn apply_to_ctx(&mut self, ctx: &mut Context, mut d: Option<&mut CD>, force: bool) -> BackendResult<()> {
         if self.ver != SAVEFILE_VERSION && !force {
@@ -79,10 +82,14 @@ impl Savefile {
                 let _ = res?;
             }
         }
-        ctx.mixer.process_config(self.mixer_conf.clone())?;
+        let res = ctx.mixer.process_config(self.mixer_conf.clone());
+        if !force {
+            let _ = res?;
+        }
+        ctx.undo = self.undo.clone();
         if let Some(ref mut d) = d {
-            let resp = ctx.refresh_action_list();
-            d.broadcast(Reply::ReplyActionList { list: resp })?;
+            ctx.on_all_actions_changed(d);
+            ctx.on_undo_changed(d);
         }
         Ok(())
     }

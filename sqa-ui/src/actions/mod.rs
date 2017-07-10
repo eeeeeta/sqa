@@ -1,7 +1,6 @@
 use gtk::prelude::*;
 use gtk::{self, Widget, Menu, TreeView, ListStore, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack};
 use gdk::WindowExt;
-use connection::UndoableChange;
 use gdk;
 use uuid::Uuid;
 use std::collections::HashMap;
@@ -261,11 +260,7 @@ impl ActionController {
         match msg {
             Create(typ) => {
                 let uuid = Uuid::new_v4();
-                let msg = UndoableChange {
-                    undo: Command::DeleteAction { uuid },
-                    redo: Command::CreateActionWithUuid { typ: typ.into(), uuid },
-                    desc: format!("create {} action", typ)
-                };
+                let msg = Command::CreateActionWithUuid { typ: typ.into(), uuid };
                 self.tx.as_mut().unwrap().send(msg);
             },
             SelectionChanged => {
@@ -315,11 +310,7 @@ impl ActionController {
                     params.url = Some(file.clone().into());
                     let params = ActionParameters::Audio(params);
                     let uuid = Uuid::new_v4();
-                    let msg = UndoableChange {
-                        undo: Command::DeleteAction { uuid },
-                        redo: Command::CreateActionWithExtras { typ: "audio".into(), params: params, uuid },
-                        desc: format!("drop file {}", file)
-                    };
+                    let msg = Command::CreateActionWithExtras { typ: "audio".into(), params: params, uuid };
                     self.tx.as_mut().unwrap().send(msg);
                 }
             },
@@ -365,16 +356,7 @@ impl ActionController {
                 ResetAction => tx.send(Command::ResetAction { uuid: msg.0 }),
                 DeleteAction => {
                     let opa = self.opas.get_mut(&msg.0).unwrap();
-                    tx.send(UndoableChange {
-                        undo: Command::ReviveAction {
-                            uuid: msg.0,
-                            typ: opa.typ().into(),
-                            params: opa.params.clone(),
-                            meta: opa.meta.clone(),
-                        },
-                        redo: Command::DeleteAction { uuid: msg.0 },
-                        desc: "delete action".into()
-                    });
+                    tx.send(Command::DeleteAction { uuid: msg.0 });
                 },
                 EditAction => {
                     if let Some((uu, w)) = self.cur_widget.take() {
@@ -391,11 +373,7 @@ impl ActionController {
                     if let Some(opa) = self.opas.get(&msg.0) {
                         let mut meta = opa.meta.clone();
                         meta.name = name;
-                        tx.send(UndoableChange {
-                            undo: Command::UpdateActionMetadata { uuid: msg.0, meta: opa.meta.clone() },
-                            redo: Command::UpdateActionMetadata { uuid: msg.0, meta: meta },
-                            desc: "change action name".into()
-                        });
+                        tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: meta });
                     }
                 },
                 CloseButton => ctl.close_window(),
