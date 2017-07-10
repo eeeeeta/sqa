@@ -13,7 +13,8 @@ pub enum SaveMessage {
     Open(String, bool),
     Save(String),
     Autosave,
-    External(Reply)
+    External(Reply),
+    NewlyConnected
 }
 pub struct SaveController {
     cur_file: Option<String>,
@@ -47,6 +48,7 @@ impl SaveController {
         let msg = if open { "Select a file to open" } else { "Select a file to save as" };
         let act = if open { FileChooserAction::Open } else { FileChooserAction::Save };
         let diag = FileChooserDialog::new(Some(msg), Some(&self.win), act);
+        diag.set_modal(true);
         diag.add_button("Cancel", ResponseType::Cancel.into());
         if open {
             diag.add_button("Open", ResponseType::Accept.into());
@@ -73,6 +75,7 @@ impl SaveController {
                     }
                 },
                 _x if _x == ResponseType::Cancel.into() => slf.destroy(),
+                _x if _x == ResponseType::DeleteEvent.into() => {},
                 x => warn!("odd dialog response type: {}", x)
             }
         });
@@ -158,7 +161,10 @@ impl SaveController {
                     x => warn!("unexpected reply {:?}", x)
                 }
             },
-            Autosave => {}
+            Autosave => {},
+            NewlyConnected => {
+                self.cur_file = None;
+            }
         }
         self.update();
     }

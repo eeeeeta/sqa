@@ -17,4 +17,4 @@ sample = "0.6.2"
 chrono = "0.2"
 
 [dev-dependencies]
-sqa-engine = { path = "../sqa-engine" }
+sqa-engine = { path = "../sqa-engine", version = "0.2.4" }

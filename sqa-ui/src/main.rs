@@ -42,7 +42,6 @@ fn main() {
         .chain(::std::io::stdout())
         .apply()
         .unwrap();
-
     info!("SQA UI, using version {}", sqa_backend::VERSION);
     info!("an eta project <http://theta.eu.org>");
     info!("[+] Initialising GTK+");
@@ -52,6 +51,8 @@ fn main() {
     provider.load_from_data(include_str!("ui.css")).unwrap();
     let screen = gdk::Screen::get_default().unwrap();
     gtk::StyleContext::add_provider_for_screen(&screen, &provider, gtk::STYLE_PROVIDER_PRIORITY_USER);
+    glib::set_application_name("SQA");
+    glib::set_prgname(Some("SQA"));
     info!("[+] Initialising event loop & backend context");
     let tn = util::ThreadNotifier::new();
     let ttn = tn.clone();
@@ -77,7 +78,7 @@ fn main() {
         tx: btx,
         stn: tn.clone(),
         stx: utx,
-        conn: connection::ConnectionController::new(&b),
+        conn: connection::ConnectionController::new(&b, win.clone()),
         act: actions::ActionController::new(&b),
         msg: messages::MessageController::new(&b),
         save: save::SaveController::new(&b, win.clone())
@@ -88,7 +89,6 @@ fn main() {
         ctx.borrow_mut().on_event();
     });
     info!("[+] Showing main window");
-    win.set_title(&format!("SQA UI [{}]", sqa_backend::VERSION));
     win.show_all();
     win.connect_delete_event(|_, _| {
         gtk::main_quit();

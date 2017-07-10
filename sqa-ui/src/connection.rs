@@ -3,7 +3,7 @@ use tokio_core::reactor::{Timeout};
 use sqa_backend::codec::{SqaClientCodec, Reply, Command};
 use sqa_backend::undo::{UndoState};
 use gtk::prelude::*;
-use gtk::{Button, Builder, MenuItem, IconSize, Image};
+use gtk::{Button, Builder, MenuItem, IconSize, Window, Image};
 use std::net::SocketAddr;
 use futures::{Sink, Stream, Async, Future};
 use sync::{BackendContextArgs, UIMessage, UISender};
@@ -142,6 +142,7 @@ impl Context {
                     self.send(Command::GetMixerConf)?;
                     self.send(Command::GetUndoContext)?;
                     self.send(Command::ActionList)?;
+                    args.send(SaveMessage::NewlyConnected.into());
                     args.send(ConnectionUIMessage::NewlyConnected.into());
                     Ok(true)
                 }
@@ -252,6 +253,7 @@ pub struct ConnectionController {
     ipe: FallibleEntry,
     connect_btn: Button,
     disconnect_btn: Button,
+    close_btn: Button,
     status_btn: Button,
     status_img: Image,
     mundo: MenuItem,
@@ -262,18 +264,23 @@ pub struct ConnectionController {
 }
 
 impl ConnectionController {
-    pub fn new(b: &Builder) -> Self {
+    pub fn new(b: &Builder, win: Window) -> Self {
         let mut pwin = PropertyWindow::new();
         let ipe = FallibleEntry::new();
         let connect_btn = Button::new_with_mnemonic("_Connect");
         let disconnect_btn = Button::new_with_mnemonic("_Disconnect");
+        let close_btn = Button::new_with_mnemonic("Cl_ose");
+        pwin.window.set_modal(true);
+        pwin.window.set_title("Connection Manager");
+        pwin.window.set_transient_for(&win);
         pwin.append_property("IP address and port", &*ipe);
-        pwin.append_button(&connect_btn);
+        pwin.append_button(&close_btn);
         pwin.append_button(&disconnect_btn);
+        pwin.append_button(&connect_btn);
         let tx = None;
         let state = ConnectionState::Disconnected;
         let mut ret = build!(ConnectionController using b
-                             with pwin, ipe, connect_btn, disconnect_btn, tx, state
+                             with pwin, ipe, connect_btn, disconnect_btn, close_btn, tx, state
                              get menuitem, status_btn, status_img, mundo, mredo);
         ret.on_state_change(ConnectionState::Disconnected);
         ret
@@ -300,6 +307,19 @@ impl ConnectionController {
         self.mredo.connect_activate(clone!(tx; |_| {
             tx.send(Command::Redo);
         }));
+        let win = self.pwin.window.clone();
+        self.close_btn.connect_clicked(move |_| {
+            win.hide();
+        });
+        self.pwin.window.connect_key_press_event(move |slf, ek| {
+            if ek.get_keyval() == ::gdk::enums::key::Escape {
+                slf.hide();
+                Inhibit(true)
+            }
+            else {
+                Inhibit(false)
+            }
+        });
         self.tx = Some(tx.clone());
     }
     pub fn on_msg(&mut self, msg: ConnectionUIMessage) {
