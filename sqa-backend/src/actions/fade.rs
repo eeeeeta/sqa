@@ -30,9 +30,9 @@ impl EditableAction for Controller {
     fn get_params(&self) -> &FadeParams {
         &self.params
     }
-    fn set_params(&mut self, mut params: FadeParams, ctx: &mut Context) {
+    fn set_params(&mut self, mut params: FadeParams, ctx: ControllerParams) {
         if let Some(tgt) = self.params.target.as_ref() {
-            if let Some(tgt) = ctx.actions.get(tgt) {
+            if let Some(tgt) = ctx.ctx.actions.get(tgt) {
                 if let ActionType::Audio(ref ctl) = tgt.ctl {
                     if ctl.params.chans.len() > params.fades.len() {
                         let len = params.fades.len();
@@ -56,7 +56,7 @@ impl ActionController for Controller {
         }
         format!("Fade [invalid]")
     }
-    fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError> {
+    fn verify_params(&self, ctx: &Context) -> Vec<ParameterError> {
         let mut ret = vec![];
         if let Some(tgt) = self.params.target.as_ref() {
             if let Some(tgt) = ctx.actions.get(tgt) {

@@ -4,13 +4,9 @@ use sqa_engine::{PlainSender, BufferSender};
 use sqa_engine::param::Parameter;
 use sqa_engine::sync::AudioThreadMessage;
 use sqa_ffmpeg::{Frame, MediaFile, MediaResult};
-use super::{ParameterError, ControllerParams, DurationInfo, PlaybackState, ActionController, EditableAction};
+use super::{ParameterError, ControllerParams, DurationInfo, ActionController, EditableAction};
 use state::{ServerMessage, Context, IntSender};
 use std::thread;
-use futures::Sink;
-use futures::sink::Wait;
-use futures::Future;
-use std::time::Duration;
 use std::ops::Deref;
 use errors::*;
 use std::sync::mpsc::{Sender, Receiver, self};
@@ -18,6 +14,7 @@ use uuid::Uuid;
 use url::percent_encoding;
 use url::Url;
 use std::path::{Path, PathBuf};
+
 /// Converts a linear amplitude to decibels.
 pub fn lin_db(lin: f32) -> f32 {
     lin.log10() * 20.0
@@ -34,7 +31,7 @@ pub struct SpoolerContext {
     bsends: Vec<BufferSender>,
     file: MediaFile,
     uuid: Uuid,
-    sender: Wait<IntSender>,
+    sender: IntSender,
     rx: Receiver<SpoolerMessage>,
 }
 impl SpoolerContext {
@@ -158,18 +155,18 @@ impl EditableAction for Controller {
     fn get_params(&self) -> &AudioParams {
         &self.params
     }
-    fn set_params(&mut self, mut p: AudioParams, ctx: &mut Context) {
+    fn set_params(&mut self, mut p: AudioParams, ctx: ControllerParams) {
         if self.params.url != p.url {
             self.url = match p.url {
                 Some(ref u) => Some(Self::parse_url(u)),
                 None => None
             };
-            self.file = self.open_file(ctx);
+            self.file = self.open_file(ctx.ctx);
             if let Some(Ok(ref mf)) = self.file {
                 if p.chans.len() != mf.channels() {
                     if p.chans.len() == 0 {
                         p.chans = (0..mf.channels())
-                            .map(|idx| ctx.mixer.obtain_def(idx))
+                            .map(|idx| ctx.ctx.mixer.obtain_def(idx))
                             .map(|patch| AudioChannel { patch, .. Default::default() })
                             .collect::<Vec<_>>();
                     }
@@ -193,7 +190,7 @@ impl EditableAction for Controller {
     }
 }
 impl ActionController for Controller {
-    fn desc(&self, ctx: &Context) -> String {
+    fn desc(&self, _: &Context) -> String {
         if let Some(Ok(ref url)) = self.url {
             format!("Play audio at {}", url.file_name().unwrap().to_string_lossy())
         }
@@ -201,7 +198,7 @@ impl ActionController for Controller {
             format!("Play audio [invalid]")
         }
     }
-    fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError> {
+    fn verify_params(&self, ctx: &Context) -> Vec<ParameterError> {
         let mut ret = vec![];
         if self.params.url.is_some() {
             if let Some(Err(ref e)) = self.url {
@@ -282,7 +279,7 @@ impl ActionController for Controller {
             bsends: senders,
             file: mf,
             uuid: params.uuid,
-            sender: params.internal_tx.clone().wait(),
+            sender: params.internal_tx.clone(),
             rx: rx
         };
         thread::spawn(move || {
@@ -340,12 +337,7 @@ impl ActionController for Controller {
                         if sender.uuid() == uu {
                             if let Err(e) = rd.control.send(SpoolerMessage::Wakeup) {
                                 let msg = format!("Failed to wakeup spooler thread: {:?}", e);
-                                let fut = ctx.internal_tx.clone().send(
-                                    ServerMessage::ActionWarning(ctx.uuid,
-                                                                 msg));
-                                ctx.ctx.remote.spawn(move |_| {
-                                    fut.map_err(|_| ()).map(|_| ())
-                                });
+                                ctx.internal_tx.send(ServerMessage::ActionWarning(ctx.uuid, msg));
                             }
                             return true;
                         }

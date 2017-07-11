@@ -1,11 +1,10 @@
 //! Handling the global state of the backend.
 
 use tokio_core::reactor::Remote;
-use std::any::Any;
 use uuid::Uuid;
 use handlers::{ConnHandler, ConnData};
 use codec::{Command, Reply};
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
 use actions::{Action, OpaqueAction, ActionParameters, ActionMetadata, PlaybackState};
 use sqa_engine::sync::{AudioThreadMessage};
 use sqa_ffmpeg::MediaContext;
@@ -13,13 +12,16 @@ use mixer::{MixerContext};
 use undo::{UndoableChange, UndoContext};
 use errors::*;
 use save::Savefile;
+use handlers;
 use std::mem;
 pub struct Context {
     pub remote: Remote,
     pub mixer: MixerContext,
     pub media: MediaContext,
     pub undo: UndoContext,
-    pub actions: HashMap<Uuid, Action>
+    pub actions: HashMap<Uuid, Action>,
+    pub async_actions: HashSet<Uuid>,
+    pub sender: Option<IntSender>
 }
 macro_rules! do_with_ctx {
     ($self:expr, $uu:expr, $clo:expr) => {{
@@ -36,35 +38,53 @@ macro_rules! do_with_ctx {
 pub enum ServerMessage {
     Audio(AudioThreadMessage),
     ActionStateChange(Uuid, PlaybackState),
-    ActionLoad(Uuid, Box<Any+Send>),
-    ActionCustom(Uuid, Box<Any+Send>),
-    ActionWarning(Uuid, String)
+    ActionWarning(Uuid, String),
 }
-pub type IntSender = ::futures::sync::mpsc::Sender<ServerMessage>;
+
+pub type IntSender = handlers::IntSender<ServerMessage>;
 pub type CD = ConnData<ServerMessage>;
+
 impl ConnHandler for Context {
     type Message = ServerMessage;
     fn init(&mut self, d: &mut CD) {
-        self.mixer.start_messaging(d.internal_tx.clone());
+        self.mixer.start_messaging(d.int_sender.clone());
+        self.sender = Some(d.int_sender.clone());
+    }
+    fn wakeup(&mut self, d: &mut CD) {
+        let mut to_remove = vec![];
+        for uu in self.async_actions.clone() {
+            let continue_polling = if let Some(mut act) = self.actions.remove(&uu) {
+                let a = act.poll(self, &d.int_sender);
+                self.on_action_changed(d, &mut act);
+                self.actions.insert(uu, act);
+                a
+            }
+            else {
+                false
+            };
+            if !continue_polling {
+                to_remove.push(uu);
+            }
+        }
+        for uu in to_remove {
+            self.async_actions.remove(&uu);
+        }
     }
     fn internal(&mut self, d: &mut CD, m: ServerMessage) {
         match m {
             ServerMessage::Audio(msg) => {
                 for (uu, mut act) in mem::replace(&mut self.actions, HashMap::new()).into_iter() {
-                    act.accept_audio_message(self, &d.internal_tx, &msg);
+                    act.accept_audio_message(self, &d.int_sender, &msg);
                     self.actions.insert(uu, act);
                 }
             },
             ServerMessage::ActionStateChange(uu, ps) => {
-                if let Some(act) = self.actions.get_mut(&uu) {
-                    act.state_change(ps);
-                }
-            },
-            ServerMessage::ActionCustom(uu, msg) => {
-                if let Some(act) = self.actions.get_mut(&uu) {
-                    if let Err(e) = act.message(msg) {
-                        println!("error in some dead code, what? {:?}", e);
+                if let Some(mut act) = self.actions.remove(&uu) {
+                    if let Err(e) = act.state_change(ps, self, &d.int_sender) {
+                        println!("failed state change: {:?}", e);
                     }
+                    self.on_action_changed(d, &mut act);
+                    self.actions.insert(uu, act);
                 }
             },
             _ => {}
@@ -85,10 +105,15 @@ impl Context {
             mixer: MixerContext::new().unwrap(),
             actions: HashMap::new(),
             media: ::sqa_ffmpeg::init().unwrap(),
-            undo: UndoContext::new()
+            undo: UndoContext::new(),
+            async_actions: HashSet::new(),
+            sender: None
         };
         ctx.mixer.default_config().unwrap();
         ctx
+    }
+    pub fn sender(&self) -> &IntSender {
+        self.sender.as_ref().unwrap()
     }
     pub fn process_command(&mut self, d: &mut CD, c: Command) -> BackendResult<()> {
         use self::Command::*;
@@ -150,7 +175,7 @@ impl Context {
             },
             UpdateActionParams { uuid, params, .. } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let ret = a.set_params(params, self).map_err(|e| e.to_string());
+                    let ret = a.set_params(params, self, &d.int_sender).map_err(|e| e.to_string());
                     self.on_action_changed(d, a);
                     ret
                 });
@@ -166,7 +191,7 @@ impl Context {
             },
             LoadAction { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let ret = a.load(self, &d.internal_tx).map_err(|e| e.to_string());
+                    let ret = a.load(self, &d.int_sender).map_err(|e| e.to_string());
                     self.on_action_changed(d, a);
                     ret
                 });
@@ -174,7 +199,7 @@ impl Context {
             },
             ResetAction { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let ret = a.reset(self, &d.internal_tx).map_err(|e| e.to_string());
+                    let ret = a.reset(self, &d.int_sender).map_err(|e| e.to_string());
                     self.on_action_changed(d, a);
                     ret
                 });
@@ -182,7 +207,7 @@ impl Context {
             },
             ExecuteAction { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let ret = a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), self, &d.internal_tx).map_err(|e| e.to_string());
+                    let ret = a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), self, &d.int_sender).map_err(|e| e.to_string());
                     self.on_action_changed(d, a);
                     ret
                 });
@@ -295,7 +320,8 @@ impl Context {
         let uu = act.uuid();
         if let Some(ref pars) = pars {
             // FIXME: we should ideally send something here
-            if let Err(e) = act.set_params(pars.clone(), self) {
+            let sender = self.sender.clone().unwrap();
+            if let Err(e) = act.set_params(pars.clone(), self, &sender) {
                 println!("fixme: set_params failed in create_action: {:?}", e);
             }
         }

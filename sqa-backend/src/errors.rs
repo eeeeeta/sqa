@@ -42,6 +42,12 @@ error_chain! {
         UnknownOSCPath {
             description("The OSC path provided was unknown.")
         }
+        EmptyAsyncResult {
+            description("No asynchronous computation was performed.")
+        }
+        WaitingAsyncResult {
+            description("An asynchronous computation had not completed.")
+        }
     }
 }
 impl From<::rosc::OscError> for BackendError {

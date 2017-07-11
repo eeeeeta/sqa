@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "sqa-bounded-spsc-queue"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -814,7 +814,7 @@ dependencies = [
  "error-chain 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hound 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
- "sqa-bounded-spsc-queue 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqa-bounded-spsc-queue 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "sqa-jack 0.5.2",
  "time 0.1.37 (registry+https://github.com/rust-lang/crates.io-index)",
  "uuid 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1077,7 +1077,7 @@ dependencies = [
 "checksum serde_json 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "48b04779552e92037212c3615370f6bd57a40ebba7f20e554ff9f55e41a69a7b"
 "checksum slab 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "17b4fcaed89ab08ef143da37bc52adbcc04d4a69014f4c1208d6b51f0c47bc23"
 "checksum smallvec 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "26aa2afb825226fa29f0315de04d5a4af5fd44adadf837296accc01a49929724"
-"checksum sqa-bounded-spsc-queue 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c42858b2ea5bac5fcf6008c5b3e850b9f3c8266e60076eacf17853675903a04d"
+"checksum sqa-bounded-spsc-queue 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "e0b945028b5fc19ffc546d398a6fe06ca46e3fd6258a669a7cb45998c521b902"
 "checksum syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)" = "d3b891b9015c88c576343b9b3e41c2c11a51c219ef067b264bd9c8aa9b441dad"
 "checksum synom 0.11.3 (registry+https://github.com/rust-lang/crates.io-index)" = "a393066ed9010ebaed60b9eafa373d4b1baac186dd7e008555b0f702b51945b6"
 "checksum thread-id 3.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "2af4d6289a69a35c4d3aea737add39685f2784122c28119a7713165a63d68c9d"

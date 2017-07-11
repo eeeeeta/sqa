@@ -39,7 +39,7 @@ pub fn main() {
     let hdl = core.handle();
     let addr = "127.0.0.1:1234".parse().unwrap();
     let sock = UdpSocket::bind(&addr, &hdl).unwrap();
-    let conn = Connection::new(sock, core.remote(), ctx);
+    let conn = Connection::new(sock, core.handle(), ctx);
     println!("[+] SQA Backend is up & running!");
     core.run(conn).unwrap();
 }

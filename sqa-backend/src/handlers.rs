@@ -2,18 +2,15 @@ use codec::{Command, RecvMessage, SendMessage, SendMessageExt, SqaWireCodec};
 use futures::stream::Stream;
 use futures::sink::Sink;
 use futures::{Poll, Async, Future};
-use futures::sync::mpsc::{self, Sender, Receiver};
+use futures::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
 use tokio_core::net::{UdpFramed, UdpSocket};
-use tokio_core::reactor::Remote;
+use tokio_core::reactor::{Handle};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use time::{Duration, SteadyTime};
-use serde::Serialize;
-use rosc::{OscType, OscMessage};
+use rosc::{OscMessage};
 use codec::Reply;
 use errors::*;
 use std::io::Result as IoResult;
-
-pub const INTERNAL_BUFFER_SIZE: usize = 128;
 
 #[derive(Debug)]
 pub struct Party {
@@ -25,18 +22,35 @@ pub trait ConnHandler {
     fn internal(&mut self, d: &mut ConnData<Self::Message>, m: Self::Message);
     fn external(&mut self, d: &mut ConnData<Self::Message>, p: Command) -> BackendResult<()>;
     fn init(&mut self, d: &mut ConnData<Self::Message>);
+    fn wakeup(&mut self, d: &mut ConnData<Self::Message>);
 }
 /*struct WaitingHandler {
     pkt: u32,
     time: SteadyTime,
     sender: oneshot::Sender<bool>
 }*/
+pub struct IntSender<M> {
+    tx: UnboundedSender<M>,
+}
+impl<M> Clone for IntSender<M> {
+    fn clone(&self) -> Self {
+        IntSender {
+            tx: self.tx.clone(),
+        }
+    }
+}
+impl<M> IntSender<M> where M: Send + 'static {
+    pub fn send(&self, msg: M) {
+        UnboundedSender::send(&self.tx, msg).unwrap();
+    }
+}
 pub struct ConnData<M> {
     pub framed: UdpFramed<SqaWireCodec>,
-    pub internal_rx: Receiver<M>,
-    pub internal_tx: Sender<M>,
+    pub internal_rx: UnboundedReceiver<M>,
+    pub internal_tx: UnboundedSender<M>,
+    pub int_sender: IntSender<M>,
     pub parties: Vec<Party>,
-    pub remote: Remote,
+    pub handle: Handle,
     pub addr: SocketAddr,
     pub path: String
 }
@@ -124,6 +138,7 @@ impl<H> Future for Connection<H> where H: ConnHandler {
     type Error = ::std::io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.hdlr.wakeup(&mut self.data);
         'outer: loop {
             match self.data.internal_rx.poll() {
                 Ok(Async::Ready(msg)) => {
@@ -149,16 +164,20 @@ impl<H> Future for Connection<H> where H: ConnHandler {
     }
 }
 impl<H> Connection<H> where H: ConnHandler {
-    pub fn new(socket: UdpSocket, remote: Remote, handler: H) -> Self {
+    pub fn new(socket: UdpSocket, handle: Handle, handler: H) -> Self {
         let framed = socket.framed(SqaWireCodec);
-        let (tx, rx) = mpsc::channel::<H::Message>(INTERNAL_BUFFER_SIZE);
+        let (tx, rx) = mpsc::unbounded::<H::Message>();
+        let is = IntSender {
+            tx: tx.clone(),
+        };
         let mut ret = Connection {
             data: ConnData {
                 framed: framed,
                 internal_tx: tx,
                 internal_rx: rx,
                 parties: vec![],
-                remote: remote,
+                handle: handle,
+                int_sender: is,
                 addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
                 path: String::new()
             },
@@ -167,7 +186,7 @@ impl<H> Connection<H> where H: ConnHandler {
         ret.hdlr.init(&mut ret.data);
         ret
     }
-    pub fn get_internal_tx(&self) -> Sender<H::Message> {
+    pub fn get_internal_tx(&self) -> UnboundedSender<H::Message> {
         self.data.internal_tx.clone()
     }
 }

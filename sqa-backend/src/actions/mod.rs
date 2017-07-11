@@ -1,13 +1,9 @@
-use futures::Future;
-use std::error::Error;
-use std::path::PathBuf;
-use std::any::Any;
+use futures::{Future, Async, Poll};
 use uuid::Uuid;
 use std::borrow::Cow;
 use sqa_engine::sync::AudioThreadMessage;
-use state::{Context};
+use state::{Context, ServerMessage};
 use rosc::OscType;
-use futures::sync::mpsc::Sender;
 use state::IntSender;
 use errors::*;
 use serde::{Serialize, Deserialize};
@@ -43,6 +39,91 @@ pub struct ControllerParams<'a> {
     internal_tx: &'a IntSender,
     uuid: Uuid
 }
+impl<'a> ControllerParams<'a> {
+    pub fn change_state(&mut self, st: PlaybackState) {
+        self.internal_tx.send(ServerMessage::ActionStateChange(self.uuid, st));
+    }
+    pub fn register_interest(&mut self) {
+        self.ctx.async_actions.insert(self.uuid);
+    }
+    pub fn unregister_interest(&mut self) {
+        self.ctx.async_actions.remove(&self.uuid);
+    }
+}
+pub trait PerformExt {
+    type Item;
+    type Error;
+    fn perform(self, &mut ControllerParams) -> AsyncResult<Self::Item, Self::Error>;
+}
+impl<X, T, E> PerformExt for X where X: Future<Item=T, Error=E> + 'static {
+    type Item = T;
+    type Error = E;
+    fn perform(self, p: &mut ControllerParams) -> AsyncResult<T, E> {
+        p.register_interest();
+        AsyncResult::Waiting(Box::new(self))
+    }
+}
+pub enum AsyncResult<T, E> {
+    Empty,
+    Waiting(Box<Future<Item=T, Error=E>>),
+    Result(Result<T, E>)
+}
+impl<T, E> AsyncResult<T, E> {
+    pub fn is_empty(&self) -> bool {
+        if let AsyncResult::Empty = *self {
+            true
+        }
+        else {
+            false
+        }
+    }
+    pub fn is_waiting(&self) -> bool {
+        if let AsyncResult::Waiting(_) = *self {
+            true
+        }
+        else {
+            false
+        }
+    }
+    pub fn is_complete(&self) -> bool {
+        if let AsyncResult::Result(_) = *self {
+            true
+        }
+        else {
+            false
+        }
+    }
+}
+impl<T, E> AsyncResult<T, E> where E: Into<BackendError> {
+    pub fn as_result(self) -> BackendResult<T> {
+        match self {
+            AsyncResult::Empty => bail!(BackendErrorKind::EmptyAsyncResult),
+            AsyncResult::Waiting(_) => bail!(BackendErrorKind::WaitingAsyncResult),
+            AsyncResult::Result(res) => res.map_err(|e| e.into())
+        }
+    }
+}
+impl<T, E> Future for AsyncResult<T, E> {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let res: Result<T, E>;
+        if let AsyncResult::Waiting(ref mut x) = *self {
+            match x.poll() {
+                Ok(Async::Ready(t)) => res = Ok(t),
+                Ok(Async::NotReady) => return Ok(Async::NotReady),
+                Err(e) => res = Err(e)
+            }
+        }
+        else {
+            return Ok(Async::Ready(()));
+        }
+        *self = AsyncResult::Result(res);
+        Ok(Async::Ready(()))
+    }
+}
+pub type BackendFuture<T> = Box<Future<Item=T, Error=BackendError>>;
 pub trait OscEditable {
     fn edit(&mut self, path: &str, args: Vec<OscType>) -> BackendResult<()>;
 }
@@ -50,16 +131,16 @@ pub trait EditableAction {
     type Parameters: Serialize + for<'de> Deserialize<'de> + Clone + Debug + Default;
 
     fn get_params(&self) -> &Self::Parameters;
-    fn set_params(&mut self, Self::Parameters, ctx: &mut Context);
+    fn set_params(&mut self, Self::Parameters, ControllerParams);
 }
 pub trait ActionController {
     fn desc(&self, ctx: &Context) -> String;
-    fn verify_params(&self, ctx: &mut Context) -> Vec<ParameterError>;
+    fn verify_params(&self, ctx: &Context) -> Vec<ParameterError>;
     fn load(&mut self, _ctx: ControllerParams) -> BackendResult<bool> {
         Ok(true)
     }
-    fn accept_load(&mut self, _ctx: ControllerParams, _data: Box<Any>) -> BackendResult<()> {
-        Ok(())
+    fn poll(&mut self, _ctx: ControllerParams) -> bool {
+        false
     }
     fn execute(&mut self, time: u64, ctx: ControllerParams) -> BackendResult<bool>;
     fn pause(&mut self, _ctx: ControllerParams) {
@@ -165,19 +246,6 @@ impl Action {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         action!(mut self.ctl).accept_audio_message(msg, cp)
     }
-    pub fn accept_load(&mut self, ctx: &mut Context, sender: &IntSender, data: Box<Any>) -> BackendResult<()> {
-        let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
-        if let PlaybackState::Loading = self.state {
-            match action!(mut self.ctl).accept_load(cp, data) {
-                Ok(_) => self.state = PlaybackState::Loaded,
-                Err(e) => self.state = PlaybackState::Errored(e.to_string())
-            }
-        }
-        else {
-            bail!(format!("Wrong state for accepting load data: expected Loading, found {:?}", self.state));
-        }
-        Ok(())
-    }
     pub fn load(&mut self, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
         self.verify_params(ctx);
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
@@ -210,6 +278,10 @@ impl Action {
     pub fn set_uuid(&mut self, uu: Uuid) {
         self.uu = uu;
     }
+    pub fn poll(&mut self, ctx: &mut Context, sender: &IntSender) -> bool {
+        let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
+        action!(mut self.ctl).poll(cp)
+    }
     pub fn execute(&mut self, time: u64, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         if let PlaybackState::Loaded = self.state {
@@ -232,10 +304,35 @@ impl Action {
         }
         Ok(())
     }
-    pub fn state_change(&mut self, ps: PlaybackState) {
+    pub fn state_change(&mut self, ps: PlaybackState, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
+        use self::PlaybackState::*;
+        if let Errored(_) = ps {
+            /* a state change to Errored is *always* valid */
+        }
+        else {
+            match self.state {
+                Inactive | Unverified(_) | Errored(_) => {
+                    bail!(format!("A state change (to {:?}) cannot be made whilst {:?}", ps, self.state));
+                },
+                Loading | Loaded | Active(_) | Paused => {
+                    match ps {
+                        Loaded => {},
+                        Loading => {},
+                        Paused => {},
+                        Active(_) => {},
+                        Inactive => {
+                            self.reset(ctx, sender)?;
+                            return Ok(())
+                        },
+                        x => bail!(format!("Wrong state change for {:?}: {:?}", self.state, x))
+                    }
+                }
+            }
+        }
         self.state = ps;
+        Ok(())
     }
-    pub fn get_data(&mut self, ctx: &mut Context) -> BackendResult<OpaqueAction> {
+    pub fn get_data(&mut self, ctx: &Context) -> BackendResult<OpaqueAction> {
         self.verify_params(ctx);
         Ok(OpaqueAction {
             state: self.state.clone(),
@@ -245,7 +342,7 @@ impl Action {
             desc: action!(self.ctl).desc(ctx)
         })
     }
-    pub fn verify_params(&mut self, ctx: &mut Context) {
+    pub fn verify_params(&mut self, ctx: &Context) {
         use self::PlaybackState::*;
         let mut new = None;
         let mut active = false;
@@ -270,7 +367,8 @@ impl Action {
     pub fn set_meta(&mut self, data: ActionMetadata) {
         self.meta = data; /* neat */
     }
-    pub fn set_params(&mut self, data: ActionParameters, ctx: &mut Context) -> BackendResult<()> {
+    pub fn set_params(&mut self, data: ActionParameters, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
+        let ctx: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         match self.ctl {
             ActionType::Audio(ref mut a) => {
                 if let ActionParameters::Audio(d) = data {
@@ -291,9 +389,6 @@ impl Action {
                 }
             }
         }
-    }
-    pub fn message(&mut self, msg: Box<Any>) -> Result<(), Box<Error>> {
-        unimplemented!()
     }
     pub fn uuid(&self) -> Uuid {
         self.uu
