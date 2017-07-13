@@ -3,7 +3,7 @@ use gtk::{self, Widget, Menu, TreeView, ListStore, Builder, MenuItem, TreeSelect
 use gdk::WindowExt;
 use gdk;
 use uuid::Uuid;
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
 use std::mem;
 use sync::UISender;
 use sqa_backend::codec::{Command, Reply};
@@ -11,6 +11,8 @@ use sqa_backend::mixer::MixerConf;
 use sqa_backend::actions::{ActionParameters, PlaybackState, OpaqueAction};
 use sqa_backend::actions::audio::AudioParams;
 use messages::Message;
+use std::time::Duration;
+use widgets::{DurationEntry, DurationEntryMessage};
 
 pub mod audio;
 pub mod fade;
@@ -24,7 +26,7 @@ pub enum ActionInternalMessage {
     FilesDropped(Vec<String>),
     BeginSelection(Uuid),
     CancelSelection,
-    ChangeCurPage(Option<u32>)
+    ChangeCurPage(Option<u32>),
 }
 #[derive(Clone)]
 pub enum ActionMessageInner {
@@ -36,7 +38,18 @@ pub enum ActionMessageInner {
     ResetAction,
     EditAction,
     ChangeName(Option<String>),
+    ChangePrewait(Duration),
     CloseButton,
+    UpdateTiming,
+    StartUpdatingTiming
+}
+impl DurationEntryMessage for ActionMessageInner {
+    type Message = ActionMessage;
+    type Identifier = Uuid;
+
+    fn on_payload(dur: Duration, id: Uuid) -> Self::Message {
+        (id, ActionMessageInner::ChangePrewait(dur))
+    }
 }
 pub type ActionMessage = (Uuid, ActionMessageInner);
 struct SelectionDetails {
@@ -53,6 +66,7 @@ pub struct ActionController {
     sidebar: Stack,
     ctls: HashMap<Uuid, Box<ActionUI>>,
     opas: HashMap<Uuid, OpaqueAction>,
+    timed: HashSet<Uuid>,
     cur_sel: Option<SelectionDetails>,
     menu: Menu,
     medit: MenuItem,
@@ -113,8 +127,9 @@ impl ActionController {
         let cur_widget = None;
         let cur_sel = None;
         let mixer = Default::default();
+        let timed = HashSet::new();
         build!(ActionController using b
-               with ctls, opas, tx, mixer, cur_widget, cur_sel, cur_page
+               with ctls, opas, tx, mixer, cur_widget, cur_sel, cur_page, timed
                get view, store, menu, medit, mload, mexec, mdelete, mcreate_audio, mcreate_fade, sidebar)
     }
     pub fn bind(&mut self, tx: &UISender) {
@@ -177,16 +192,26 @@ impl ActionController {
                 Active(_) => "gtk-media-play",
                 Errored(_) => "gtk-dialog-error"
             };
+            let duration = match action.state {
+                Active(Some(ref dur)) => {
+                    let (elapsed, pos) = dur.elapsed(true);
+                    let text = if pos { "T+" } else { "T-" };
+                    format!("{}{}", text, DurationEntry::format(elapsed, false))
+                },
+                _ => "".into()
+            };
             let iter = self.store.insert_with_values(None, &[
                 0, // uuid
                 1, // description
                 2, // icon-state (playback state icon)
                 3, // icon-type (action type icon)
+                4, // duration
             ], &[
                 &uu.to_string(),
                 &action.display_name(),
                 &state,
-                &typ
+                &typ,
+                &duration
             ]);
             if let Some(u2) = sel {
                 if *uu == u2 {
@@ -346,18 +371,40 @@ impl ActionController {
             }
         }
     }
+    pub fn schedule_timeout_for(uu: Uuid, tx: &UISender, opa: &OpaqueAction) -> bool {
+        if let PlaybackState::Active(ref dur) = opa.state {
+            let delta_millis;
+            if let Some(ref dur) = *dur {
+                let (elapsed, pos) = dur.elapsed(false);
+                let elapsed = elapsed.subsec_nanos();
+                let delta_nanos = if pos {
+                    1_000_000_000 - elapsed
+                } else { elapsed };
+                delta_millis = delta_nanos / 1_000_000;
+            }
+            else {
+                delta_millis = 1000;
+            }
+            gtk::timeout_add(delta_millis, clone!(tx; || {
+                tx.send_internal((uu, ActionMessageInner::UpdateTiming));
+                Continue(false)
+            }));
+            true
+        }
+        else {
+            false
+        }
+    }
     pub fn on_action_msg(&mut self, msg: ActionMessage) {
-        let tx = self.tx.as_mut().unwrap();
+        let mut udt = false;
         if let Some(ctl) = self.ctls.get_mut(&msg.0) {
+            let tx = self.tx.as_mut().unwrap();
             use self::ActionMessageInner::*;
             match msg.1 {
                 LoadAction => tx.send(Command::LoadAction { uuid: msg.0 }),
                 ExecuteAction => tx.send(Command::ExecuteAction { uuid: msg.0 }),
                 ResetAction => tx.send(Command::ResetAction { uuid: msg.0 }),
-                DeleteAction => {
-                    let opa = self.opas.get_mut(&msg.0).unwrap();
-                    tx.send(Command::DeleteAction { uuid: msg.0 });
-                },
+                DeleteAction => tx.send(Command::DeleteAction { uuid: msg.0 }),
                 EditAction => {
                     if let Some((uu, w)) = self.cur_widget.take() {
                         if uu == msg.0 {
@@ -376,9 +423,39 @@ impl ActionController {
                         tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: meta });
                     }
                 },
+                ChangePrewait(dur) => {
+                    if let Some(opa) = self.opas.get(&msg.0) {
+                        let mut meta = opa.meta.clone();
+                        meta.prewait = dur;
+                        tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: meta });
+                    }
+                },
+                UpdateTiming => {
+                    trace!("updatetiming for {}", msg.0);
+                    self.timed.remove(&msg.0);
+                    if let Some(opa) = self.opas.get(&msg.0) {
+                        if Self::schedule_timeout_for(msg.0, tx, opa) {
+                            self.timed.insert(msg.0);
+                        }
+                    }
+                    udt = true;
+                },
+                StartUpdatingTiming => {
+                    trace!("startupdatingtiming for {}", msg.0);
+                    if !self.timed.contains(&msg.0) {
+                        if let Some(opa) = self.opas.get(&msg.0) {
+                            if Self::schedule_timeout_for(msg.0, tx, opa) {
+                                self.timed.insert(msg.0);
+                            }
+                        }
+                    }
+                },
                 CloseButton => ctl.close_window(),
                 x => ctl.on_message(x)
             }
+        }
+        if udt {
+            self.update_store(None);
         }
     }
     pub fn on_mixer(&mut self, conf: MixerConf) {

@@ -2,6 +2,7 @@ use futures::{Future, Async, Poll};
 use uuid::Uuid;
 use std::borrow::Cow;
 use sqa_engine::sync::AudioThreadMessage;
+use sqa_engine::Sender;
 use state::{Context, ServerMessage};
 use rosc::OscType;
 use state::IntSender;
@@ -33,6 +34,26 @@ pub enum PlaybackState {
 pub struct DurationInfo {
     pub start_time: u64,
     pub est_duration: Duration
+}
+impl DurationInfo {
+    pub fn elapsed(&self, rounded: bool) -> (Duration, bool) {
+        let now = Sender::<()>::precise_time_ns();
+        let mut positive = true;
+        let delta = if self.start_time > now {
+            positive = false;
+            self.start_time - now
+        } else { now - self.start_time };
+        let mut secs = delta / 1_000_000_000;
+        let mut ssn = delta % 1_000_000_000;
+        println!("secs {} ssn {} delta {} now {} start {}", secs, ssn, delta, now, self.start_time);
+        if rounded {
+            if ssn >= 500_000_000 {
+                secs += 1;
+            }
+            ssn = 0;
+        }
+        (Duration::new(secs, ssn as _), positive)
+    }
 }
 pub struct ControllerParams<'a> {
     ctx: &'a mut Context,
@@ -284,6 +305,7 @@ impl Action {
     }
     pub fn execute(&mut self, time: u64, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
+        let time = time + (self.meta.prewait.subsec_nanos() as u64) + (self.meta.prewait.as_secs() * 1_000_000_000);
         if let PlaybackState::Loaded = self.state {
             let x = match action!(mut self.ctl).execute(time, cp) {
                 Ok(b) => b,

@@ -1,8 +1,9 @@
 use gtk::prelude::*;
 use gtk::{Button, ButtonBox, ButtonBoxStyle, Box, Label, Image, Orientation, Notebook, Widget, ScrolledWindow, Entry, ListBox, SelectionMode};
-use widgets::PropertyWindow;
+use widgets::{PropertyWindow, DurationEntry};
 use std::collections::HashMap;
 use sync::UISender;
+use super::ActionMessageInner;
 use uuid::Uuid;
 use sqa_backend::actions::{PlaybackState, OpaqueAction};
 
@@ -33,6 +34,7 @@ pub struct UITemplate {
     pub execute_btn: Button,
     pub reset_btn: Button,
     pub name_ent: Entry,
+    pub prewait_ent: DurationEntry,
     pub tx: UISender,
     pub popped_out: bool,
     pub errors_list: ListBox,
@@ -50,6 +52,7 @@ impl UITemplate {
             notebk: Notebook::new(),
             notebk_tabs: HashMap::new(),
             name_ent: Entry::new(),
+            prewait_ent: DurationEntry::new(),
             errors_list: ListBox::new(),
             popped_out: false,
             tx, uu
@@ -70,6 +73,7 @@ impl UITemplate {
         let errors_tab = ret.add_tab("Errors");
         basics_tab.append_property("Controls", &btn_box);
         basics_tab.append_property("Name", &ret.name_ent);
+        basics_tab.append_property("Pre-wait", &*ret.prewait_ent);
         errors_tab.container.pack_start(&ret.errors_list, false, false, 0);
         ret.errors_list.set_selection_mode(SelectionMode::None);
         ret.pwin.props_box.pack_start(&ret.notebk, true, true, 0);
@@ -145,6 +149,7 @@ impl UITemplate {
             }
             tx.send_internal((uu, ChangeName(txt)));
         }));
+        self.prewait_ent.bind::<ActionMessageInner>(tx, uu);
     }
     pub fn box_for_errors_list(msg: &str) -> Box {
         let bx = Box::new(Orientation::Horizontal, 5);
@@ -159,8 +164,12 @@ impl UITemplate {
         playback_state_update(p, &mut self.pwin);
         self.name_ent.set_placeholder_text(&p.desc as &str);
         self.name_ent.set_text(p.meta.name.as_ref().map(|s| s as &str).unwrap_or(""));
+        self.prewait_ent.set(p.meta.prewait);
         for child in self.errors_list.get_children() {
             self.errors_list.remove(&child);
+        }
+        if let PlaybackState::Active(Some(_)) = p.state {
+            self.tx.send_internal((self.uu, ActionMessageInner::StartUpdatingTiming));
         }
         if let PlaybackState::Unverified(ref errs) = p.state {
             self.get_tab("Errors").label.set_markup(&format!("Errors ({})", errs.len()));
@@ -180,7 +189,7 @@ impl UITemplate {
             let tx = self.tx.clone();
             let uu = self.uu;
             reset_btn.connect_clicked(move |_| {
-                tx.send_internal((uu, super::ActionMessageInner::ResetAction));
+                tx.send_internal((uu, ActionMessageInner::ResetAction));
             });
             bx.pack_end(&reset_btn, false, false, 0);
             self.errors_list.add(&bx);

@@ -4,7 +4,7 @@ use sqa_engine::{PlainSender, BufferSender};
 use sqa_engine::param::Parameter;
 use sqa_engine::sync::AudioThreadMessage;
 use sqa_ffmpeg::{Frame, MediaFile, MediaResult};
-use super::{ParameterError, ControllerParams, DurationInfo, ActionController, EditableAction};
+use super::{ParameterError, ControllerParams, DurationInfo, PlaybackState, ActionController, EditableAction};
 use state::{ServerMessage, Context, IntSender};
 use std::thread;
 use std::ops::Deref;
@@ -84,6 +84,7 @@ impl SpoolerContext {
                 }
             }
             // If we got here, we've sent all the frames!
+            println!("All frames sent, goodnight!");
             return;
         }
     }
@@ -306,7 +307,7 @@ impl ActionController for Controller {
                 sender.set_active(true);
             }
         }
-        Ok(true)
+        Ok(false)
     }
     fn pause(&mut self, _: ControllerParams) {
         if let Some(ref mut rd) = self.rd {
@@ -337,7 +338,7 @@ impl ActionController for Controller {
                         if sender.uuid() == uu {
                             if let Err(e) = rd.control.send(SpoolerMessage::Wakeup) {
                                 let msg = format!("Failed to wakeup spooler thread: {:?}", e);
-                                ctx.internal_tx.send(ServerMessage::ActionWarning(ctx.uuid, msg));
+                                ctx.internal_tx.send(ServerMessage::ActionStateChange(ctx.uuid, PlaybackState::Errored(msg)));
                             }
                             return true;
                         }
@@ -345,7 +346,17 @@ impl ActionController for Controller {
                 }
                 false
             },
+            PlayerRemoved(ref pl) => {
+                if let Some(ref mut rd) = self.rd {
+                    if rd.senders[0].uuid() == pl.uuid {
+                        println!("We're done here.");
+                        ctx.internal_tx.send(ServerMessage::ActionStateChange(ctx.uuid, PlaybackState::Inactive));
+                        return true;
+                    }
+                }
+                false
+            },
             _ => false
+        }
     }
-}
 }

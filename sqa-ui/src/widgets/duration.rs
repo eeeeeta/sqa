@@ -46,17 +46,17 @@ impl DurationEntry {
             }
             else {
                 trace!("resetting duration to {:?} because input was bad", dc.get());
-                slf.set_text(&Self::format(dc.get()));
+                slf.set_text(&Self::format(dc.get(), true));
             }
             Inhibit(false)
         }));
     }
-    pub fn format(dur: Duration) -> String {
+    pub fn format(dur: Duration, show_millis: bool) -> String {
         let secs = dur.as_secs();
         let hrs = secs / 3600;
         let mins = (secs / 60).saturating_sub(60 * hrs);
         let just_secs = secs.saturating_sub(60 * mins).saturating_sub(3600 * hrs);
-        let millis = (dur.subsec_nanos() as u64 / 1_000_000).saturating_sub(just_secs * 1000);
+        let millis = dur.subsec_nanos() as u64 / 1_000_000;
         let hrs = if hrs > 0 {
             format!("{:02}:", hrs)
         }
@@ -64,7 +64,12 @@ impl DurationEntry {
             "".to_string()
         };
         trace!("format orig_secs {} h{} m{} s{} mi{}", secs, hrs, mins, just_secs, millis);
-        format!("{}{:02}:{:02}.{:03}", hrs, mins, just_secs, millis)
+        if show_millis {
+            format!("{}{:02}:{:02}.{:03}", hrs, mins, just_secs, millis)
+        }
+        else {
+            format!("{}{:02}:{:02}", hrs, mins, just_secs)
+        }
     }
     pub fn parse(st: &str) -> Option<Duration> {
         let time_components = st.rsplit(":").collect::<Vec<_>>();
@@ -90,7 +95,7 @@ impl DurationEntry {
     }
     pub fn set(&mut self, dur: Duration) {
         self.dur.set(dur);
-        self.ent.set_text(&Self::format(dur));
+        self.ent.set_text(&Self::format(dur, true));
     }
 }
 
