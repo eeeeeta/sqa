@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use sync::UISender;
 use super::ActionMessageInner;
 use uuid::Uuid;
+use glib::signal;
 use sqa_backend::actions::{PlaybackState, OpaqueAction};
 
 #[derive(Clone)]
@@ -34,6 +35,7 @@ pub struct UITemplate {
     pub execute_btn: Button,
     pub reset_btn: Button,
     pub name_ent: Entry,
+    pub name_ent_handler: u64,
     pub prewait_ent: DurationEntry,
     pub tx: UISender,
     pub popped_out: bool,
@@ -52,6 +54,7 @@ impl UITemplate {
             notebk: Notebook::new(),
             notebk_tabs: HashMap::new(),
             name_ent: Entry::new(),
+            name_ent_handler: 0,
             prewait_ent: DurationEntry::new(),
             errors_list: ListBox::new(),
             popped_out: false,
@@ -140,8 +143,9 @@ impl UITemplate {
         self.notebk.connect_switch_page(clone!(tx; |_, _, pg| {
             tx.send_internal(super::ActionInternalMessage::ChangeCurPage(Some(pg)));
         }));
-        self.name_ent.connect_changed(clone!(tx; |slf| {
+        self.name_ent_handler = self.name_ent.connect_changed(clone!(tx; |slf| {
             let mut txt = slf.get_text();
+            println!("name entry changed, text {:?}", txt);
             if txt.is_some() {
                 if txt.as_ref().unwrap() == "" {
                     txt = None;
@@ -162,8 +166,11 @@ impl UITemplate {
     }
     pub fn on_update(&mut self, p: &OpaqueAction) {
         playback_state_update(p, &mut self.pwin);
+        signal::signal_handler_block(&self.name_ent, self.name_ent_handler);
         self.name_ent.set_placeholder_text(&p.desc as &str);
+        trace!("setting name entry text to {:?}", p.meta.name);
         self.name_ent.set_text(p.meta.name.as_ref().map(|s| s as &str).unwrap_or(""));
+        signal::signal_handler_unblock(&self.name_ent, self.name_ent_handler);
         self.prewait_ent.set(p.meta.prewait);
         for child in self.errors_list.get_children() {
             self.errors_list.remove(&child);

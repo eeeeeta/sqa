@@ -77,7 +77,7 @@ impl Savefile {
             d.broadcast(Reply::ReplyActionList { list: resp })?;
         }
         for (uu, sa) in self.actions.iter_mut() {
-            let res = ctx.create_action(&sa.typ, Some(sa.params.clone()), Some(sa.meta.clone()), Some(*uu), &mut d);
+            let res = ctx.create_action(&sa.typ, Some(sa.params.clone()), Some(sa.meta.clone()), Some(*uu));
             if !force {
                 let _ = res?;
             }

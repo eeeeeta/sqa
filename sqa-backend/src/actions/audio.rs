@@ -4,6 +4,7 @@ use sqa_engine::{PlainSender, BufferSender};
 use sqa_engine::param::Parameter;
 use sqa_engine::sync::AudioThreadMessage;
 use sqa_ffmpeg::{Frame, MediaFile, MediaResult};
+use sqa_ffmpeg::errors::ErrorKind;
 use super::{ParameterError, ControllerParams, DurationInfo, PlaybackState, ActionController, EditableAction};
 use state::{ServerMessage, Context, IntSender};
 use std::thread;
@@ -74,17 +75,22 @@ impl SpoolerContext {
                         }
                     },
                     Err(e) => {
-                        println!("FIXME: spooler error {:?}", e);
-                        /*
-                        self.sender.send(ServerMessage::ActionStateChange(self.uuid,
-                        PlaybackState::Errored(msg)))
-                        .unwrap();
-                        return;*/
+                        match *e.kind() {
+                            ErrorKind::InvalidData => debug!("Invalid data in spooler, not doing anything"),
+                            _ => {
+                                error!("spooler error! {:?}", e);
+                                let msg = format!("Error in spooler: {}", e);
+                                self.sender.send(
+                                    ServerMessage::ActionStateChange(self.uuid,
+                                                                     PlaybackState::Errored(msg)));
+                                return;
+                            }
+                        }
                     }
                 }
             }
             // If we got here, we've sent all the frames!
-            println!("All frames sent, goodnight!");
+            debug!("All frames sent, goodnight!");
             return;
         }
     }
@@ -349,7 +355,7 @@ impl ActionController for Controller {
             PlayerRemoved(ref pl) => {
                 if let Some(ref mut rd) = self.rd {
                     if rd.senders[0].uuid() == pl.uuid {
-                        println!("We're done here.");
+                        debug!("We're done here.");
                         ctx.internal_tx.send(ServerMessage::ActionStateChange(ctx.uuid, PlaybackState::Inactive));
                         return true;
                     }

@@ -51,10 +51,16 @@ impl Context {
         }
     }
     fn notify_state_change(&mut self, args: &mut BackendContextArgs) {
-        debug!("State change: {:?}", self.state);
+        if let ConnectionState::Connected { .. } = self.state {
+            /* avoid spamming logs */
+        }
+        else {
+            debug!("State change: {:?}", self.state);
+        }
         args.send(UIMessage::ConnState(self.state.clone()));
     }
     fn send(&mut self, cmd: Command) -> errors::Result<()> {
+        trace!("--> {:?}", cmd);
         self.sock.as_mut()
             .expect("Connected with no socket")
             .start_send(cmd)?;
@@ -79,7 +85,6 @@ impl Context {
             }
             else {
                 self.send(Command::Ping)?;
-                trace!("sending ping");
                 self.update_last_ping();
                 self.notify_state_change(args);
             }
@@ -119,6 +124,7 @@ impl Context {
     }
     fn handle_external(&mut self, msg: Reply, args: &mut BackendContextArgs) -> errors::Result<bool> {
         use self::ConnectionState::*;
+        trace!("<-- {:?}", msg);
         match mem::replace(&mut self.state, Disconnected) {
             VersionQuerySent { addr } => {
                 if let Reply::ServerVersion { ver } = msg {
@@ -154,7 +160,6 @@ impl Context {
             Connected { addr, ver, last_ping, mut last_pong, last_err } => {
                 if let Reply::Pong = msg {
                     last_pong = time::precise_time_ns();
-                    trace!("got pong");
                     self.state = Connected { addr, ver, last_ping, last_pong, last_err };
                     Ok(true)
                 }
@@ -343,11 +348,13 @@ impl ConnectionController {
             },
             Show => self.pwin.window.show_all(),
             NewlyConnected => {
+                info!("Newly connected!");
                 self.pwin.window.hide();
                 self.tx.as_mut().unwrap()
                     .send_internal(Message::Statusbar("Connected to server.".into()));
             },
             NewlyDisconnected => {
+                info!("Newly disconnected");
                 self.tx.as_mut().unwrap().
                     send_internal(Message::Statusbar("Disconnected from server.".into()));
                 self.pwin.window.show_all();

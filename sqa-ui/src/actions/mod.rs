@@ -417,17 +417,16 @@ impl ActionController {
                     ctl.edit_separately()
                 },
                 ChangeName(name) => {
-                    if let Some(opa) = self.opas.get(&msg.0) {
-                        let mut meta = opa.meta.clone();
-                        meta.name = name;
-                        tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: meta });
+                    trace!("ChangeName({:?}) called", name);
+                    if let Some(opa) = self.opas.get_mut(&msg.0) {
+                        opa.meta.name = name;
+                        tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: opa.meta.clone() });
                     }
                 },
                 ChangePrewait(dur) => {
-                    if let Some(opa) = self.opas.get(&msg.0) {
-                        let mut meta = opa.meta.clone();
-                        meta.prewait = dur;
-                        tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: meta });
+                    if let Some(opa) = self.opas.get_mut(&msg.0) {
+                        opa.meta.prewait = dur;
+                        tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: opa.meta.clone() });
                     }
                 },
                 UpdateTiming => {
@@ -435,6 +434,7 @@ impl ActionController {
                     self.timed.remove(&msg.0);
                     if let Some(opa) = self.opas.get(&msg.0) {
                         if Self::schedule_timeout_for(msg.0, tx, opa) {
+                            trace!("updatetiming succeeded");
                             self.timed.insert(msg.0);
                         }
                     }
@@ -445,6 +445,7 @@ impl ActionController {
                     if !self.timed.contains(&msg.0) {
                         if let Some(opa) = self.opas.get(&msg.0) {
                             if Self::schedule_timeout_for(msg.0, tx, opa) {
+                                trace!("startupdatingtiming succeeded");
                                 self.timed.insert(msg.0);
                             }
                         }
@@ -455,7 +456,13 @@ impl ActionController {
             }
         }
         if udt {
-            self.update_store(None);
+            // FIXME: this is hacky...
+            if self.cur_sel.is_some() {
+                debug!("not updating timing whilst selecting");
+            }
+            else {
+                self.update_store(None);
+            }
         }
     }
     pub fn on_mixer(&mut self, conf: MixerConf) {

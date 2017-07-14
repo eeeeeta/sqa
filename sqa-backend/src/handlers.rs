@@ -115,7 +115,7 @@ impl<H> Connection<H> where H: ConnHandler {
                 self.data.addr = addr;
                 self.data.path = path;
                 if let Err(e) = self.hdlr.external(&mut self.data, pkt) {
-                    println!("ERROR in external handler: {:?}", e);
+                    error!("in external handler: {:?}", e);
                 }
                 for party in self.data.parties.iter_mut() {
                     if party.addr == self.data.addr {
@@ -127,7 +127,7 @@ impl<H> Connection<H> where H: ConnHandler {
                 self.data.framed.start_send(addr.msg_to(
                     Reply::DeserFailed { err: e.to_string() }.into()
                 ))?;
-                println!("Deser failed: {:?}", e);
+                warn!("Deser failed: {:?}", e);
             }
         };
         Ok(())
@@ -148,7 +148,7 @@ impl<H> Future for Connection<H> where H: ConnHandler {
                     match self.data.framed.poll() {
                         Ok(Async::Ready(Some(RecvMessage { addr, pkt }))) => {
                             if let Err(e) = self.on_external(addr, pkt) {
-                                println!("error in external handler: {:?}", e);
+                                error!("error in external handler: {:?}", e);
                             }
                         },
                         Ok(Async::Ready(None)) => unreachable!(),

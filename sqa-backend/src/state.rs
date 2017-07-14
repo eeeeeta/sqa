@@ -14,6 +14,7 @@ use errors::*;
 use save::Savefile;
 use handlers;
 use std::mem;
+use tokio_core::reactor::Handle;
 pub struct Context {
     pub remote: Remote,
     pub mixer: MixerContext,
@@ -21,7 +22,9 @@ pub struct Context {
     pub undo: UndoContext,
     pub actions: HashMap<Uuid, Action>,
     pub async_actions: HashSet<Uuid>,
-    pub sender: Option<IntSender>
+    pub sender: Option<IntSender>,
+    pub handle: Option<Handle>,
+    pub changed: HashSet<Uuid>
 }
 macro_rules! do_with_ctx {
     ($self:expr, $uu:expr, $clo:expr) => {{
@@ -49,6 +52,7 @@ impl ConnHandler for Context {
     fn init(&mut self, d: &mut CD) {
         self.mixer.start_messaging(d.int_sender.clone());
         self.sender = Some(d.int_sender.clone());
+        self.handle = Some(d.handle.clone());
     }
     fn wakeup(&mut self, d: &mut CD) {
         let mut to_remove = vec![];
@@ -81,7 +85,7 @@ impl ConnHandler for Context {
             ServerMessage::ActionStateChange(uu, ps) => {
                 if let Some(mut act) = self.actions.remove(&uu) {
                     if let Err(e) = act.state_change(ps, self, &d.int_sender) {
-                        println!("failed state change: {:?}", e);
+                        warn!("failed state change: {:?}", e);
                     }
                     self.on_action_changed(d, &mut act);
                     self.actions.insert(uu, act);
@@ -91,11 +95,18 @@ impl ConnHandler for Context {
         }
     }
     fn external(&mut self, d: &mut CD, c: Command) -> BackendResult<()> {
-        if let Some(ch) = self.cmd_as_undoable(d, &c) {
+        if let Some(ch) = self.cmd_as_undoable(&c) {
             self.undo.register_change(ch);
             self.on_undo_changed(d);
         }
-        self.process_command(d, c)
+        let res = self.process_command(d, c);
+        for changed in mem::replace(&mut self.changed, HashSet::new()) {
+            let _: BackendResult<()> = do_with_ctx!(self, &changed, |a: &mut Action| {
+                self.on_action_changed(d, a);
+                Ok(())
+            });
+        }
+        res
     }
 }
 impl Context {
@@ -107,7 +118,9 @@ impl Context {
             media: ::sqa_ffmpeg::init().unwrap(),
             undo: UndoContext::new(),
             async_actions: HashSet::new(),
-            sender: None
+            sender: None,
+            handle: None,
+            changed: HashSet::new()
         };
         ctx.mixer.default_config().unwrap();
         ctx
@@ -157,7 +170,7 @@ impl Context {
                     _ => unreachable!()
                 }
                 let broadcast = met.is_some();
-                let act = self.create_action(&ty, pars, met, old_uu, &mut Some(d));
+                let act = self.create_action(&ty, pars, met, old_uu);
                 d.respond(Reply::ActionCreated {
                     res: act.map_err(|e| e.to_string())
                 })?;
@@ -168,7 +181,7 @@ impl Context {
             ActionInfo { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
                     let ret = a.get_data(self).map_err(|e| e.to_string());
-                    self.on_action_changed(d, a);
+                    self.changed.insert(uuid);
                     ret
                 });
                 d.respond(ActionInfoRetrieved { uuid, res })?;
@@ -176,7 +189,7 @@ impl Context {
             UpdateActionParams { uuid, params, .. } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
                     let ret = a.set_params(params, self, &d.int_sender).map_err(|e| e.to_string());
-                    self.on_action_changed(d, a);
+                    self.changed.insert(uuid);
                     ret
                 });
                 d.respond(ActionParamsUpdated { uuid, res })?;
@@ -184,7 +197,7 @@ impl Context {
             UpdateActionMetadata { uuid, meta } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
                     let ret = a.set_meta(meta);
-                    self.on_action_changed(d, a);
+                    self.changed.insert(uuid);
                     Ok(ret)
                 });
                 d.respond(ActionMetadataUpdated { uuid, res })?;
@@ -192,7 +205,7 @@ impl Context {
             LoadAction { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
                     let ret = a.load(self, &d.int_sender).map_err(|e| e.to_string());
-                    self.on_action_changed(d, a);
+                    self.changed.insert(uuid);
                     ret
                 });
                 d.respond(ActionLoaded { uuid, res })?;
@@ -200,7 +213,7 @@ impl Context {
             ResetAction { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
                     let ret = a.reset(self, &d.int_sender).map_err(|e| e.to_string());
-                    self.on_action_changed(d, a);
+                    self.changed.insert(uuid);
                     ret
                 });
                 d.respond(ActionReset { uuid, res })?;
@@ -208,7 +221,7 @@ impl Context {
             ExecuteAction { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
                     let ret = a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), self, &d.int_sender).map_err(|e| e.to_string());
-                    self.on_action_changed(d, a);
+                    self.changed.insert(uuid);
                     ret
                 });
                 d.respond(ActionExecuted { uuid, res })?;
@@ -271,7 +284,7 @@ impl Context {
                     resp.insert(uu, data);
                 }
                 else {
-                    println!("FIXME: handle failure to get_data");
+                    error!("FIXME: handle failure to get_data");
                 }
                 Ok(())
             });
@@ -284,23 +297,23 @@ impl Context {
                 uuid: action.uuid(),
                 data
             }) {
-                println!("fixme: error in on_action_changed: {:?}", e);
+                error!("fixme: error in on_action_changed: {:?}", e);
             }
         }
     }
     pub fn on_all_actions_changed(&mut self, d: &mut CD) {
         let resp = self.refresh_action_list();
         if let Err(e) = d.broadcast(Reply::ReplyActionList { list: resp }) {
-            println!("fixme: error in on_all_actions_changed: {:?}", e);
+            error!("fixme: error in on_all_actions_changed: {:?}", e);
         }
     }
     pub fn on_undo_changed(&mut self, d: &mut CD) {
         let ctx = self.undo.clone();
         if let Err(e) = d.broadcast(Reply::ReplyUndoContext { ctx }) {
-            println!("fixme: error in on_undo_changed: {:?}", e);
+            error!("fixme: error in on_undo_changed: {:?}", e);
         }
     }
-    pub fn create_action(&mut self, ty: &str, pars: Option<ActionParameters>, met: Option<ActionMetadata>, old_uu: Option<Uuid>, d: &mut Option<&mut CD>) -> BackendResult<Uuid> {
+    pub fn create_action(&mut self, ty: &str, pars: Option<ActionParameters>, met: Option<ActionMetadata>, old_uu: Option<Uuid>) -> BackendResult<Uuid> {
         let mut act = match &*ty {
             "audio" => Action::new_audio(),
             "fade" => Action::new_fade(),
@@ -322,14 +335,14 @@ impl Context {
             // FIXME: we should ideally send something here
             let sender = self.sender.clone().unwrap();
             if let Err(e) = act.set_params(pars.clone(), self, &sender) {
-                println!("fixme: set_params failed in create_action: {:?}", e);
+                error!("fixme: set_params failed in create_action: {:?}", e);
             }
         }
-        if let Some(ref mut d) = *d { self.on_action_changed(d, &mut act); }
+        self.changed.insert(uu);
         self.actions.insert(uu, act);
         Ok(uu)
     }
-    pub fn cmd_as_undoable(&mut self, d: &mut CD, cmd: &Command) -> Option<UndoableChange> {
+    pub fn cmd_as_undoable(&mut self, cmd: &Command) -> Option<UndoableChange> {
         use self::Command::*;
         match *cmd {
             CreateActionWithUuid { ref typ, uuid } => Some(UndoableChange {
@@ -350,7 +363,7 @@ impl Context {
             UpdateActionParams { uuid, ref params, ref desc } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
                     let data = a.get_data(self).map_err(|e| e.to_string());
-                    self.on_action_changed(d, a);
+                    self.changed.insert(uuid);
                     data
                 });
                 res.ok().map(|old| {
@@ -364,7 +377,7 @@ impl Context {
             UpdateActionMetadata { uuid, ref meta } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
                     let data = a.get_data(self).map_err(|e| e.to_string());
-                    self.on_action_changed(d, a);
+                    self.changed.insert(uuid);
                     data
                 });
                 res.ok().map(|old| {
@@ -378,7 +391,7 @@ impl Context {
             DeleteAction { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
                     let data = a.get_data(self).map_err(|e| e.to_string());
-                    self.on_action_changed(d, a);
+                    self.changed.insert(uuid);
                     data
                 });
                 res.ok().map(|old| {

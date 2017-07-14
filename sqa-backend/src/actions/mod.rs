@@ -45,7 +45,7 @@ impl DurationInfo {
         } else { now - self.start_time };
         let mut secs = delta / 1_000_000_000;
         let mut ssn = delta % 1_000_000_000;
-        println!("secs {} ssn {} delta {} now {} start {}", secs, ssn, delta, now, self.start_time);
+        trace!("secs {} ssn {} delta {} now {} start {}", secs, ssn, delta, now, self.start_time);
         if rounded {
             if ssn >= 500_000_000 {
                 secs += 1;
@@ -88,6 +88,11 @@ pub enum AsyncResult<T, E> {
     Empty,
     Waiting(Box<Future<Item=T, Error=E>>),
     Result(Result<T, E>)
+}
+impl<T, E> Default for AsyncResult<T, E> {
+    fn default() -> Self {
+        AsyncResult::Empty
+    }
 }
 impl<T, E> AsyncResult<T, E> {
     pub fn is_empty(&self) -> bool {

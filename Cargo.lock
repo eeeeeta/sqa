@@ -786,7 +786,9 @@ version = "0.1.0"
 dependencies = [
  "chrono 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "error-chain 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fern 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.14 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "rmp-serde 0.13.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "rosc 0.1.4",
  "serde 1.0.9 (registry+https://github.com/rust-lang/crates.io-index)",

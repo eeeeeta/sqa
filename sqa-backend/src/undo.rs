@@ -29,9 +29,9 @@ impl UndoContext {
         }
     }
     pub fn register_change(&mut self, ch: UndoableChange) {
-        println!("registering undoable change {:?}", ch);
+        trace!("registering undoable change {:?}", ch);
         if let Some(idx) = self.idx {
-            println!("obliterating redoability");
+            trace!("obliterating redoability");
             self.changes.drain((idx+1)..);
             self.idx = None;
         }
@@ -50,7 +50,7 @@ impl UndoContext {
     }
     pub fn undo(&mut self) -> Option<Command> {
         let (undo, _) = self.indexes();
-        println!("attempting to undo, idx {:?}", self.idx);
+        trace!("attempting to undo, idx {:?}", self.idx);
         if let Some(idx) = undo {
             self.idx = Some(idx-1);
             Some(self.changes[idx].undo.clone())
@@ -61,7 +61,7 @@ impl UndoContext {
     }
     pub fn redo(&mut self) -> Option<Command> {
         let (_, redo) = self.indexes();
-        println!("attempting to redo, idx {:?}", self.idx);
+        trace!("attempting to redo, idx {:?}", self.idx);
         if let Some(idx) = redo {
             if idx == self.changes.len()-1 {
                 self.idx = None;

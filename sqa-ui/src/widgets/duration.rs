@@ -34,15 +34,20 @@ impl DurationEntry {
         self.ent.connect_activate(clone!(tx, id, dc; |slf| {
             trace!("duration entry activated");
             if let Some(dur) = Self::parse(&slf.get_text().unwrap_or("".into())) {
-                dc.set(dur);
-                tx.send_internal(T::on_payload(dur, id));
-                trace!("new duration: {:?}", dur);
+                if dc.get() != dur {
+                    dc.set(dur);
+                    tx.send_internal(T::on_payload(dur, id));
+                    trace!("new duration: {:?}", dur);
+                }
             }
         }));
         self.ent.connect_focus_out_event(clone!(tx, id, dc; |slf, _| {
             if let Some(dur) = Self::parse(&slf.get_text().unwrap_or("".into())) {
-                dc.set(dur);
-                tx.send_internal(T::on_payload(dur, id));
+                if dc.get() != dur {
+                    dc.set(dur);
+                    tx.send_internal(T::on_payload(dur, id));
+                    trace!("new focusout duration: {:?}", dur);
+                }
             }
             else {
                 trace!("resetting duration to {:?} because input was bad", dc.get());
