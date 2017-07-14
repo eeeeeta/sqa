@@ -255,8 +255,8 @@ impl Context {
                 let res = Savefile::apply_from_file(self, &load_from, Some(d), force);
                 d.respond(SavefileLoaded { res: res.map_err(|e| e.to_string()) })?;
             },
-            GetUndoContext => {
-                d.respond(ReplyUndoContext { ctx: self.undo.clone() })?;
+            GetUndoState => {
+                d.respond(ReplyUndoState { ctx: self.undo.state() })?;
             },
             Undo => {
                 if let Some(cmd) = self.undo.undo() {
@@ -308,8 +308,8 @@ impl Context {
         }
     }
     pub fn on_undo_changed(&mut self, d: &mut CD) {
-        let ctx = self.undo.clone();
-        if let Err(e) = d.broadcast(Reply::ReplyUndoContext { ctx }) {
+        let ctx = self.undo.state();
+        if let Err(e) = d.broadcast(Reply::ReplyUndoState { ctx }) {
             error!("fixme: error in on_undo_changed: {:?}", e);
         }
     }

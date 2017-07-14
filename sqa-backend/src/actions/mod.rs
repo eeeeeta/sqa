@@ -10,6 +10,7 @@ use errors::*;
 use serde::{Serialize, Deserialize};
 use std::fmt::Debug;
 use std::time::Duration;
+use tokio_core::reactor::Timeout;
 
 pub mod audio;
 pub mod fade;
@@ -30,31 +31,39 @@ pub enum PlaybackState {
     Active(Option<DurationInfo>),
     Errored(String)
 }
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct DurationInfo {
+    pub duration: Duration,
     pub start_time: u64,
-    pub est_duration: Duration
+    pub est_duration: Option<Duration>
 }
 impl DurationInfo {
+    pub fn nanos_to_dur(nanos: u64) -> Duration {
+        let secs = nanos / 1_000_000_000;
+        let ssn = nanos % 1_000_000_000;
+        Duration::new(secs, ssn as _)
+    }
     pub fn elapsed(&self, rounded: bool) -> (Duration, bool) {
         let now = Sender::<()>::precise_time_ns();
         let mut positive = true;
-        let delta = if self.start_time > now {
+        let mut secs = self.duration.as_secs();
+        let mut ssn = self.duration.subsec_nanos();
+        if self.start_time > now {
             positive = false;
-            self.start_time - now
-        } else { now - self.start_time };
-        let mut secs = delta / 1_000_000_000;
-        let mut ssn = delta % 1_000_000_000;
-        trace!("secs {} ssn {} delta {} now {} start {}", secs, ssn, delta, now, self.start_time);
+            let delta = self.start_time - now;
+            secs = delta / 1_000_000_000;
+            ssn = (delta % 1_000_000_000) as u32;
+        }
         if rounded {
             if ssn >= 500_000_000 {
                 secs += 1;
             }
             ssn = 0;
         }
-        (Duration::new(secs, ssn as _), positive)
+        (Duration::new(secs, ssn), positive)
     }
 }
+
 pub struct ControllerParams<'a> {
     ctx: &'a mut Context,
     internal_tx: &'a IntSender,
@@ -249,6 +258,7 @@ pub struct Action {
     state: PlaybackState,
     ctl: ActionType,
     meta: ActionMetadata,
+    timeout: AsyncResult<(), ::std::io::Error>,
     uu: Uuid
 }
 impl Action {
@@ -257,7 +267,8 @@ impl Action {
             state: PlaybackState::Inactive,
             ctl: ActionType::Audio(audio::Controller::new()),
             uu: Uuid::new_v4(),
-            meta: Default::default()
+            meta: Default::default(),
+            timeout: Default::default()
         }
     }
     pub fn new_fade() -> Self {
@@ -265,7 +276,8 @@ impl Action {
             state: PlaybackState::Inactive,
             ctl: ActionType::Fade(fade::Controller::new()),
             uu: Uuid::new_v4(),
-            meta: Default::default()
+            meta: Default::default(),
+            timeout: Default::default()
         }
     }
     pub fn accept_audio_message(&mut self, ctx: &mut Context, sender: &IntSender, msg: &AudioThreadMessage) -> bool {
@@ -305,24 +317,66 @@ impl Action {
         self.uu = uu;
     }
     pub fn poll(&mut self, ctx: &mut Context, sender: &IntSender) -> bool {
+        let _ = self.timeout.poll();
+        let mut continue_polling = false;
+        if self.timeout.is_complete() {
+            if let PlaybackState::Active(_) = self.state {
+                let st = action!(self.ctl).duration_info();
+                let delta_millis;
+                if let Some(dur) = st {
+                    let (elapsed, pos) = dur.elapsed(false);
+                    let elapsed = elapsed.subsec_nanos();
+                    let delta_nanos = if pos {
+                        1_000_000_000 - elapsed
+                    } else { elapsed };
+                    delta_millis = delta_nanos / 1_000_000;
+                }
+                else {
+                    delta_millis = 1000;
+                }
+                self.timeout = AsyncResult::Waiting(
+                    Box::new(Timeout::new(Duration::from_millis(delta_millis as _), ctx.handle.as_ref().unwrap()).unwrap())
+                );
+                let _ = self.timeout.poll();
+                continue_polling = true;
+            }
+            else {
+                self.timeout = Default::default();
+            }
+        }
+        else if self.timeout.is_waiting() {
+            let _ = self.timeout.poll();
+            continue_polling = true;
+        }
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
-        action!(mut self.ctl).poll(cp)
+        let res = action!(mut self.ctl).poll(cp);
+        if !continue_polling {
+            continue_polling = res;
+        }
+        continue_polling
     }
     pub fn execute(&mut self, time: u64, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
-        let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         let time = time + (self.meta.prewait.subsec_nanos() as u64) + (self.meta.prewait.as_secs() * 1_000_000_000);
         if let PlaybackState::Loaded = self.state {
-            let x = match action!(mut self.ctl).execute(time, cp) {
-                Ok(b) => b,
-                Err(e) => {
-                    self.state = PlaybackState::Errored(e.to_string());
-                    return Ok(())
+            let x = {
+                let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
+                match action!(mut self.ctl).execute(time, cp) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        self.state = PlaybackState::Errored(e.to_string());
+                        return Ok(())
+                    }
                 }
             };
             if x {
                 self.state = PlaybackState::Inactive;
             }
             else {
+                ctx.async_actions.insert(self.uu);
+                self.timeout = AsyncResult::Waiting(
+                    Box::new(Timeout::new(Duration::new(1, 0), ctx.handle.as_ref().unwrap()).unwrap())
+                );
+                let _ = self.timeout.poll();
                 self.state = PlaybackState::Active(None);
             }
         }

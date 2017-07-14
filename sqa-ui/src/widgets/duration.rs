@@ -100,7 +100,12 @@ impl DurationEntry {
     }
     pub fn set(&mut self, dur: Duration) {
         self.dur.set(dur);
-        self.ent.set_text(&Self::format(dur, true));
+        if !self.ent.has_focus() {
+            self.ent.set_text(&Self::format(dur, true));
+        }
+        else {
+            trace!("not updating; widget has focus");
+        }
     }
 }
 

@@ -150,7 +150,7 @@ impl SliderBoxType for Patched {
                     signal::signal_handler_unblock(rb, hid);
                 }
             }
-            if val.vol != slider.scale.get_value() {
+            if val.vol != slider.scale.get_value() && !slider.scale.has_focus() {
                 signal::signal_handler_block(&slider.scale, slider.changed_handler);
                 slider.scale.set_value(val.vol);
                 signal::signal_handler_unblock(&slider.scale, slider.changed_handler);
@@ -225,7 +225,7 @@ impl SliderBoxType for Faded {
             signal::signal_handler_block(&slider.scale, slider.changed_handler);
             trace!("mixer: updating slider, {:?}", val);
             let val = val as f64;
-            if val != slider.scale.get_value() {
+            if val != slider.scale.get_value() && !slider.scale.has_focus() {
                 slider.scale.set_value(val);
             }
             if enabled {

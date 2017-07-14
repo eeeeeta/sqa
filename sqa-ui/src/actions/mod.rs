@@ -3,7 +3,7 @@ use gtk::{self, Widget, Menu, TreeView, ListStore, Builder, MenuItem, TreeSelect
 use gdk::WindowExt;
 use gdk;
 use uuid::Uuid;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashMap;
 use std::mem;
 use sync::UISender;
 use sqa_backend::codec::{Command, Reply};
@@ -13,6 +13,7 @@ use sqa_backend::actions::audio::AudioParams;
 use messages::Message;
 use std::time::Duration;
 use widgets::{DurationEntry, DurationEntryMessage};
+use glib::signal;
 
 pub mod audio;
 pub mod fade;
@@ -40,8 +41,6 @@ pub enum ActionMessageInner {
     ChangeName(Option<String>),
     ChangePrewait(Duration),
     CloseButton,
-    UpdateTiming,
-    StartUpdatingTiming
 }
 impl DurationEntryMessage for ActionMessageInner {
     type Message = ActionMessage;
@@ -66,7 +65,6 @@ pub struct ActionController {
     sidebar: Stack,
     ctls: HashMap<Uuid, Box<ActionUI>>,
     opas: HashMap<Uuid, OpaqueAction>,
-    timed: HashSet<Uuid>,
     cur_sel: Option<SelectionDetails>,
     menu: Menu,
     medit: MenuItem,
@@ -75,7 +73,8 @@ pub struct ActionController {
     mexec: MenuItem,
     mcreate_audio: MenuItem,
     mcreate_fade: MenuItem,
-    cur_page: Option<u32>
+    cur_page: Option<u32>,
+    sel_handler: u64
 }
 pub trait ActionUI {
     fn on_update(&mut self, p: &OpaqueAction);
@@ -127,9 +126,9 @@ impl ActionController {
         let cur_widget = None;
         let cur_sel = None;
         let mixer = Default::default();
-        let timed = HashSet::new();
+        let sel_handler = 0;
         build!(ActionController using b
-               with ctls, opas, tx, mixer, cur_widget, cur_sel, cur_page, timed
+               with ctls, opas, tx, mixer, cur_widget, cur_sel, cur_page, sel_handler
                get view, store, menu, medit, mload, mexec, mdelete, mcreate_audio, mcreate_fade, sidebar)
     }
     pub fn bind(&mut self, tx: &UISender) {
@@ -152,7 +151,7 @@ impl ActionController {
             }
             Inhibit(false)
         });
-        self.view.get_selection().connect_changed(clone!(tx; |_| {
+        self.sel_handler = self.view.get_selection().connect_changed(clone!(tx; |_| {
             tx.send_internal(ActionInternalMessage::SelectionChanged);
         }));
         self.mcreate_audio.connect_activate(clone!(tx; |_| {
@@ -175,7 +174,10 @@ impl ActionController {
     }
     fn update_store(&mut self, sel: Option<Uuid>) {
         let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
-        let sel = if sel.is_some() { sel } else { tsg.get() };
+        let sel = if sel.is_some() { sel } else {
+            signal::signal_handler_block(&tsg.sel, self.sel_handler);
+            tsg.get()
+        };
         self.store.clear();
         for (uu, action) in self.opas.iter() {
             let typ = match action.params {
@@ -219,6 +221,7 @@ impl ActionController {
                 }
             }
         }
+        signal::signal_handler_unblock(&tsg.sel, self.sel_handler);
     }
     fn on_action_info(&mut self, uu: Uuid, data: OpaqueAction) {
         if self.opas.get_mut(&uu).is_some() {
@@ -371,32 +374,7 @@ impl ActionController {
             }
         }
     }
-    pub fn schedule_timeout_for(uu: Uuid, tx: &UISender, opa: &OpaqueAction) -> bool {
-        if let PlaybackState::Active(ref dur) = opa.state {
-            let delta_millis;
-            if let Some(ref dur) = *dur {
-                let (elapsed, pos) = dur.elapsed(false);
-                let elapsed = elapsed.subsec_nanos();
-                let delta_nanos = if pos {
-                    1_000_000_000 - elapsed
-                } else { elapsed };
-                delta_millis = delta_nanos / 1_000_000;
-            }
-            else {
-                delta_millis = 1000;
-            }
-            gtk::timeout_add(delta_millis, clone!(tx; || {
-                tx.send_internal((uu, ActionMessageInner::UpdateTiming));
-                Continue(false)
-            }));
-            true
-        }
-        else {
-            false
-        }
-    }
     pub fn on_action_msg(&mut self, msg: ActionMessage) {
-        let mut udt = false;
         if let Some(ctl) = self.ctls.get_mut(&msg.0) {
             let tx = self.tx.as_mut().unwrap();
             use self::ActionMessageInner::*;
@@ -429,39 +407,8 @@ impl ActionController {
                         tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: opa.meta.clone() });
                     }
                 },
-                UpdateTiming => {
-                    trace!("updatetiming for {}", msg.0);
-                    self.timed.remove(&msg.0);
-                    if let Some(opa) = self.opas.get(&msg.0) {
-                        if Self::schedule_timeout_for(msg.0, tx, opa) {
-                            trace!("updatetiming succeeded");
-                            self.timed.insert(msg.0);
-                        }
-                    }
-                    udt = true;
-                },
-                StartUpdatingTiming => {
-                    trace!("startupdatingtiming for {}", msg.0);
-                    if !self.timed.contains(&msg.0) {
-                        if let Some(opa) = self.opas.get(&msg.0) {
-                            if Self::schedule_timeout_for(msg.0, tx, opa) {
-                                trace!("startupdatingtiming succeeded");
-                                self.timed.insert(msg.0);
-                            }
-                        }
-                    }
-                },
                 CloseButton => ctl.close_window(),
                 x => ctl.on_message(x)
-            }
-        }
-        if udt {
-            // FIXME: this is hacky...
-            if self.cur_sel.is_some() {
-                debug!("not updating timing whilst selecting");
-            }
-            else {
-                self.update_store(None);
             }
         }
     }

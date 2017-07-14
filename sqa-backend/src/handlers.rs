@@ -138,7 +138,6 @@ impl<H> Future for Connection<H> where H: ConnHandler {
     type Error = ::std::io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.hdlr.wakeup(&mut self.data);
         'outer: loop {
             match self.data.internal_rx.poll() {
                 Ok(Async::Ready(msg)) => {
@@ -152,7 +151,10 @@ impl<H> Future for Connection<H> where H: ConnHandler {
                             }
                         },
                         Ok(Async::Ready(None)) => unreachable!(),
-                        Ok(Async::NotReady) => break 'outer,
+                        Ok(Async::NotReady) => {
+                            self.hdlr.wakeup(&mut self.data);
+                            break 'outer;
+                        },
                         Err(e) => return Err(e)
                     }
                 },

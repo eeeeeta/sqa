@@ -1,5 +1,7 @@
 use codec::Command;
 
+const MAX_UNDOS: usize = 100;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UndoableChange {
     pub undo: Command,
@@ -11,7 +13,7 @@ pub struct UndoContext {
     changes: Vec<UndoableChange>,
     idx: Option<usize>
 }
-#[derive(Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct UndoState {
     pub undo: Option<String>,
     pub redo: Option<String>
@@ -29,13 +31,16 @@ impl UndoContext {
         }
     }
     pub fn register_change(&mut self, ch: UndoableChange) {
-        trace!("registering undoable change {:?}", ch);
+        trace!("registering undoable change \"{}\"", ch.desc);
         if let Some(idx) = self.idx {
             trace!("obliterating redoability");
             self.changes.drain((idx+1)..);
             self.idx = None;
         }
         self.changes.push(ch);
+        if self.changes.len() > MAX_UNDOS {
+            self.changes.remove(0);
+        }
     }
     fn indexes(&self) -> (Option<usize>, Option<usize>) {
         let (mut undo, mut redo) = (None, None);

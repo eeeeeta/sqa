@@ -168,15 +168,14 @@ impl UITemplate {
         playback_state_update(p, &mut self.pwin);
         signal::signal_handler_block(&self.name_ent, self.name_ent_handler);
         self.name_ent.set_placeholder_text(&p.desc as &str);
-        trace!("setting name entry text to {:?}", p.meta.name);
-        self.name_ent.set_text(p.meta.name.as_ref().map(|s| s as &str).unwrap_or(""));
+        if !self.name_ent.has_focus() {
+            trace!("setting name entry text to {:?}", p.meta.name);
+            self.name_ent.set_text(p.meta.name.as_ref().map(|s| s as &str).unwrap_or(""));
+        }
         signal::signal_handler_unblock(&self.name_ent, self.name_ent_handler);
         self.prewait_ent.set(p.meta.prewait);
         for child in self.errors_list.get_children() {
             self.errors_list.remove(&child);
-        }
-        if let PlaybackState::Active(Some(_)) = p.state {
-            self.tx.send_internal((self.uu, ActionMessageInner::StartUpdatingTiming));
         }
         if let PlaybackState::Unverified(ref errs) = p.state {
             self.get_tab("Errors").label.set_markup(&format!("Errors ({})", errs.len()));
@@ -185,6 +184,8 @@ impl UITemplate {
                 self.errors_list.add(&bx);
                 bx.show_all();
             }
+            self.load_btn.set_sensitive(false);
+            self.execute_btn.set_sensitive(false);
         }
         else if let PlaybackState::Errored(ref err) = p.state {
             self.get_tab("Errors").label.set_markup("Errors (!!)");
@@ -201,8 +202,19 @@ impl UITemplate {
             bx.pack_end(&reset_btn, false, false, 0);
             self.errors_list.add(&bx);
             bx.show_all();
+            self.load_btn.set_sensitive(false);
+            self.execute_btn.set_sensitive(false);
         }
         else {
+            self.load_btn.set_sensitive(true);
+            if let PlaybackState::Loaded = p.state {
+                self.execute_btn.set_sensitive(true);
+                self.load_btn.set_sensitive(false);
+            }
+            else {
+                self.load_btn.set_sensitive(true);
+                self.execute_btn.set_sensitive(false);
+            }
             self.get_tab("Errors").label.set_markup("Errors");
         }
     }

@@ -22,7 +22,7 @@ pub struct FadeParams {
 pub struct Controller {
     params: FadeParams,
     timeout: AsyncResult<(), ::std::io::Error>,
-    durinfo: Option<DurationInfo>
+    cur: Option<FadeDetails<f32>>
 }
 impl Controller {
     pub fn new() -> Self {
@@ -98,7 +98,9 @@ impl ActionController for Controller {
     }
     fn poll(&mut self, mut ctx: ControllerParams) -> bool {
         let _ = self.timeout.poll();
+        trace!("poll fired");
         if self.timeout.is_complete() {
+            trace!("changing state");
             ctx.change_state(PlaybackState::Inactive);
             false
         }
@@ -108,7 +110,7 @@ impl ActionController for Controller {
     }
     fn reset(&mut self, _: ControllerParams) {
         self.timeout = AsyncResult::Empty;
-        self.durinfo = None;
+        self.cur = None;
     }
     fn execute(&mut self, time: u64, mut ctx: ControllerParams) -> BackendResult<bool> {
         {
@@ -123,6 +125,7 @@ impl ActionController for Controller {
             if self.params.fade_master.0 {
                 if let Some(sdr) = tgt.senders.get_mut(0) {
                     let mut fd = FadeDetails::new(sdr.master_volume().get(time), db_lin(self.params.fade_master.1));
+                    self.cur = Some(fd.clone());
                     fd.set_start_time(time);
                     let secs_component = self.params.dur.as_secs() * ::sqa_engine::ONE_SECOND_IN_NANOSECONDS;
                     let subsec_component = self.params.dur.subsec_nanos() as u64;
@@ -135,6 +138,7 @@ impl ActionController for Controller {
                 if enabled {
                     if let Some(sdr) = tgt.senders.get_mut(i) {
                         let mut fd = FadeDetails::new(sdr.volume().get(time), db_lin(fade));
+                        self.cur = Some(fd.clone());
                         fd.set_start_time(time);
                         let secs_component = self.params.dur.as_secs() * ::sqa_engine::ONE_SECOND_IN_NANOSECONDS;
                         let subsec_component = self.params.dur.subsec_nanos() as u64;
@@ -146,29 +150,42 @@ impl ActionController for Controller {
             }
         }
         let now = Sender::<()>::precise_time_ns();
-        let mut positive = true;
+        let mut positive = false;
         let delta = if time > now {
-            positive = false;
+            positive = true;
             time - now
         } else { now - time };
         let secs = delta / 1_000_000_000;
         let ssn = delta % 1_000_000_000;
-        let mut dur = Duration::new(secs, ssn as _);
+        let _dur = Duration::new(secs, ssn as _);
+        let dur;
         if positive {
-            dur = self.params.dur + dur;
+            dur = self.params.dur + _dur;
         }
         else {
-            dur = self.params.dur - dur;
+            dur = self.params.dur - _dur;
         }
+        trace!("time now = {}, sched = {}, delta = {:?}, conf dur = {:?}, wait time = {:?}", now, time, _dur, self.params.dur, dur);
         let timeout = Timeout::new(dur, ctx.ctx.handle.as_ref().unwrap())?;
         self.timeout = timeout.perform(&mut ctx);
-        self.durinfo = Some(DurationInfo {
-            start_time: time,
-            est_duration: self.params.dur
-        });
+        let _ = self.timeout.poll();
         Ok(false)
     }
     fn duration_info(&self) -> Option<DurationInfo> {
-        self.durinfo.clone()
+        if let Some(ref fd) = self.cur {
+            let now = Sender::<()>::precise_time_ns();
+            let start = fd.start_time();
+            let delta = if start > now { 0 } else { now - start };
+            let elapsed = DurationInfo::nanos_to_dur(delta);
+            let total_dur = DurationInfo::nanos_to_dur(fd.duration());
+            Some(DurationInfo {
+                duration: elapsed,
+                start_time: start,
+                est_duration: Some(total_dur)
+            })
+        }
+        else {
+            None
+        }
     }
 }

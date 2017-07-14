@@ -45,8 +45,14 @@ impl<T> FadeDetails<T> where T: Mul<f32, Output=T> + Sub<T, Output=T> + Add<T, O
     pub fn set_start_time(&mut self, st: u64) {
         self.start_time.store(st, Relaxed);
     }
+    pub fn start_time(&self) -> u64 {
+        self.start_time.load(Relaxed)
+    }
     pub fn set_duration(&mut self, st: u64) {
         self.duration.store(st, Relaxed);
+    }
+    pub fn duration(&self) -> u64 {
+        self.duration.load(Relaxed)
     }
     pub fn delta(&self) -> T {
         self.delta

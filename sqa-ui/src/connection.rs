@@ -111,8 +111,8 @@ impl Context {
             UpdateMixerConf { conf } => {
                 args.send(UIMessage::UpdatedMixerConf(conf));
             },
-            ReplyUndoContext { ctx } => {
-                args.send(ConnectionUIMessage::UndoState(ctx.state()).into());
+            ReplyUndoState { ctx } => {
+                args.send(ConnectionUIMessage::UndoState(ctx).into());
             },
             x @ SavefileMade {..} |
             x @ SavefileLoaded {..} => {
@@ -146,7 +146,7 @@ impl Context {
                     self.state = Connected { addr, ver, last_ping, last_err, last_pong };
                     self.ping_timeout(args)?;
                     self.send(Command::GetMixerConf)?;
-                    self.send(Command::GetUndoContext)?;
+                    self.send(Command::GetUndoState)?;
                     self.send(Command::ActionList)?;
                     args.send(SaveMessage::NewlyConnected.into());
                     args.send(ConnectionUIMessage::NewlyConnected.into());

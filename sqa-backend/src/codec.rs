@@ -4,7 +4,7 @@ use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
 use errors::*;
 use mixer::MixerConf;
 use errors::BackendErrorKind::*;
-use undo::UndoContext;
+use undo::UndoState;
 use actions::{ActionParameters, ActionMetadata, OpaqueAction};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -61,8 +61,8 @@ pub enum Command {
     Undo,
     #[oscpath = "/system/redo"]
     Redo,
-    #[oscpath = "/system/undoctx"]
-    GetUndoContext
+    #[oscpath = "/system/undostate"]
+    GetUndoState
 }
 impl Into<OscMessage> for Command {
     fn into(self) -> OscMessage {
@@ -112,8 +112,8 @@ pub enum Reply {
     SavefileMade { #[ser] res: Result<(), String> },
     #[oscpath = "/reply/system/load"]
     SavefileLoaded { #[ser] res: Result<(), String> },
-    #[oscpath = "/reply/system/undoctx"]
-    ReplyUndoContext { #[ser] ctx: UndoContext }
+    #[oscpath = "/reply/system/undostate"]
+    ReplyUndoState { #[ser] ctx: UndoState }
 }
 impl Into<OscMessage> for Reply {
     fn into(self) -> OscMessage {

@@ -14,6 +14,7 @@ use std::sync::mpsc::{Sender, Receiver, self};
 use uuid::Uuid;
 use url::percent_encoding;
 use url::Url;
+use std::time::Duration;
 use std::path::{Path, PathBuf};
 
 /// Converts a linear amplitude to decibels.
@@ -297,7 +298,8 @@ impl ActionController for Controller {
             control: tx,
             durinfo: DurationInfo {
                 start_time: 0,
-                est_duration: dur
+                duration: Duration::new(0, 0),
+                est_duration: Some(dur)
             }
         });
         Ok(true)
@@ -329,7 +331,12 @@ impl ActionController for Controller {
     }
     fn duration_info(&self) -> Option<DurationInfo> {
         if let Some(ref rd) = self.rd {
-            Some(rd.durinfo.clone())
+            let mut ret = rd.durinfo;
+            ret.duration = rd.senders[0].position().to_std().unwrap_or_else(|_| {
+                error!("Hm, we actually failed to convert a Duration to std...");
+                Duration::new(0, 0)
+            });
+            Some(ret)
         }
         else {
             None
