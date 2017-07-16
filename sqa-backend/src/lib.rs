@@ -26,7 +26,7 @@ pub mod mixer;
 pub mod save;
 pub mod undo;
 
-pub static VERSION: &str = "indev";
+pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 use handlers::Connection;
 use state::Context;

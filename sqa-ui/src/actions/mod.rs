@@ -41,6 +41,7 @@ pub enum ActionMessageInner {
     ExecuteAction,
     DeleteAction,
     ResetAction,
+    PauseAction,
     EditAction,
     ChangeName(Option<String>),
     ChangePrewait(Duration),
@@ -73,7 +74,6 @@ pub struct ActionController {
     cur_sel: Option<SelectionDetails>,
     menu: Menu,
     medit: MenuItem,
-    mdelete: MenuItem,
     mload: MenuItem,
     mexec: MenuItem,
     mcreate_audio: MenuItem,
@@ -146,7 +146,7 @@ impl ActionController {
         let sel_handler = 0;
         build!(ActionController using b
                with ctls, opas, tx, mixer, cur_widget, cur_sel, cur_page, sel_handler
-               get view, store, menu, medit, mload, mexec, mdelete, mcreate_audio, mcreate_fade, sidebar, drag_notif)
+               get view, store, menu, medit, mload, mexec, mcreate_audio, mcreate_fade, sidebar, drag_notif)
     }
     pub fn bind(&mut self, tx: &UISender) {
         use self::ActionMessageInner::*;
@@ -157,8 +157,7 @@ impl ActionController {
             self, tx, tsg,
             medit => EditAction,
             mexec => ExecuteAction,
-            mload => LoadAction,
-            mdelete => DeleteAction
+            mload => LoadAction
         }
         let menu = self.menu.clone();
         self.view.connect_button_press_event(move |_, eb| {
@@ -169,6 +168,15 @@ impl ActionController {
             }
             Inhibit(false)
         });
+        self.view.connect_key_press_event(clone!(tx, tsg; |_, ek| {
+            if ek.get_keyval() == gdk::enums::key::Delete {
+                if let Some(uu) = tsg.get() {
+                    tx.send_internal((uu, DeleteAction));
+                    return Inhibit(true);
+                }
+            }
+            Inhibit(false)
+        }));
         self.sel_handler = self.view.get_selection().connect_changed(clone!(tx; |_| {
             tx.send_internal(ActionInternalMessage::SelectionChanged);
         }));
@@ -190,7 +198,6 @@ impl ActionController {
         let drag_uu: Rc<Cell<Option<Uuid>>> = Rc::new(Cell::new(None));
         self.view.connect_button_press_event(clone!(press_coords; |_, eb| {
             let coords = eb.get_position();
-            debug!("dnd: set position to {:?}", coords);
             press_coords.set(coords);
             Inhibit(false)
         }));
@@ -212,7 +219,11 @@ impl ActionController {
                 }
             }
             else {
+                /*
+                FIXME: This provokes memory unsafety for some reason. Probably a bug in gtk.
                 debug!("dnd: cancelling failed drag");
+                dctx.drag_cancel();
+                */
             }
         }));
         self.view.connect_drag_motion(clone!(drag_uu, tsg; |slf, dctx, x, y, _| {
@@ -300,13 +311,13 @@ impl ActionController {
                 Unverified(_) => "gtk-dialog-warning",
                 Loaded => "gtk-home",
                 Loading => "gtk-refresh",
-                Paused => "gtk-media-pause",
+                Paused(_) => "gtk-media-pause",
                 Active(_) => "gtk-media-play",
                 Errored(_) => "gtk-dialog-error"
             };
             let mut duration_progress = 0;
             let duration = match action.state {
-                Active(Some(ref dur)) => {
+                Active(Some(ref dur)) | Paused(Some(ref dur)) => {
                     let (elapsed, pos) = dur.elapsed(true);
                     let text = if pos { "T+" } else { "T-" };
                     if pos && dur.est_duration.is_some() {
@@ -399,6 +410,12 @@ impl ActionController {
                     self.tx.as_mut().unwrap().send_internal(msg);
                 }
             },
+            ActionMaybePaused { res, .. } => {
+                if let Err(e) = res {
+                    let msg = Message::Error(format!("Pausing action failed: {}", e));
+                    self.tx.as_mut().unwrap().send_internal(msg);
+                }
+            },
             ActionExecuted { res, .. } => {
                 action_reply_notify!(self, res, "Executing action", "Action executed.");
             },
@@ -433,7 +450,6 @@ impl ActionController {
                 self.medit.set_sensitive(activated);
                 self.mload.set_sensitive(activated);
                 self.mexec.set_sensitive(activated);
-                self.mdelete.set_sensitive(activated);
                 if let Some(uu) = tsg.get() {
                     if let Some((u2, w)) = self.cur_widget.take() {
                         if uu == u2 {
@@ -509,6 +525,7 @@ impl ActionController {
                 ExecuteAction => tx.send(Command::ExecuteAction { uuid: msg.0 }),
                 ResetAction => tx.send(Command::ResetAction { uuid: msg.0 }),
                 DeleteAction => tx.send(Command::DeleteAction { uuid: msg.0 }),
+                PauseAction => tx.send(Command::PauseAction { uuid: msg.0 }),
                 EditAction => {
                     if let Some((uu, w)) = self.cur_widget.take() {
                         if uu == msg.0 {

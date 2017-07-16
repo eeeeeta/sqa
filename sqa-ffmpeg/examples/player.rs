@@ -4,12 +4,13 @@ extern crate sqa_ffmpeg;
 use sqa_engine::{EngineContext, jack, Sender};
 use sqa_engine::param::{Parameter, FadeDetails};
 use sqa_ffmpeg::{MediaFile, init, Duration};
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead};
+use std::time::Duration as StdDuration;
 use std::thread;
 
 fn main() {
     let mut mctx = init().unwrap();
-    mctx.network_init();
+    mctx.network_init().unwrap();
     println!("Provide a FFmpeg URL:");
 
     let stdin = io::stdin();
@@ -34,7 +35,7 @@ fn main() {
         }
     }
     println!("Chans: {} Sample rate: {} Duration: {} Bitrate: {}", file.channels(), file.sample_rate(), file.duration(), file.bitrate());
-    let thr = ::std::thread::spawn(move || {
+    let _thr = ::std::thread::spawn(move || {
         loop {
             for x in &mut file {
                 if let Ok(mut x) = x {
@@ -61,7 +62,7 @@ fn main() {
             let cur_vol = ctls[0].volume().get(0);
             let mut fd = FadeDetails::new(cur_vol, 0.0);
             fd.set_start_time(Sender::<()>::precise_time_ns() + sqa_engine::ONE_SECOND_IN_NANOSECONDS);
-            fd.set_duration(10 * sqa_engine::ONE_SECOND_IN_NANOSECONDS);
+            fd.set_duration(StdDuration::new(10, 0));
             fd.set_active(true);
             for ch in ctls.iter_mut() {
                 ch.set_volume(Box::new(Parameter::LinearFade(fd.clone())));

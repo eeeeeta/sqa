@@ -212,11 +212,19 @@ impl Context {
             },
             ResetAction { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let ret = a.reset(self, &d.int_sender).map_err(|e| e.to_string());
+                    a.reset(self, &d.int_sender);
                     self.changed.insert(uuid);
-                    ret
+                    Ok(())
                 });
                 d.respond(ActionReset { uuid, res })?;
+            },
+            PauseAction { uuid } => {
+                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
+                    a.pause(self, &d.int_sender);
+                    self.changed.insert(uuid);
+                    Ok(())
+                });
+                d.respond(ActionMaybePaused { uuid, res })?;
             },
             ExecuteAction { uuid } => {
                 let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
@@ -315,8 +323,8 @@ impl Context {
     }
     pub fn create_action(&mut self, ty: &str, pars: Option<ActionParameters>, met: Option<ActionMetadata>, old_uu: Option<Uuid>) -> BackendResult<Uuid> {
         let mut act = match &*ty {
-            "audio" => Action::new_audio(),
-            "fade" => Action::new_fade(),
+            "audio" => Action::audio(),
+            "fade" => Action::fade(),
             x => bail!("Unknown action type: {}", x)
         };
         if let Some(uu) = old_uu {

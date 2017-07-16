@@ -31,6 +31,7 @@ pub struct UITemplate {
     pub notebk: Notebook,
     pub notebk_tabs: HashMap<&'static str, ActionTab>,
     pub close_btn: Button,
+    pub pause_btn: Button,
     pub load_btn: Button,
     pub execute_btn: Button,
     pub reset_btn: Button,
@@ -42,12 +43,21 @@ pub struct UITemplate {
     pub errors_list: ListBox,
     pub uu: Uuid
 }
-
+macro_rules! bind_buttons {
+    ($self:ident, $tx:ident, $uu:ident, $($name:ident => $res:ident),*) => {
+        $(
+            $self.$name.connect_clicked(clone!($tx; |_| {
+                $tx.send_internal(($uu, $res));
+            }));
+        )*
+    }
+}
 impl UITemplate {
     pub fn new(uu: Uuid, tx: UISender) -> Self {
         let mut ret = UITemplate {
             pwin: PropertyWindow::new(),
             close_btn: Button::new_with_mnemonic("_Close"),
+            pause_btn: Button::new_with_mnemonic("_Pause"),
             load_btn: Button::new_with_mnemonic("_Load"),
             execute_btn: Button::new_with_mnemonic("_Execute"),
             reset_btn: Button::new_with_mnemonic("_Reset"),
@@ -64,6 +74,7 @@ impl UITemplate {
         btn_box.set_layout(ButtonBoxStyle::End);
         btn_box.pack_start(&ret.load_btn, false, false, 5);
         btn_box.pack_start(&ret.execute_btn, false, false, 5);
+        btn_box.pack_start(&ret.pause_btn, false, false, 5);
         btn_box.pack_start(&ret.reset_btn, false, false, 5);
         ret.load_btn.set_always_show_image(true);
         ret.load_btn.set_image(&Image::new_from_stock("gtk-home", 4));
@@ -71,6 +82,8 @@ impl UITemplate {
         ret.execute_btn.set_image(&Image::new_from_stock("gtk-media-play", 4));
         ret.reset_btn.set_always_show_image(true);
         ret.reset_btn.set_image(&Image::new_from_stock("gtk-refresh", 4));
+        ret.pause_btn.set_always_show_image(true);
+        ret.pause_btn.set_image(&Image::new_from_stock("gtk-media-pause", 4));
         ret.pwin.append_button(&ret.close_btn);
         let basics_tab = ret.add_tab("Basics");
         let errors_tab = ret.add_tab("Errors");
@@ -128,21 +141,14 @@ impl UITemplate {
         let uu = self.uu;
         let ref tx = self.tx;
         use super::ActionMessageInner::*;
-        self.close_btn.connect_clicked(clone!(tx; |_| {
-            tx.send_internal((uu, CloseButton));
-        }));
-        self.load_btn.connect_clicked(clone!(tx; |_| {
-            tx.send_internal((uu, LoadAction));
-        }));
-        self.execute_btn.connect_clicked(clone!(tx; |_| {
-            tx.send_internal((uu, ExecuteAction));
-        }));
-        self.reset_btn.connect_clicked(clone!(tx; |_| {
-            tx.send_internal((uu, ResetAction));
-        }));
-        self.notebk.connect_switch_page(clone!(tx; |_, _, pg| {
-            tx.send_internal(super::ActionInternalMessage::ChangeCurPage(Some(pg)));
-        }));
+        bind_buttons! {
+            self, tx, uu,
+            close_btn => CloseButton,
+            load_btn => LoadAction,
+            execute_btn => ExecuteAction,
+            pause_btn => PauseAction,
+            reset_btn => ResetAction
+        };
         self.name_ent_handler = self.name_ent.connect_changed(clone!(tx; |slf| {
             let mut txt = slf.get_text();
             println!("name entry changed, text {:?}", txt);
@@ -207,14 +213,7 @@ impl UITemplate {
         }
         else {
             self.load_btn.set_sensitive(true);
-            if let PlaybackState::Loaded = p.state {
-                self.execute_btn.set_sensitive(true);
-                self.load_btn.set_sensitive(false);
-            }
-            else {
-                self.load_btn.set_sensitive(true);
-                self.execute_btn.set_sensitive(false);
-            }
+            self.execute_btn.set_sensitive(true);
             self.get_tab("Errors").label.set_markup("Errors");
         }
     }
@@ -243,7 +242,7 @@ pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {
             "Loaded",
             desc
         ),
-        Paused => pwin.update_header(
+        Paused(_) => pwin.update_header(
             "gtk-media-pause",
             "Paused",
             desc

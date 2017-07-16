@@ -1,6 +1,6 @@
 [package]
 name = "sqa-ffmpeg"
-version = "0.2.2"
+version = "0.2.3"
 description = "FFmpeg bindings for Rust (part of the SQA project)"
 documentation = "https://docs.rs/sqa-ffmpeg"
 repository = "https://github.com/eeeeeta/sqa"
@@ -17,4 +17,4 @@ sample = "0.6.2"
 chrono = "0.2"
 
 [dev-dependencies]
-sqa-engine = { path = "../sqa-engine", version = "0.2.4" }
+sqa-engine = { path = "../sqa-engine", version = "0.3.0" }

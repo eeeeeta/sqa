@@ -5,7 +5,7 @@ use sqa_engine::param::Parameter;
 use sqa_engine::sync::AudioThreadMessage;
 use sqa_ffmpeg::{Frame, MediaFile, MediaResult};
 use sqa_ffmpeg::errors::ErrorKind;
-use super::{ParameterError, ControllerParams, DurationInfo, PlaybackState, ActionController, EditableAction};
+use super::{ParameterError, ControllerParams, DurationInfoInt, PlaybackState, ActionController, EditableAction};
 use state::{ServerMessage, Context, IntSender};
 use std::thread;
 use std::ops::Deref;
@@ -98,7 +98,7 @@ impl SpoolerContext {
 }
 pub struct RunningData {
     control: Sender<SpoolerMessage>,
-    durinfo: DurationInfo,
+    durinfo: DurationInfoInt,
     pub senders: Vec<PlainSender>
 }
 #[derive(Default)]
@@ -296,7 +296,7 @@ impl ActionController for Controller {
         self.rd = Some(RunningData {
             senders: plains,
             control: tx,
-            durinfo: DurationInfo {
+            durinfo: DurationInfoInt {
                 start_time: 0,
                 duration: Duration::new(0, 0),
                 est_duration: Some(dur)
@@ -306,22 +306,28 @@ impl ActionController for Controller {
     }
     fn execute(&mut self, time: u64, _: ControllerParams) -> BackendResult<bool> {
         if let Some(ref mut rd) = self.rd {
-            rd.durinfo.start_time = time;
             for (i, sender) in rd.senders.iter_mut().enumerate() {
-                if let Some(ch) = self.params.chans.get(i) {
-                    sender.set_volume(Box::new(Parameter::Raw(db_lin(ch.vol))));
+                if rd.durinfo.start_time == 0 {
+                    if let Some(ch) = self.params.chans.get(i) {
+                        sender.set_volume(Box::new(Parameter::Raw(db_lin(ch.vol))));
+                    }
                 }
                 sender.set_start_time(time);
                 sender.set_active(true);
             }
+            rd.durinfo.start_time = time;
         }
         Ok(false)
     }
-    fn pause(&mut self, _: ControllerParams) {
+    fn pause(&mut self, _: ControllerParams) -> bool {
         if let Some(ref mut rd) = self.rd {
             for sender in rd.senders.iter_mut() {
                 sender.set_active(false);
             }
+            true
+        }
+        else {
+            false
         }
     }
     fn reset(&mut self, _: ControllerParams) {
@@ -329,7 +335,7 @@ impl ActionController for Controller {
             let _ = rd.control.send(SpoolerMessage::Quit);
         }
     }
-    fn duration_info(&self) -> Option<DurationInfo> {
+    fn duration_info(&self) -> Option<DurationInfoInt> {
         if let Some(ref rd) = self.rd {
             let mut ret = rd.durinfo;
             ret.duration = rd.senders[0].position().to_std().unwrap_or_else(|_| {

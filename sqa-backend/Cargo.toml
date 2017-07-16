@@ -24,10 +24,11 @@ path = "../rosc"
 
 [dependencies.sqa-engine]
 path = "../sqa-engine"
-version = "0.2.4"
+version = "0.3.0"
 
 [dependencies.sqa-ffmpeg]
 path = "../sqa-ffmpeg"
+version = "0.2.3"
 
 [dependencies.sqa-osc-custom-derive]
 path = "../sqa-osc-custom-derive"

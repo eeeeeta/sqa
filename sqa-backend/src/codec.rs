@@ -49,6 +49,8 @@ pub enum Command {
     ExecuteAction { #[subst] uuid: Uuid },
     #[oscpath = "/action/{uuid}/reset"]
     ResetAction { #[subst] uuid: Uuid },
+    #[oscpath = "/action/{uuid}/pause"]
+    PauseAction { #[subst] uuid: Uuid },
     #[oscpath = "/mixer/config"]
     GetMixerConf,
     #[oscpath = "/mixer/config/set"]
@@ -95,6 +97,8 @@ pub enum Reply {
     ActionLoaded { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/action/{uuid}/execute"]
     ActionExecuted { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
+    #[oscpath = "/reply/action/{uuid}/pause"]
+    ActionMaybePaused { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/action/{uuid}/reset"]
     ActionReset { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/mixer/config"]

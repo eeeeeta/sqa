@@ -193,7 +193,6 @@
                         <property name="can_focus">False</property>
                         <property name="label" translatable="yes">_Delete</property>
                         <property name="use_underline">True</property>
-                        <accelerator key="Delete" signal="activate"/>
                       </object>
                     </child>
                     <child>

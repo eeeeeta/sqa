@@ -27,12 +27,18 @@ pub enum PlaybackState {
     Unverified(Vec<ParameterError>),
     Loaded,
     Loading,
-    Paused,
+    Paused(Option<DurationInfo>),
     Active(Option<DurationInfo>),
     Errored(String)
 }
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct DurationInfo {
+    pub elapsed: Duration,
+    pub pos: bool,
+    pub est_duration: Option<Duration>
+}
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub(crate) struct DurationInfoInt {
     pub duration: Duration,
     pub start_time: u64,
     pub est_duration: Option<Duration>
@@ -43,6 +49,28 @@ impl DurationInfo {
         let ssn = nanos % 1_000_000_000;
         Duration::new(secs, ssn as _)
     }
+    pub fn elapsed(&self, rounded: bool) -> (Duration, bool) {
+        let mut secs = self.elapsed.as_secs();
+        let mut ssn = self.elapsed.subsec_nanos();
+        if rounded {
+            if ssn >= 500_000_000 {
+                secs += 1;
+            }
+            ssn = 0;
+        }
+        (Duration::new(secs, ssn), self.pos)
+    }
+}
+impl From<DurationInfoInt> for DurationInfo {
+    fn from(v: DurationInfoInt) -> DurationInfo {
+        let (elapsed, pos) = v.elapsed(false);
+        Self {
+            elapsed, pos,
+            est_duration: v.est_duration
+        }
+    }
+}
+impl DurationInfoInt {
     pub fn elapsed(&self, rounded: bool) -> (Duration, bool) {
         let now = Sender::<()>::precise_time_ns();
         let mut positive = true;
@@ -63,6 +91,7 @@ impl DurationInfo {
         (Duration::new(secs, ssn), positive)
     }
 }
+
 
 pub struct ControllerParams<'a> {
     ctx: &'a mut Context,
@@ -168,7 +197,7 @@ pub trait EditableAction {
     fn get_params(&self) -> &Self::Parameters;
     fn set_params(&mut self, Self::Parameters, ControllerParams);
 }
-pub trait ActionController {
+pub(crate) trait ActionController {
     fn desc(&self, ctx: &Context) -> String;
     fn verify_params(&self, ctx: &Context) -> Vec<ParameterError>;
     fn load(&mut self, _ctx: ControllerParams) -> BackendResult<bool> {
@@ -178,14 +207,15 @@ pub trait ActionController {
         false
     }
     fn execute(&mut self, time: u64, ctx: ControllerParams) -> BackendResult<bool>;
-    fn pause(&mut self, _ctx: ControllerParams) {
+    fn pause(&mut self, _ctx: ControllerParams) -> bool {
+        false
     }
     fn reset(&mut self, _ctx: ControllerParams) {
     }
     fn estimated_duration(&self) -> Duration {
         Duration::from_millis(0)
     }
-    fn duration_info(&self) -> Option<DurationInfo> {
+    fn duration_info(&self) -> Option<DurationInfoInt> {
         None
     }
     fn accept_audio_message(&mut self, _msg: &AudioThreadMessage, _ctx: ControllerParams) -> bool {
@@ -259,27 +289,29 @@ pub struct Action {
     ctl: ActionType,
     meta: ActionMetadata,
     timeout: AsyncResult<(), ::std::io::Error>,
-    uu: Uuid
+    uu: Uuid,
+    start_asap: bool
 }
+macro_rules! new_impl {
+    ($($aty:ident, $atyl:ident),*) => {
+        impl Action {
+            $(
+                pub fn $atyl() -> Self {
+                    Action {
+                        state: PlaybackState::Inactive,
+                        ctl: ActionType::$aty($atyl::Controller::new()),
+                        uu: Uuid::new_v4(),
+                        meta: Default::default(),
+                        timeout: Default::default(),
+                        start_asap: false
+                    }
+                }
+            )*
+        }
+    }
+}
+new_impl!(Audio, audio, Fade, fade);
 impl Action {
-    pub fn new_audio() -> Self {
-        Action {
-            state: PlaybackState::Inactive,
-            ctl: ActionType::Audio(audio::Controller::new()),
-            uu: Uuid::new_v4(),
-            meta: Default::default(),
-            timeout: Default::default()
-        }
-    }
-    pub fn new_fade() -> Self {
-        Action {
-            state: PlaybackState::Inactive,
-            ctl: ActionType::Fade(fade::Controller::new()),
-            uu: Uuid::new_v4(),
-            meta: Default::default(),
-            timeout: Default::default()
-        }
-    }
     pub fn accept_audio_message(&mut self, ctx: &mut Context, sender: &IntSender, msg: &AudioThreadMessage) -> bool {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         action!(mut self.ctl).accept_audio_message(msg, cp)
@@ -307,11 +339,22 @@ impl Action {
         }
         Ok(())
     }
-    pub fn reset(&mut self, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
+    pub fn pause(&mut self, ctx: &mut Context, sender: &IntSender) {
+        let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
+        let durinfo = if let PlaybackState::Active(_) = self.state {
+            action!(self.ctl).duration_info().map(|x| x.into())
+        }
+        else {
+            None
+        };
+        if action!(mut self.ctl).pause(cp) {
+            self.state = PlaybackState::Paused(durinfo);
+        }
+    }
+    pub fn reset(&mut self, ctx: &mut Context, sender: &IntSender) {
         let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
         action!(mut self.ctl).reset(cp);
         self.state = PlaybackState::Inactive;
-        Ok(())
     }
     pub fn set_uuid(&mut self, uu: Uuid) {
         self.uu = uu;
@@ -320,7 +363,7 @@ impl Action {
         let _ = self.timeout.poll();
         let mut continue_polling = false;
         if self.timeout.is_complete() {
-            trace!("poll fired; timeout complete");
+            //trace!("poll fired; timeout complete");
             if let PlaybackState::Active(_) = self.state {
                 let st = action!(self.ctl).duration_info();
                 let mut delta_millis;
@@ -334,7 +377,7 @@ impl Action {
                     if delta_millis < 500 {
                         delta_millis = 1000 + delta_millis;
                     }
-                    trace!("elapsed: {:?}; waiting {}ms", elapsed, delta_millis);
+                    //trace!("elapsed: {:?}; waiting {}ms", elapsed, delta_millis);
                 }
                 else {
                     delta_millis = 1000;
@@ -350,7 +393,7 @@ impl Action {
             }
         }
         else if self.timeout.is_waiting() {
-            trace!("poll fired; timeout still waiting");
+            //trace!("poll fired; timeout still waiting");
             let _ = self.timeout.poll();
             continue_polling = true;
         }
@@ -362,34 +405,57 @@ impl Action {
         continue_polling
     }
     pub fn execute(&mut self, time: u64, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
-        let time = time + (self.meta.prewait.subsec_nanos() as u64) + (self.meta.prewait.as_secs() * 1_000_000_000);
-        if let PlaybackState::Loaded = self.state {
-            let x = {
-                let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
-                match action!(mut self.ctl).execute(time, cp) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        self.state = PlaybackState::Errored(e.to_string());
-                        return Ok(())
-                    }
-                }
-            };
-            if x {
-                self.state = PlaybackState::Inactive;
+        use self::PlaybackState::*;
+        loop {
+            match self.state {
+                Loading => {
+                    self.start_asap = true;
+                    break;
+                },
+                Loaded | Paused(None) => {
+                    let time = time + (self.meta.prewait.subsec_nanos() as u64) + (self.meta.prewait.as_secs() * 1_000_000_000);
+                    self._execute(time, ctx, sender);
+                    break;
+                },
+                Paused(Some(dur)) => {
+                    let delta_nanos = (dur.elapsed.subsec_nanos() as u64) + (dur.elapsed.as_secs() * 1_000_000_000);
+                    let time = if dur.pos {
+                        time - delta_nanos
+                    } else {
+                        time + delta_nanos
+                    };
+                    self._execute(time, ctx, sender);
+                    break;
+                },
+                Active(_) => break,
+                Inactive => self.load(ctx, sender)?,
+                _ => bail!(format!("Wrong state for executing: expected Loading, Loaded, Inactive, or Active, found {:?}", self.state))
             }
-            else {
-                ctx.async_actions.insert(self.uu);
-                self.timeout = AsyncResult::Waiting(
-                    Box::new(Timeout::new(Duration::new(1, 0), ctx.handle.as_ref().unwrap()).unwrap())
-                );
-                let _ = self.timeout.poll();
-                self.state = PlaybackState::Active(None);
-            }
-        }
-        else {
-            bail!(format!("Wrong state for executing: expected Loaded, found {:?}", self.state));
         }
         Ok(())
+    }
+    fn _execute(&mut self, time: u64, ctx: &mut Context, sender: &IntSender) {
+        let x = {
+            let cp: ControllerParams = ControllerParams { ctx: ctx, internal_tx: sender, uuid: self.uu };
+            match action!(mut self.ctl).execute(time, cp) {
+                Ok(b) => b,
+                Err(e) => {
+                    self.state = PlaybackState::Errored(e.to_string());
+                    return;
+                }
+            }
+        };
+        if x {
+            self.state = PlaybackState::Inactive;
+        }
+        else {
+            ctx.async_actions.insert(self.uu);
+            self.timeout = AsyncResult::Waiting(
+                Box::new(Timeout::new(Duration::new(1, 0), ctx.handle.as_ref().unwrap()).unwrap())
+            );
+            let _ = self.timeout.poll();
+            self.state = PlaybackState::Active(None);
+        }
     }
     pub fn state_change(&mut self, ps: PlaybackState, ctx: &mut Context, sender: &IntSender) -> BackendResult<()> {
         use self::PlaybackState::*;
@@ -401,14 +467,14 @@ impl Action {
                 Inactive | Unverified(_) | Errored(_) => {
                     bail!(format!("A state change (to {:?}) cannot be made whilst {:?}", ps, self.state));
                 },
-                Loading | Loaded | Active(_) | Paused => {
+                Loading | Loaded | Active(_) | Paused(_) => {
                     match ps {
                         Loaded => {},
                         Loading => {},
-                        Paused => {},
+                        Paused(_) => {},
                         Active(_) => {},
                         Inactive => {
-                            self.reset(ctx, sender)?;
+                            self.reset(ctx, sender);
                             return Ok(())
                         },
                         x => bail!(format!("Wrong state change for {:?}: {:?}", self.state, x))
@@ -439,7 +505,7 @@ impl Action {
             _ => {}
         }
         if active {
-            let st = action!(self.ctl).duration_info();
+            let st = action!(self.ctl).duration_info().map(|x| x.into());
             self.state = PlaybackState::Active(st);
         }
         else if let Some(vec) = new {
