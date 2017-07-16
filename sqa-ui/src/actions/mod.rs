@@ -1,10 +1,14 @@
 use gtk::prelude::*;
-use gtk::{self, Widget, Menu, TreeView, ListStore, Builder, MenuItem, TreeSelection, TargetEntry, TargetFlags, Stack};
+use gtk::{self, Widget, Menu, TreeView, ListStore, SelectionMode, Builder, MenuItem, TreeSelection, TreeIter, TargetEntry, TargetFlags, Stack};
+use gtk::Box as GBox;
 use gdk::WindowExt;
 use gdk;
+use gtk::DragContextExtManual;
 use uuid::Uuid;
 use std::collections::HashMap;
 use std::mem;
+use std::cell::Cell;
+use std::rc::Rc;
 use sync::UISender;
 use sqa_backend::codec::{Command, Reply};
 use sqa_backend::mixer::MixerConf;
@@ -40,6 +44,7 @@ pub enum ActionMessageInner {
     EditAction,
     ChangeName(Option<String>),
     ChangePrewait(Duration),
+    Retarget(Uuid),
     CloseButton,
 }
 impl DurationEntryMessage for ActionMessageInner {
@@ -73,6 +78,7 @@ pub struct ActionController {
     mexec: MenuItem,
     mcreate_audio: MenuItem,
     mcreate_fade: MenuItem,
+    drag_notif: GBox,
     cur_page: Option<u32>,
     sel_handler: u64
 }
@@ -86,6 +92,7 @@ pub trait ActionUI {
     fn on_action_list(&mut self, _l: &HashMap<Uuid, OpaqueAction>) {}
     fn on_selection_finished(&mut self, _sel: Uuid) {}
     fn on_selection_cancelled(&mut self) {}
+    fn is_dnd_target(&self) -> bool { false }
     fn change_cur_page(&mut self, Option<u32>);
 }
 
@@ -95,13 +102,23 @@ struct TreeSelectGetter {
     ts: ListStore
 }
 impl TreeSelectGetter {
+    pub fn iter_to_value(&self, ti: TreeIter) -> Option<Uuid> {
+        if let Some(v) = self.ts.get_value(&ti, 0).get::<String>() {
+            if let Ok(uu) = Uuid::parse_str(&v) {
+                return Some(uu);
+            }
+        }
+        None
+    }
+    pub fn iter_is_dnd_target(&self, ti: TreeIter) -> bool {
+        if let Some(v) = self.ts.get_value(&ti, 7).get::<bool>() {
+            return v;
+        }
+        false
+    }
     pub fn get(&self) -> Option<Uuid> {
         if let Some((_, ti)) = self.sel.get_selected() {
-            if let Some(v) = self.ts.get_value(&ti, 0).get::<String>() {
-                if let Ok(uu) = Uuid::parse_str(&v) {
-                    return Some(uu);
-                }
-            }
+            return self.iter_to_value(ti)
         }
         None
     }
@@ -129,11 +146,12 @@ impl ActionController {
         let sel_handler = 0;
         build!(ActionController using b
                with ctls, opas, tx, mixer, cur_widget, cur_sel, cur_page, sel_handler
-               get view, store, menu, medit, mload, mexec, mdelete, mcreate_audio, mcreate_fade, sidebar)
+               get view, store, menu, medit, mload, mexec, mdelete, mcreate_audio, mcreate_fade, sidebar, drag_notif)
     }
     pub fn bind(&mut self, tx: &UISender) {
         use self::ActionMessageInner::*;
         self.tx = Some(tx.clone());
+        self.view.get_selection().set_mode(SelectionMode::Single);
         let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
         bind_action_menu_items! {
             self, tx, tsg,
@@ -160,13 +178,105 @@ impl ActionController {
         self.mcreate_fade.connect_activate(clone!(tx; |_| {
             tx.send_internal(ActionInternalMessage::Create("fade"));
         }));
-        let dnd_targets = vec![TargetEntry::new("text/uri-list", TargetFlags::empty(), 0)];
+        let row_dnd_target = TargetEntry::new("STRING", gtk::TARGET_SAME_WIDGET, 0);
+        let dnd_targets = vec![
+            TargetEntry::new("text/uri-list", TargetFlags::empty(), 0),
+            row_dnd_target.clone()
+        ];
+        self.view.drag_source_set(gdk::BUTTON1_MASK, &vec![row_dnd_target], gdk::ACTION_COPY | gdk::ACTION_MOVE);
         self.view.drag_dest_set(gtk::DEST_DEFAULT_ALL, &dnd_targets, gdk::ACTION_COPY | gdk::ACTION_MOVE);
+        let dn = self.drag_notif.clone();
+        let press_coords = Rc::new(Cell::new((0.0, 0.0)));
+        let drag_uu: Rc<Cell<Option<Uuid>>> = Rc::new(Cell::new(None));
+        self.view.connect_button_press_event(clone!(press_coords; |_, eb| {
+            let coords = eb.get_position();
+            debug!("dnd: set position to {:?}", coords);
+            press_coords.set(coords);
+            Inhibit(false)
+        }));
+        self.view.connect_drag_begin(clone!(dn, tsg, press_coords, drag_uu; |slf, dctx| {
+            let (x, y) = press_coords.get();
+            let (x, y) = (x.trunc() as _, y.trunc() as _);
+            if let Some((Some(path), _, _, _)) = slf.get_path_at_pos(x, y) {
+                debug!("dnd: drag begun");
+                dn.show_all();
 
-        self.view.connect_drag_data_received(clone!(tx; |_, _, _, _, data, _, _| {
+                if let Some(ti) = tsg.ts.get_iter(&path) {
+                    if let Some(uu) = tsg.iter_to_value(ti) {
+                        debug!("dnd: dragging uu {}", uu);
+                        drag_uu.set(Some(uu));
+                    }
+                }
+                if let Some(surf) = slf.create_row_drag_icon(&path) {
+                    dctx.drag_set_icon_surface(&surf);
+                }
+            }
+            else {
+                debug!("dnd: cancelling failed drag");
+            }
+        }));
+        self.view.connect_drag_motion(clone!(drag_uu, tsg; |slf, dctx, x, y, _| {
+            use gdk::DragContextExtManual;
+            if drag_uu.get().is_some() {
+                let (x, y) = slf.convert_widget_to_bin_window_coords(x, y);
+                if let Some((Some(path), _, _, _)) = slf.get_path_at_pos(x, y) {
+                    if let Some(ti) = tsg.ts.get_iter(&path) {
+                        if !tsg.iter_is_dnd_target(ti) {
+                            dctx.drag_status(gdk::DragAction::empty(), 0);
+                        }
+                        else {
+                            dctx.drag_status(gdk::ACTION_MOVE, 0);
+                        }
+                        return Inhibit(false);
+                    }
+                }
+                dctx.drag_status(gdk::DragAction::empty(), 0);
+            }
+            else {
+                dctx.drag_status(gdk::ACTION_COPY, 0);
+            }
+            Inhibit(false)
+        }));
+        self.view.connect_drag_end(clone!(drag_uu; |_, _| {
+            debug!("dnd: drag ended");
+            drag_uu.set(None);
+            dn.hide();
+        }));
+        self.view.connect_drag_data_get(clone!(drag_uu; |_, _, data, _, _| {
+            if let Some(uu) = drag_uu.get() {
+                debug!("dnd: drag_data_get called for uu {}", uu);
+                data.set_text(&format!("{}", uu), -1);
+            }
+            else {
+                debug!("dnd: drag_data_get called, but no uu");
+            }
+        }));
+        self.view.connect_drag_data_received(clone!(tx, tsg; |slf, _, x, y, data, _, _| {
             let uris = data.get_uris();
             debug!("dnd: got uris {:?}", uris);
-            if uris.len() == 0 { return; }
+            if uris.len() == 0 {
+                if let Some(txt) = data.get_text() {
+                    if let Ok(uu) = txt.parse::<Uuid>() {
+                        debug!("dnd: got UUID dropped {}, widget coords ({}, {})", uu, x, y);
+                        let (x, y) = slf.convert_widget_to_bin_window_coords(x, y);
+                        debug!("dnd: bin window coords ({}, {})", x, y);
+                        if let Some((Some(path), _, _, _)) = slf.get_path_at_pos(x, y) {
+                            if let Some(ti) = tsg.ts.get_iter(&path) {
+                                if let Some(uu2) = tsg.iter_to_value(ti) {
+                                    debug!("dnd: was dropped onto {}", uu2);
+                                    tx.send_internal((uu2, ActionMessageInner::Retarget(uu)));
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        return;
+                    }
+                }
+                else {
+                    return;
+                }
+            }
             tx.send_internal(ActionInternalMessage::FilesDropped(uris));
         }));
 
@@ -194,26 +304,42 @@ impl ActionController {
                 Active(_) => "gtk-media-play",
                 Errored(_) => "gtk-dialog-error"
             };
+            let mut duration_progress = 0;
             let duration = match action.state {
                 Active(Some(ref dur)) => {
                     let (elapsed, pos) = dur.elapsed(true);
                     let text = if pos { "T+" } else { "T-" };
+                    if pos && dur.est_duration.is_some() {
+                        let ed = dur.est_duration.unwrap();
+                        let ed = (ed.as_secs() as f32 * 1_000_000_000.0) + ed.subsec_nanos() as f32;
+                        let elapsed = (elapsed.as_secs() as f32 * 1_000_000_000.0) + elapsed.subsec_nanos() as f32;
+                        let mut perc = ((elapsed / ed) * 100.0).trunc();
+                        if perc > 100.0 {
+                            perc = 100.0;
+                        }
+                        duration_progress = perc as u32;
+                    }
                     format!("{}{}", text, DurationEntry::format(elapsed, false))
                 },
                 _ => "".into()
             };
+            let is_dnd_target = self.ctls.get(&uu).unwrap().is_dnd_target();
             let iter = self.store.insert_with_values(None, &[
                 0, // uuid
                 1, // description
                 2, // icon-state (playback state icon)
                 3, // icon-type (action type icon)
                 4, // duration
+                6, // duration progress bar (0-100 percent)
+                7, // is-dnd-target (can we drop other actions onto this one?)
             ], &[
                 &uu.to_string(),
                 &action.display_name(),
                 &state,
                 &typ,
-                &duration
+                &duration,
+                &duration_progress,
+                &is_dnd_target
             ]);
             if let Some(u2) = sel {
                 if *uu == u2 {
@@ -407,6 +533,7 @@ impl ActionController {
                         tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: opa.meta.clone() });
                     }
                 },
+                Retarget(uu) => ctl.on_selection_finished(uu),
                 CloseButton => ctl.close_window(),
                 x => ctl.on_message(x)
             }

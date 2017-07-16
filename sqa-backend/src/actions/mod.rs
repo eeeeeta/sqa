@@ -320,9 +320,10 @@ impl Action {
         let _ = self.timeout.poll();
         let mut continue_polling = false;
         if self.timeout.is_complete() {
+            trace!("poll fired; timeout complete");
             if let PlaybackState::Active(_) = self.state {
                 let st = action!(self.ctl).duration_info();
-                let delta_millis;
+                let mut delta_millis;
                 if let Some(dur) = st {
                     let (elapsed, pos) = dur.elapsed(false);
                     let elapsed = elapsed.subsec_nanos();
@@ -330,6 +331,10 @@ impl Action {
                         1_000_000_000 - elapsed
                     } else { elapsed };
                     delta_millis = delta_nanos / 1_000_000;
+                    if delta_millis < 500 {
+                        delta_millis = 1000 + delta_millis;
+                    }
+                    trace!("elapsed: {:?}; waiting {}ms", elapsed, delta_millis);
                 }
                 else {
                     delta_millis = 1000;
@@ -345,6 +350,7 @@ impl Action {
             }
         }
         else if self.timeout.is_waiting() {
+            trace!("poll fired; timeout still waiting");
             let _ = self.timeout.poll();
             continue_polling = true;
         }

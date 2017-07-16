@@ -8,8 +8,8 @@ sqa-backend = { path = "../sqa-backend" }
 rosc = { path = "../rosc" }
 tokio-core = "0.1"
 futures = "0.1"
-gtk = { git = "https://github.com/gtk-rs/gtk", features = ["v3_12"] }
-gdk = { git = "https://github.com/gtk-rs/gdk", features = ["v3_12"] }
+gtk = { git = "https://github.com/gtk-rs/gtk", features = ["v3_16"] }
+gdk = { git = "https://github.com/gtk-rs/gdk", features = ["v3_16"] }
 glib = { git = "https://github.com/gtk-rs/glib" }
 error-chain = "0.10"
 time = "0.1"

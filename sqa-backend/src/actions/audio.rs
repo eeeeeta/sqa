@@ -200,10 +200,10 @@ impl EditableAction for Controller {
 impl ActionController for Controller {
     fn desc(&self, _: &Context) -> String {
         if let Some(Ok(ref url)) = self.url {
-            format!("Play audio at {}", url.file_name().unwrap().to_string_lossy())
+            format!("{}", url.file_name().unwrap().to_string_lossy())
         }
         else {
-            format!("Play audio [invalid]")
+            format!("[invalid audio cue]")
         }
     }
     fn verify_params(&self, ctx: &Context) -> Vec<ParameterError> {

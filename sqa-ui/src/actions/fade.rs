@@ -179,4 +179,5 @@ impl ActionUI for FadeUI {
     fn change_cur_page(&mut self, cp: Option<u32>) {
         self.temp.change_cur_page(cp)
     }
+    fn is_dnd_target(&self) -> bool { true }
 }

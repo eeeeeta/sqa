@@ -98,7 +98,6 @@ impl ActionController for Controller {
     }
     fn poll(&mut self, mut ctx: ControllerParams) -> bool {
         let _ = self.timeout.poll();
-        trace!("poll fired");
         if self.timeout.is_complete() {
             trace!("changing state");
             ctx.change_state(PlaybackState::Inactive);
