@@ -5,7 +5,7 @@ use gdk::WindowExt;
 use gdk;
 use gtk::DragContextExtManual;
 use uuid::Uuid;
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
 use std::mem;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -18,6 +18,7 @@ use messages::Message;
 use std::time::Duration;
 use widgets::{DurationEntry, DurationEntryMessage};
 use glib::signal;
+use copy::CopyPasteMessage;
 
 pub mod audio;
 pub mod fade;
@@ -32,6 +33,8 @@ pub enum ActionInternalMessage {
     BeginSelection(Uuid),
     CancelSelection,
     ChangeCurPage(Option<u32>),
+    CopyPaste(CopyPasteMessage),
+    Rebuild
 }
 #[derive(Clone)]
 pub enum ActionMessageInner {
@@ -72,10 +75,15 @@ pub struct ActionController {
     ctls: HashMap<Uuid, Box<ActionUI>>,
     opas: HashMap<Uuid, OpaqueAction>,
     cur_sel: Option<SelectionDetails>,
+    clipboard: Option<OpaqueAction>,
     menu: Menu,
     medit: MenuItem,
     mload: MenuItem,
+    mreset: MenuItem,
+    mpause: MenuItem,
     mexec: MenuItem,
+    mdelete: MenuItem,
+    mrebuild: MenuItem,
     mcreate_audio: MenuItem,
     mcreate_fade: MenuItem,
     drag_notif: GBox,
@@ -136,17 +144,9 @@ macro_rules! bind_action_menu_items {
 }
 impl ActionController {
     pub fn new(b: &Builder) -> Self {
-        let ctls = HashMap::new();
-        let opas = HashMap::new();
-        let tx = None;
-        let cur_page = None;
-        let cur_widget = None;
-        let cur_sel = None;
-        let mixer = Default::default();
-        let sel_handler = 0;
         build!(ActionController using b
-               with ctls, opas, tx, mixer, cur_widget, cur_sel, cur_page, sel_handler
-               get view, store, menu, medit, mload, mexec, mcreate_audio, mcreate_fade, sidebar, drag_notif)
+               default tx, cur_page, cur_widget, cur_sel, clipboard, mixer, sel_handler, ctls, opas
+               get view, store, menu, medit, mload, mexec, mdelete, mrebuild, mreset, mpause, mcreate_audio, mcreate_fade, sidebar, drag_notif)
     }
     pub fn bind(&mut self, tx: &UISender) {
         use self::ActionMessageInner::*;
@@ -157,7 +157,16 @@ impl ActionController {
             self, tx, tsg,
             medit => EditAction,
             mexec => ExecuteAction,
+            mdelete => DeleteAction,
+            mreset => ResetAction,
+            mpause => PauseAction,
             mload => LoadAction
+        }
+        bind_menu_items! {
+            self, tx,
+            mcreate_audio => ActionInternalMessage::Create("audio"),
+            mcreate_fade => ActionInternalMessage::Create("fade"),
+            mrebuild => ActionInternalMessage::Rebuild
         }
         let menu = self.menu.clone();
         self.view.connect_button_press_event(move |_, eb| {
@@ -179,12 +188,6 @@ impl ActionController {
         }));
         self.sel_handler = self.view.get_selection().connect_changed(clone!(tx; |_| {
             tx.send_internal(ActionInternalMessage::SelectionChanged);
-        }));
-        self.mcreate_audio.connect_activate(clone!(tx; |_| {
-            tx.send_internal(ActionInternalMessage::Create("audio"));
-        }));
-        self.mcreate_fade.connect_activate(clone!(tx; |_| {
-            tx.send_internal(ActionInternalMessage::Create("fade"));
         }));
         let row_dnd_target = TargetEntry::new("STRING", gtk::TARGET_SAME_WIDGET, 0);
         let dnd_targets = vec![
@@ -392,10 +395,14 @@ impl ActionController {
                     .send_internal(Message::Statusbar("Action deleted.".into()));
             },
             ReplyActionList { list } => {
-                self.opas.clear();
-                self.ctls.clear();
+                let mut to_remove = self.opas.iter().map(|(&k, _)| k).collect::<HashSet<_>>();
                 for (uu, oa) in list {
                     self.on_action_info(uu, oa);
+                    to_remove.remove(&uu);
+                }
+                for uu in to_remove {
+                    self.opas.remove(&uu);
+                    self.ctls.remove(&uu);
                 }
             },
             ActionCreated { res } => {
@@ -448,6 +455,9 @@ impl ActionController {
                 }
                 let activated = tsg.get().is_some();
                 self.medit.set_sensitive(activated);
+                self.mdelete.set_sensitive(activated);
+                self.mreset.set_sensitive(activated);
+                self.mpause.set_sensitive(activated);
                 self.mload.set_sensitive(activated);
                 self.mexec.set_sensitive(activated);
                 if let Some(uu) = tsg.get() {
@@ -513,7 +523,40 @@ impl ActionController {
             },
             ChangeCurPage(cp) => {
                 self.cur_page = cp;
-            }
+            },
+            CopyPaste(msg) => {
+                use self::CopyPasteMessage::*;
+                debug!("got copypaste: {:?}", msg);
+                match msg {
+                    x @ Copy | x @ Cut => {
+                        let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
+                        if let Some(uu) = tsg.get() {
+                            if let Some(opa) = self.opas.get(&uu) {
+                                self.clipboard = Some(opa.clone());
+                            }
+                            if let Cut = x {
+                                self.tx.as_mut().unwrap()
+                                    .send_internal((uu, ActionMessageInner::DeleteAction));
+                            }
+                        }
+                    },
+                    Paste => {
+                        if let Some(opa) = self.clipboard.clone() {
+                            let typ = opa.typ().into();
+                            let OpaqueAction { mut uu, params, meta, .. } = opa;
+                            if self.opas.get(&uu).is_some() {
+                                uu = Uuid::new_v4();
+                            }
+                            self.tx.as_mut().unwrap()
+                                .send(Command::ReviveAction { typ, uuid: uu, params, meta });
+                        }
+                    }
+                };
+            },
+            Rebuild => {
+                self.tx.as_mut().unwrap()
+                    .send(Command::ActionList);
+            },
         }
     }
     pub fn on_action_msg(&mut self, msg: ActionMessage) {

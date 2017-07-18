@@ -29,6 +29,7 @@ mod messages;
 mod actions;
 mod connection;
 mod save;
+mod copy;
 
 use sync::{UIContext, BackendContext};
 fn main() {
@@ -81,7 +82,8 @@ fn main() {
         conn: connection::ConnectionController::new(&b, win.clone()),
         act: actions::ActionController::new(&b),
         msg: messages::MessageController::new(&b),
-        save: save::SaveController::new(&b, win.clone())
+        save: save::SaveController::new(&b, win.clone()),
+        copy: copy::CopyPasteController::new(&b, win.clone())
     };
     ctx.bind_all();
     let ctx = RefCell::new(ctx);

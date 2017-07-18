@@ -74,6 +74,9 @@
                       <object class="GtkMenuItem" id="sqa-SaveController-mopen_force">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
+                        <property name="tooltip_text" translatable="yes">Open the savefile, attempting to salvage as much information as possible from it.
+
+This may result in some of the actions being broken.</property>
                         <property name="label" translatable="yes">_Open (ignoring errors)...</property>
                         <property name="use_underline">True</property>
                         <accelerator key="o" signal="activate" modifiers="GDK_SHIFT_MASK | GDK_CONTROL_MASK"/>
@@ -132,6 +135,39 @@
                         <accelerator key="z" signal="activate" modifiers="GDK_SHIFT_MASK | GDK_CONTROL_MASK"/>
                       </object>
                     </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="sqa-CopyPasteController-mcopy">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">_Copy</property>
+                        <property name="use_underline">True</property>
+                        <accelerator key="c" signal="activate" modifiers="GDK_CONTROL_MASK"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="sqa-CopyPasteController-mcut">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">C_ut</property>
+                        <property name="use_underline">True</property>
+                        <accelerator key="x" signal="activate" modifiers="GDK_CONTROL_MASK"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="sqa-CopyPasteController-mpaste">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">_Paste</property>
+                        <property name="use_underline">True</property>
+                        <accelerator key="v" signal="activate" modifiers="GDK_CONTROL_MASK"/>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>
@@ -179,9 +215,24 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkSeparatorMenuItem">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem">
+                        <property name="visible">True</property>
+                        <property name="sensitive">False</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Currently selected:</property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkMenuItem" id="sqa-ActionController-medit">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
+                        <property name="tooltip_text" translatable="yes">Edit the currently selected action in a separate window.</property>
                         <property name="label" translatable="yes">_Edit Separately...</property>
                         <property name="use_underline">True</property>
                         <accelerator key="e" signal="activate" modifiers="GDK_CONTROL_MASK"/>
@@ -196,21 +247,55 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkMenuItem" id="sqa-ActionController-mreset">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">_Reset</property>
+                        <property name="use_underline">True</property>
+                        <accelerator key="r" signal="activate" modifiers="GDK_SHIFT_MASK | GDK_CONTROL_MASK"/>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkMenuItem" id="sqa-ActionController-mload">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="label" translatable="yes">_Load</property>
                         <property name="use_underline">True</property>
-                        <accelerator key="l" signal="activate" modifiers="GDK_CONTROL_MASK"/>
+                        <accelerator key="l" signal="activate" modifiers="GDK_SHIFT_MASK | GDK_CONTROL_MASK"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="sqa-ActionController-mpause">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">_Pause</property>
+                        <property name="use_underline">True</property>
+                        <accelerator key="p" signal="activate" modifiers="GDK_SHIFT_MASK | GDK_CONTROL_MASK"/>
                       </object>
                     </child>
                     <child>
                       <object class="GtkMenuItem" id="sqa-ActionController-mexec">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">_Execute</property>
+                        <property name="label" translatable="yes">E_xecute</property>
                         <property name="use_underline">True</property>
                         <accelerator key="e" signal="activate" modifiers="GDK_SHIFT_MASK | GDK_CONTROL_MASK"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="sqa-ActionController-mrebuild">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="tooltip_text" translatable="yes">If an action displays an error you believe to be erroneous, rebuilding the action list may help.</property>
+                        <property name="label" translatable="yes">Re_build Action List</property>
+                        <property name="use_underline">True</property>
+                        <accelerator key="b" signal="activate" modifiers="GDK_CONTROL_MASK"/>
                       </object>
                     </child>
                   </object>
@@ -322,70 +407,76 @@
                 <property name="can_focus">False</property>
                 <property name="orientation">vertical</property>
                 <child>
-                  <object class="GtkTreeView" id="sqa-ActionController-view">
+                  <object class="GtkScrolledWindow">
                     <property name="visible">True</property>
                     <property name="can_focus">True</property>
-                    <property name="model">sqa-ActionController-store</property>
-                    <child internal-child="selection">
-                      <object class="GtkTreeSelection"/>
-                    </child>
                     <child>
-                      <object class="GtkTreeViewColumn">
-                        <property name="widget">image-state-column</property>
-                        <child>
-                          <object class="GtkCellRendererPixbuf"/>
-                          <attributes>
-                            <attribute name="icon-name">2</attribute>
-                          </attributes>
+                      <object class="GtkTreeView" id="sqa-ActionController-view">
+                        <property name="visible">True</property>
+                        <property name="can_focus">True</property>
+                        <property name="model">sqa-ActionController-store</property>
+                        <child internal-child="selection">
+                          <object class="GtkTreeSelection"/>
                         </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkTreeViewColumn">
-                        <property name="widget">image-type-column</property>
                         <child>
-                          <object class="GtkCellRendererPixbuf"/>
-                          <attributes>
-                            <attribute name="icon-name">3</attribute>
-                          </attributes>
+                          <object class="GtkTreeViewColumn">
+                            <property name="widget">image-state-column</property>
+                            <child>
+                              <object class="GtkCellRendererPixbuf"/>
+                              <attributes>
+                                <attribute name="icon-name">2</attribute>
+                              </attributes>
+                            </child>
+                          </object>
                         </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkTreeViewColumn">
-                        <property name="sizing">autosize</property>
-                        <property name="title" translatable="yes">Description</property>
-                        <property name="expand">True</property>
                         <child>
-                          <object class="GtkCellRendererText"/>
-                          <attributes>
-                            <attribute name="markup">1</attribute>
-                          </attributes>
+                          <object class="GtkTreeViewColumn">
+                            <property name="widget">image-type-column</property>
+                            <child>
+                              <object class="GtkCellRendererPixbuf"/>
+                              <attributes>
+                                <attribute name="icon-name">3</attribute>
+                              </attributes>
+                            </child>
+                          </object>
                         </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkTreeViewColumn">
-                        <property name="title" translatable="yes">Q</property>
-                        <property name="alignment">1</property>
                         <child>
-                          <object class="GtkCellRendererText"/>
-                          <attributes>
-                            <attribute name="markup">5</attribute>
-                          </attributes>
+                          <object class="GtkTreeViewColumn">
+                            <property name="sizing">autosize</property>
+                            <property name="title" translatable="yes">Description</property>
+                            <property name="expand">True</property>
+                            <child>
+                              <object class="GtkCellRendererText"/>
+                              <attributes>
+                                <attribute name="markup">1</attribute>
+                              </attributes>
+                            </child>
+                          </object>
                         </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkTreeViewColumn">
-                        <property name="title" translatable="yes">Duration</property>
-                        <property name="alignment">1</property>
                         <child>
-                          <object class="GtkCellRendererProgress"/>
-                          <attributes>
-                            <attribute name="text">4</attribute>
-                            <attribute name="value">6</attribute>
-                          </attributes>
+                          <object class="GtkTreeViewColumn">
+                            <property name="title" translatable="yes">Q</property>
+                            <property name="alignment">1</property>
+                            <child>
+                              <object class="GtkCellRendererText"/>
+                              <attributes>
+                                <attribute name="markup">5</attribute>
+                              </attributes>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkTreeViewColumn">
+                            <property name="title" translatable="yes">Duration</property>
+                            <property name="alignment">1</property>
+                            <child>
+                              <object class="GtkCellRendererProgress"/>
+                              <attributes>
+                                <attribute name="text">4</attribute>
+                                <attribute name="value">6</attribute>
+                              </attributes>
+                            </child>
+                          </object>
                         </child>
                       </object>
                     </child>

@@ -149,9 +149,12 @@ impl UITemplate {
             pause_btn => PauseAction,
             reset_btn => ResetAction
         };
+        self.notebk.connect_switch_page(clone!(tx; |_, _, pg| {
+            tx.send_internal(super::ActionInternalMessage::ChangeCurPage(Some(pg)));
+        }));
         self.name_ent_handler = self.name_ent.connect_changed(clone!(tx; |slf| {
             let mut txt = slf.get_text();
-            println!("name entry changed, text {:?}", txt);
+            trace!("name entry changed, text {:?}", txt);
             if txt.is_some() {
                 if txt.as_ref().unwrap() == "" {
                     txt = None;
@@ -224,33 +227,33 @@ pub fn playback_state_update(p: &OpaqueAction, pwin: &mut PropertyWindow) {
     match p.state {
         Inactive => pwin.update_header(
             "gtk-media-stop",
-            "Inactive",
-            desc
+            desc,
+            "Action inactive."
         ),
         Unverified(ref errs) => pwin.update_header(
             "gtk-dialog-error",
-            "Incomplete",
-            format!("{} errors are present.", errs.len())
+            desc,
+            format!("Action incomplete: {} errors are present.", errs.len())
         ),
         Loading => pwin.update_header(
             "gtk-refresh",
-            "Loading",
-            desc
+            desc,
+            "Action loading..."
         ),
         Loaded => pwin.update_header(
             "gtk-home",
-            "Loaded",
-            desc
+            desc,
+            "Action loaded."
         ),
         Paused(_) => pwin.update_header(
             "gtk-media-pause",
-            "Paused",
-            desc
+            desc,
+            "Action paused."
         ),
         Active(_) => pwin.update_header(
             "gtk-media-play",
-            "Active",
-            desc
+            desc,
+            "Action active."
         ),
         _ => {}
     }

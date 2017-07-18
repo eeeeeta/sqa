@@ -48,6 +48,18 @@ macro_rules! build {
                 .expect(&format!("Incorrect UI description, tried to get nonexistent path {}", path));
         )*
             $o { $($i),* $(,$f)* }
+    }};
+    ($o:ident using $b:ident with $($f:ident),* default $($d:ident),* get $($i:ident),*) => {{
+        $(
+            let $d = Default::default();
+        )*
+            build!($o using $b with $($f),* $(,$d)* get $($i),*)
+    }};
+    ($o:ident using $b:ident default $($d:ident),* get $($i:ident),*) => {{
+        $(
+            let $d = Default::default();
+        )*
+            build!($o using $b with $($d),* get $($i),*)
     }}
 }
 macro_rules! bind_menu_items {

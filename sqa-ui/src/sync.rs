@@ -10,6 +10,7 @@ use messages;
 use errors;
 use actions;
 use save;
+use copy;
 
 pub enum UIMessage {
     ConnState(ConnectionState),
@@ -19,7 +20,8 @@ pub enum UIMessage {
     ActionInternal(actions::ActionInternalMessage),
     UpdatedMixerConf(MixerConf),
     Message(messages::Message),
-    Save(save::SaveMessage)
+    Save(save::SaveMessage),
+    Copy(copy::CopyPasteMessage)
 }
 pub enum BackendMessage {
     Connection(ConnectionMessage)
@@ -38,7 +40,8 @@ message_impls!(
     ActionInternal, actions::ActionInternalMessage,
     UpdatedMixerConf, MixerConf,
     Message, messages::Message,
-    Save, save::SaveMessage
+    Save, save::SaveMessage,
+    Copy, copy::CopyPasteMessage
 );
 message_impls!(
     BackendMessage,
@@ -60,7 +63,8 @@ pub struct UIContext {
     pub conn: connection::ConnectionController,
     pub act: actions::ActionController,
     pub msg: messages::MessageController,
-    pub save: save::SaveController
+    pub save: save::SaveController,
+    pub copy: copy::CopyPasteController
 }
 #[derive(Clone)]
 pub struct UISender {
@@ -129,6 +133,7 @@ impl UIContext {
         self.act.bind(&uis);
         self.msg.bind(&uis);
         self.save.bind(&uis);
+        self.copy.bind(&uis);
     }
     pub fn on_event(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
@@ -141,7 +146,8 @@ impl UIContext {
                 ActionMessage(msg) => self.act.on_action_msg(msg),
                 UpdatedMixerConf(cnf) => self.act.on_mixer(cnf),
                 Message(msg) => self.msg.on_message(msg),
-                Save(msg) => self.save.on_message(msg)
+                Save(msg) => self.save.on_message(msg),
+                Copy(msg) => self.copy.on_message(msg)
             }
         }
     }
