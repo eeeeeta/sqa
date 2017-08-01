@@ -11,6 +11,7 @@ use errors;
 use actions;
 use save;
 use copy;
+use config;
 
 pub enum UIMessage {
     ConnState(ConnectionState),
@@ -21,7 +22,8 @@ pub enum UIMessage {
     UpdatedMixerConf(MixerConf),
     Message(messages::Message),
     Save(save::SaveMessage),
-    Copy(copy::CopyPasteMessage)
+    Copy(copy::CopyPasteMessage),
+    Config(config::ConfigMessage)
 }
 pub enum BackendMessage {
     Connection(ConnectionMessage)
@@ -41,7 +43,8 @@ message_impls!(
     UpdatedMixerConf, MixerConf,
     Message, messages::Message,
     Save, save::SaveMessage,
-    Copy, copy::CopyPasteMessage
+    Copy, copy::CopyPasteMessage,
+    Config, config::ConfigMessage
 );
 message_impls!(
     BackendMessage,
@@ -64,7 +67,8 @@ pub struct UIContext {
     pub act: actions::ActionController,
     pub msg: messages::MessageController,
     pub save: save::SaveController,
-    pub copy: copy::CopyPasteController
+    pub copy: copy::CopyPasteController,
+    pub config: config::ConfigController
 }
 #[derive(Clone)]
 pub struct UISender {
@@ -134,6 +138,7 @@ impl UIContext {
         self.msg.bind(&uis);
         self.save.bind(&uis);
         self.copy.bind(&uis);
+        self.config.bind(&uis);
     }
     pub fn on_event(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
@@ -147,7 +152,8 @@ impl UIContext {
                 UpdatedMixerConf(cnf) => self.act.on_mixer(cnf),
                 Message(msg) => self.msg.on_message(msg),
                 Save(msg) => self.save.on_message(msg),
-                Copy(msg) => self.copy.on_message(msg)
+                Copy(msg) => self.copy.on_message(msg),
+                Config(msg) => self.config.on_message(msg)
             }
         }
     }

@@ -27,9 +27,9 @@ pub struct SaveController {
 }
 impl SaveController {
     pub fn new(b: &Builder, win: Window) -> Self {
-        let (cur_file, tx) = (None, None);
         build!(SaveController using b
-               with cur_file, tx, win
+               with win
+               default cur_file, tx
                get mopen, mopen_force, msave, msaveas)
     }
     pub fn bind(&mut self, tx: &UISender) {
