@@ -55,7 +55,7 @@ macro_rules! bind_buttons {
 impl UITemplate {
     pub fn new(uu: Uuid, tx: UISender) -> Self {
         let mut ret = UITemplate {
-            pwin: PropertyWindow::new(),
+            pwin: PropertyWindow::new("Edit action"),
             close_btn: Button::new_with_mnemonic("_Close"),
             pause_btn: Button::new_with_mnemonic("_Pause"),
             load_btn: Button::new_with_mnemonic("_Load"),
@@ -114,7 +114,7 @@ impl UITemplate {
         self.notebk_tabs.get(id).expect(&format!("failed to get tab '{}' for act {}", id, self.uu))
     }
     pub fn get_container(&mut self) -> Option<Widget> {
-        if self.pwin.window.is_visible() {
+        if self.pwin.is_visible() {
             None
         }
         else {
@@ -132,7 +132,7 @@ impl UITemplate {
             self.popped_out = false;
             self.pwin.props_box_box.pack_start(&self.pwin.props_box, true, true, 0);
         }
-        self.pwin.window.show_all();
+        self.pwin.present();
     }
     pub fn change_cur_page(&mut self, cp: Option<u32>) {
         self.notebk.set_current_page(cp);

@@ -3,7 +3,7 @@ use tokio_core::reactor::{Timeout};
 use sqa_backend::codec::{SqaClientCodec, Reply, Command};
 use sqa_backend::undo::{UndoState};
 use gtk::prelude::*;
-use gtk::{Button, Builder, MenuItem, IconSize, Window, Image};
+use gtk::{Button, Builder, MenuItem, CheckMenuItem, IconSize, Window, Image};
 use std::net::SocketAddr;
 use futures::{Sink, Stream, Async, Future};
 use sync::{BackendContextArgs, UIMessage, UISender};
@@ -12,8 +12,10 @@ use errors;
 use messages::Message;
 use time;
 use save::SaveMessage;
+use config::ConfigMessage;
 use std::mem;
 use std::time::Duration;
+use glib::signal;
 
 #[derive(Clone, Debug)]
 pub enum ConnectionState {
@@ -27,7 +29,8 @@ pub enum ConnectionUIMessage {
     Show,
     NewlyConnected,
     NewlyDisconnected,
-    UndoState(UndoState)
+    UndoState(UndoState),
+    StartupButton(bool)
 }
 pub enum ConnectionMessage {
     Disconnect,
@@ -183,6 +186,7 @@ impl Context {
                 Ok(true)
             },
             Connect(addr) => {
+                info!("Connecting to server: {}", addr);
                 self.sock.take();
                 let recv_addr = "127.0.0.1:53001".parse().unwrap();
                 let codec = SqaClientCodec::new(addr);
@@ -258,35 +262,36 @@ pub struct ConnectionController {
     ipe: FallibleEntry,
     connect_btn: Button,
     disconnect_btn: Button,
-    close_btn: Button,
     status_btn: Button,
     status_img: Image,
     mundo: MenuItem,
     mredo: MenuItem,
     tx: Option<UISender>,
     state: ConnectionState,
-    menuitem: MenuItem
+    mconnect: MenuItem,
+    mdisconnect: MenuItem,
+    mconnected: MenuItem,
+    mping: MenuItem,
+    msetdef: CheckMenuItem,
+    msetdef_handler: u64
 }
 
 impl ConnectionController {
     pub fn new(b: &Builder, win: Window) -> Self {
-        let mut pwin = PropertyWindow::new();
+        let pwin = PropertyWindow::new("Connection Manager");
         let ipe = FallibleEntry::new();
         let connect_btn = Button::new_with_mnemonic("_Connect");
         let disconnect_btn = Button::new_with_mnemonic("_Disconnect");
-        let close_btn = Button::new_with_mnemonic("Cl_ose");
-        pwin.window.set_modal(true);
-        pwin.window.set_title("Connection Manager");
-        pwin.window.set_transient_for(&win);
+        pwin.make_modal(Some(&win));
         pwin.append_property("IP address and port", &*ipe);
-        pwin.append_button(&close_btn);
+        pwin.append_close_btn();
         pwin.append_button(&disconnect_btn);
         pwin.append_button(&connect_btn);
-        let tx = None;
         let state = ConnectionState::Disconnected;
         let mut ret = build!(ConnectionController using b
-                             with pwin, ipe, connect_btn, disconnect_btn, close_btn, tx, state
-                             get menuitem, status_btn, status_img, mundo, mredo);
+                             with pwin, ipe, connect_btn, disconnect_btn, state
+                             default msetdef_handler, tx
+                             get mconnect, mconnected, mdisconnect, msetdef, mping, status_btn, status_img, mundo, mredo);
         ret.on_state_change(ConnectionState::Disconnected);
         ret
     }
@@ -300,11 +305,17 @@ impl ConnectionController {
         self.ipe.on_enter(clone!(tx; |_| {
             tx.send_internal(ConnectionUIMessage::ConnectClicked);
         }));
-        self.menuitem.connect_activate(clone!(tx; |_| {
+        self.mconnect.connect_activate(clone!(tx; |_| {
             tx.send_internal(ConnectionUIMessage::Show);
         }));
         self.status_btn.connect_clicked(clone!(tx; |_| {
             tx.send_internal(ConnectionUIMessage::Show);
+        }));
+        self.mdisconnect.connect_activate(clone!(tx; |_| {
+            tx.send(ConnectionMessage::Disconnect);
+        }));
+        self.msetdef_handler = self.msetdef.connect_toggled(clone!(tx; |slf| {
+            tx.send_internal(ConfigMessage::SetServerCurrent(slf.get_active()));
         }));
         self.mundo.connect_activate(clone!(tx; |_| {
             tx.send(Command::Undo);
@@ -312,19 +323,6 @@ impl ConnectionController {
         self.mredo.connect_activate(clone!(tx; |_| {
             tx.send(Command::Redo);
         }));
-        let win = self.pwin.window.clone();
-        self.close_btn.connect_clicked(move |_| {
-            win.hide();
-        });
-        self.pwin.window.connect_key_press_event(move |slf, ek| {
-            if ek.get_keyval() == ::gdk::enums::key::Escape {
-                slf.hide();
-                Inhibit(true)
-            }
-            else {
-                Inhibit(false)
-            }
-        });
         self.tx = Some(tx.clone());
     }
     pub fn on_msg(&mut self, msg: ConnectionUIMessage) {
@@ -346,10 +344,10 @@ impl ConnectionController {
                     },
                 }
             },
-            Show => self.pwin.window.show_all(),
+            Show => self.pwin.present(),
             NewlyConnected => {
                 info!("Newly connected!");
-                self.pwin.window.hide();
+                self.pwin.hide();
                 self.tx.as_mut().unwrap()
                     .send_internal(Message::Statusbar("Connected to server.".into()));
             },
@@ -357,7 +355,7 @@ impl ConnectionController {
                 info!("Newly disconnected");
                 self.tx.as_mut().unwrap().
                     send_internal(Message::Statusbar("Disconnected from server.".into()));
-                self.pwin.window.show_all();
+                self.pwin.present();
             },
             UndoState(st) => {
                 if let Some(dsc) = st.undo {
@@ -376,6 +374,11 @@ impl ConnectionController {
                     self.mredo.set_sensitive(false);
                     self.mredo.set_label("Redo");
                 }
+            },
+            StartupButton(sb) => {
+                signal::signal_handler_block(&self.msetdef, self.msetdef_handler);
+                self.msetdef.set_active(sb);
+                signal::signal_handler_unblock(&self.msetdef, self.msetdef_handler);
             }
         }
     }
@@ -389,6 +392,10 @@ impl ConnectionController {
                     "Disconnected",
                     "Enter an IP address to connect."
                 );
+                self.mconnected.set_label("Disconnected");
+                self.mping.set_label("[no ping]");
+                self.msetdef.set_sensitive(false);
+                self.mdisconnect.set_sensitive(false);
                 self.status_img.set_from_stock("gtk-disconnect", IconSize::Button.into());
                 self.status_btn.set_label("disconnected");
             },
@@ -398,6 +405,10 @@ impl ConnectionController {
                     "Connecting (0%)...",
                     format!("Connecting to {} (sent version query)...", addr)
                 );
+                self.mconnected.set_label(&format!("Connecting to {}...", addr));
+                self.msetdef.set_sensitive(false);
+                self.mdisconnect.set_sensitive(false);
+                self.mping.set_label("0% (sent version query)");
                 self.status_img.set_from_stock("gtk-refresh", IconSize::Button.into());
                 self.status_btn.set_label("connecting");
             },
@@ -407,6 +418,10 @@ impl ConnectionController {
                     "Connecting (50%)...",
                     format!("Version of {} is {}. Connecting...", addr, ver)
                 );
+                self.mconnected.set_label(&format!("Connecting to {}...", addr));
+                self.mping.set_label("50% (sent subscription query)");
+                self.msetdef.set_sensitive(false);
+                self.mdisconnect.set_sensitive(false);
                 self.status_img.set_from_stock("gtk-refresh", IconSize::Button.into());
                 self.status_btn.set_label("connecting");
             },
@@ -421,8 +436,14 @@ impl ConnectionController {
                     format!("Connected (ping: {})", ping),
                     format!("Connected to {}, version: {}", addr, ver)
                 );
+                self.mconnected.set_label(&format!("Connected to {}", addr));
+                self.mping.set_label(&format!("Ping: {}", ping));
+                self.msetdef.set_sensitive(true);
+                self.mdisconnect.set_sensitive(true);
                 self.status_img.set_from_stock("gtk-connect", IconSize::Button.into());
-                self.status_btn.set_label(&format!("ping: {}", ping));
+                self.status_btn.set_label(&format!("{} ({})", addr, ping));
+                self.tx.as_mut().unwrap()
+                    .send_internal(ConfigMessage::NewlyConnected(addr));
             }
         }
     }

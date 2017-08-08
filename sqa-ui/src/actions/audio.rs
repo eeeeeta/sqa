@@ -106,7 +106,7 @@ impl ActionUI for AudioUI {
         }
     }
     fn close_window(&mut self) {
-        self.temp.pwin.window.hide();
+        self.temp.pwin.hide();
     }
     fn on_message(&mut self, m: ActionMessageInner) {
         if let ActionMessageInner::Audio(m) = m {

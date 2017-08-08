@@ -1,19 +1,39 @@
 [package]
+authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 name = "sqa-ui"
 version = "0.1.0"
-authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
 
 [dependencies]
-sqa-backend = { path = "../sqa-backend" }
-rosc = { path = "../rosc" }
-tokio-core = "0.1"
-futures = "0.1"
-gtk = { git = "https://github.com/gtk-rs/gtk", features = ["v3_16"] }
-gdk = { git = "https://github.com/gtk-rs/gdk", features = ["v3_16"] }
-glib = { git = "https://github.com/gtk-rs/glib" }
+app_dirs = "1.1"
+clap = "2.26"
 error-chain = "0.10"
-time = "0.1"
-uuid = { version = "0.5", features = ["v4", "serde"] }
-url = "1.4"
 fern = "0.4"
+futures = "0.1"
 log = "0.3"
+serde = "1.0"
+serde_derive = "1.0"
+time = "0.1"
+tokio-core = "0.1"
+toml = "0.4"
+url = "1.4"
+
+[dependencies.gdk]
+features = ["v3_16"]
+git = "https://github.com/gtk-rs/gdk"
+
+[dependencies.glib]
+git = "https://github.com/gtk-rs/glib"
+
+[dependencies.gtk]
+features = ["v3_16"]
+git = "https://github.com/gtk-rs/gtk"
+
+[dependencies.rosc]
+path = "../rosc"
+
+[dependencies.sqa-backend]
+path = "../sqa-backend"
+
+[dependencies.uuid]
+features = ["v4", "serde"]
+version = "0.5"

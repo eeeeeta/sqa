@@ -150,7 +150,7 @@ impl ActionUI for FadeUI {
         }
     }
     fn close_window(&mut self) {
-        self.temp.pwin.window.hide();
+        self.temp.pwin.hide();
     }
     fn edit_separately(&mut self) {
         self.temp.edit_separately();
