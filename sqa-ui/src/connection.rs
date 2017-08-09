@@ -108,6 +108,8 @@ impl Context {
             x @ ActionExecuted {..} |
             x @ UpdateActionInfo {..} |
             x @ UpdateActionDeleted {..} |
+            x @ UpdateOrder {..} |
+            x @ ActionReordered {..} |
             x @ ReplyActionList {..} => {
                 args.send(UIMessage::ActionReply(x));
             },

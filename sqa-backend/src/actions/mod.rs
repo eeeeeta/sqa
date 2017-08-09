@@ -103,10 +103,10 @@ impl<'a> ControllerParams<'a> {
         self.internal_tx.send(ServerMessage::ActionStateChange(self.uuid, st));
     }
     pub fn register_interest(&mut self) {
-        self.ctx.async_actions.insert(self.uuid);
+        self.ctx.actions.register_interest(self.uuid);
     }
     pub fn unregister_interest(&mut self) {
-        self.ctx.async_actions.remove(&self.uuid);
+        self.ctx.actions.unregister_interest(self.uuid);
     }
 }
 pub trait PerformExt {
@@ -282,7 +282,8 @@ impl OpaqueAction {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ActionMetadata {
     pub name: Option<String>,
-    pub prewait: Duration
+    pub prewait: Duration,
+    pub number: Option<String>
 }
 pub struct Action {
     state: PlaybackState,
@@ -449,7 +450,7 @@ impl Action {
             self.state = PlaybackState::Inactive;
         }
         else {
-            ctx.async_actions.insert(self.uu);
+            ctx.actions.register_interest(self.uu);
             self.timeout = AsyncResult::Waiting(
                 Box::new(Timeout::new(Duration::new(1, 0), ctx.handle.as_ref().unwrap()).unwrap())
             );

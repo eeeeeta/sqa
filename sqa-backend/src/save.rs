@@ -2,14 +2,13 @@
 
 use uuid::Uuid;
 use actions::{ActionMetadata, ActionParameters, OpaqueAction};
-use codec::Reply;
 use mixer::MixerConf;
 use std::collections::HashMap;
 use errors::*;
 use state::{CD, Context};
 use undo::UndoContext;
-use std::mem;
 use rmp_serde;
+use action_manager::ActionManager;
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -32,6 +31,7 @@ impl From<OpaqueAction> for SavedAction {
 pub struct Savefile {
     ver: String,
     actions: HashMap<Uuid, SavedAction>,
+    order: Vec<Uuid>,
     mixer_conf: MixerConf,
     undo: UndoContext
 }
@@ -53,9 +53,9 @@ impl Savefile {
     }
     pub fn new_from_ctx(ctx: &mut Context) -> BackendResult<Self> {
         let mut _actions = HashMap::new();
-        for (uu, mut act) in mem::replace(&mut ctx.actions, HashMap::new()).into_iter() {
+        for (uu, mut act) in ctx.actions.remove_all_for_editing().into_iter() {
             let data = act.get_data(ctx);
-            ctx.actions.insert(uu, act);
+            ctx.actions.insert_after_editing(uu, act);
             _actions.insert(uu, data);
         }
         let mut actions = HashMap::new();
@@ -65,22 +65,27 @@ impl Savefile {
         let mixer_conf = ctx.mixer.obtain_config();
         let undo = ctx.undo.clone();
         let ver = SAVEFILE_VERSION.into();
-        Ok(Self { ver, actions, mixer_conf, undo })
+        let order = ctx.actions.order().clone();
+        Ok(Self { ver, actions, mixer_conf, undo, order })
     }
     pub fn apply_to_ctx(&mut self, ctx: &mut Context, mut d: Option<&mut CD>, force: bool) -> BackendResult<()> {
         if self.ver != SAVEFILE_VERSION && !force {
             bail!("Savefile version mismatch: our version is {}, but the savefile was saved with {}.", SAVEFILE_VERSION, self.ver);
         }
-        ctx.actions = HashMap::new();
+        ctx.actions = ActionManager::new();
         if let Some(ref mut d) = d {
-            let resp = ctx.refresh_action_list();
-            d.broadcast(Reply::ReplyActionList { list: resp })?;
+            let rpl = ctx.make_action_list();
+            d.broadcast(rpl)?;
         }
         for (uu, sa) in self.actions.iter_mut() {
             let res = ctx.create_action(&sa.typ, Some(sa.params.clone()), Some(sa.meta.clone()), Some(*uu));
             if !force {
                 let _ = res?;
             }
+        }
+        let res = ctx.actions.restore_order(self.order.clone());
+        if !force {
+            let _ = res?;
         }
         let res = ctx.mixer.process_config(self.mixer_conf.clone());
         if !force {

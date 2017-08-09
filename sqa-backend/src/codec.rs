@@ -51,6 +51,8 @@ pub enum Command {
     ResetAction { #[subst] uuid: Uuid },
     #[oscpath = "/action/{uuid}/pause"]
     PauseAction { #[subst] uuid: Uuid },
+    #[oscpath = "/action/{uuid}/reorder"]
+    ReorderAction { #[subst] uuid: Uuid, #[ser] new_pos: usize },
     #[oscpath = "/mixer/config"]
     GetMixerConf,
     #[oscpath = "/mixer/config/set"]
@@ -101,11 +103,14 @@ pub enum Reply {
     ActionMaybePaused { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/action/{uuid}/reset"]
     ActionReset { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
+    #[oscpath = "/reply/action/{uuid}/reorder"]
+    ActionReordered { #[subst] uuid: Uuid, #[ser] res: Result<(), String> },
     #[oscpath = "/reply/mixer/config"]
     MixerConfSet { #[ser] res: Result<(), String> },
     #[oscpath = "/reply/actionlist"]
-    ReplyActionList { #[ser] list: HashMap<Uuid, OpaqueAction> },
-
+    ReplyActionList { #[ser] list: HashMap<Uuid, OpaqueAction>, #[ser] order: Vec<Uuid> },
+    #[oscpath = "/update/order"]
+    UpdateOrder { #[ser] order: Vec<Uuid> },
     #[oscpath = "/update/action/{uuid}"]
     UpdateActionInfo { #[subst] uuid: Uuid, #[ser] data: OpaqueAction },
     #[oscpath = "/update/action/{uuid}/delete"]

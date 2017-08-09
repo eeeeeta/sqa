@@ -32,7 +32,7 @@ pub struct ConfigController {
 }
 impl ConfigController {
     pub fn new(b: &Builder, path: PathBuf) -> Self {
-        let mut pwin = PropertyWindow::new("Preferences");
+        let pwin = PropertyWindow::new("Preferences");
         let ipe = FallibleEntry::new();
         let cfgpath = Entry::new();
         cfgpath.set_text(&path.to_string_lossy());

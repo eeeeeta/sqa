@@ -4,7 +4,7 @@ use tokio_core::reactor::Remote;
 use uuid::Uuid;
 use handlers::{ConnHandler, ConnData};
 use codec::{Command, Reply};
-use std::collections::{HashSet, HashMap};
+use std::collections::HashMap;
 use actions::{Action, OpaqueAction, ActionParameters, ActionMetadata, PlaybackState};
 use sqa_engine::sync::{AudioThreadMessage};
 use sqa_ffmpeg::MediaContext;
@@ -13,30 +13,16 @@ use undo::{UndoableChange, UndoContext};
 use errors::*;
 use save::Savefile;
 use handlers;
-use std::mem;
 use tokio_core::reactor::Handle;
+use action_manager::ActionManager;
 pub struct Context {
     pub remote: Remote,
     pub mixer: MixerContext,
     pub media: MediaContext,
     pub undo: UndoContext,
-    pub actions: HashMap<Uuid, Action>,
-    pub async_actions: HashSet<Uuid>,
+    pub actions: ActionManager,
     pub sender: Option<IntSender>,
     pub handle: Option<Handle>,
-    pub changed: HashSet<Uuid>
-}
-macro_rules! do_with_ctx {
-    ($self:expr, $uu:expr, $clo:expr) => {{
-        match $self.actions.remove($uu) {
-            Some(mut a) => {
-                let ret = $clo(&mut a);
-                $self.actions.insert(*$uu, a);
-                ret
-            },
-            _ => Err("No action found".into())
-        }
-    }}
 }
 pub enum ServerMessage {
     Audio(AudioThreadMessage),
@@ -55,40 +41,23 @@ impl ConnHandler for Context {
         self.handle = Some(d.handle.clone());
     }
     fn wakeup(&mut self, d: &mut CD) {
-        let mut to_remove = vec![];
-        for uu in self.async_actions.clone() {
-            let continue_polling = if let Some(mut act) = self.actions.remove(&uu) {
-                let a = act.poll(self, &d.int_sender);
-                self.on_action_changed(d, &mut act);
-                self.actions.insert(uu, act);
-                a
-            }
-            else {
-                false
-            };
-            if !continue_polling {
-                to_remove.push(uu);
-            }
-        }
-        for uu in to_remove {
-            self.async_actions.remove(&uu);
-        }
+        ActionManager::on_wakeup(self, d)
     }
     fn internal(&mut self, d: &mut CD, m: ServerMessage) {
         match m {
             ServerMessage::Audio(msg) => {
-                for (uu, mut act) in mem::replace(&mut self.actions, HashMap::new()).into_iter() {
+                for (uu, mut act) in self.actions.remove_all_for_editing().into_iter() {
                     act.accept_audio_message(self, &d.int_sender, &msg);
-                    self.actions.insert(uu, act);
+                    self.actions.insert_after_editing(uu, act);
                 }
             },
             ServerMessage::ActionStateChange(uu, ps) => {
-                if let Some(mut act) = self.actions.remove(&uu) {
+                if let Some(mut act) = self.actions.remove_for_editing(uu, false) {
                     if let Err(e) = act.state_change(ps, self, &d.int_sender) {
                         warn!("failed state change: {:?}", e);
                     }
                     self.on_action_changed(d, &mut act);
-                    self.actions.insert(uu, act);
+                    self.actions.insert_after_editing(uu, act);
                 }
             },
             _ => {}
@@ -100,11 +69,14 @@ impl ConnHandler for Context {
             self.on_undo_changed(d);
         }
         let res = self.process_command(d, c);
-        for changed in mem::replace(&mut self.changed, HashSet::new()) {
-            let _: BackendResult<()> = do_with_ctx!(self, &changed, |a: &mut Action| {
+        for changed in self.actions.clear_changed() {
+            let _: BackendResult<()> = do_with_ctx!(self, changed, |a: &mut Action| {
                 self.on_action_changed(d, a);
                 Ok(())
-            });
+            }, false);
+        }
+        if self.actions.clear_order_changed() {
+            self.on_order_changed(d);
         }
         res
     }
@@ -114,13 +86,11 @@ impl Context {
         let mut ctx = Context {
             remote: r,
             mixer: MixerContext::new().unwrap(),
-            actions: HashMap::new(),
             media: ::sqa_ffmpeg::init().unwrap(),
             undo: UndoContext::new(),
-            async_actions: HashSet::new(),
+            actions: ActionManager::new(),
             sender: None,
             handle: None,
-            changed: HashSet::new()
         };
         ctx.mixer.default_config().unwrap();
         ctx
@@ -179,58 +149,47 @@ impl Context {
                 }
             },
             ActionInfo { uuid } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let ret = a.get_data(self).map_err(|e| e.to_string());
-                    self.changed.insert(uuid);
-                    ret
+                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
+                    a.get_data(self).map_err(|e| e.to_string())
                 });
                 d.respond(ActionInfoRetrieved { uuid, res })?;
             },
             UpdateActionParams { uuid, params, .. } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let ret = a.set_params(params, self, &d.int_sender).map_err(|e| e.to_string());
-                    self.changed.insert(uuid);
-                    ret
+                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
+                    a.set_params(params, self, &d.int_sender).map_err(|e| e.to_string())
                 });
                 d.respond(ActionParamsUpdated { uuid, res })?;
             },
             UpdateActionMetadata { uuid, meta } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let ret = a.set_meta(meta);
-                    self.changed.insert(uuid);
-                    Ok(ret)
+                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
+                    Ok(a.set_meta(meta))
                 });
                 d.respond(ActionMetadataUpdated { uuid, res })?;
             },
             LoadAction { uuid } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let ret = a.load(self, &d.int_sender).map_err(|e| e.to_string());
-                    self.changed.insert(uuid);
-                    ret
+                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
+                    a.load(self, &d.int_sender).map_err(|e| e.to_string())
                 });
                 d.respond(ActionLoaded { uuid, res })?;
             },
             ResetAction { uuid } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
+                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
                     a.reset(self, &d.int_sender);
-                    self.changed.insert(uuid);
                     Ok(())
                 });
                 d.respond(ActionReset { uuid, res })?;
             },
             PauseAction { uuid } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
+                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
                     a.pause(self, &d.int_sender);
-                    self.changed.insert(uuid);
                     Ok(())
                 });
                 d.respond(ActionMaybePaused { uuid, res })?;
             },
             ExecuteAction { uuid } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let ret = a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), self, &d.int_sender).map_err(|e| e.to_string());
-                    self.changed.insert(uuid);
-                    ret
+                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
+                    a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), self, &d.int_sender)
+                        .map_err(|e| e.to_string())
                 });
                 d.respond(ActionExecuted { uuid, res })?;
             },
@@ -238,7 +197,7 @@ impl Context {
                 self.on_all_actions_changed(d);
             },
             DeleteAction { uuid } => {
-                if self.actions.remove(&uuid).is_some() {
+                if self.actions.remove(uuid).is_some() {
                     d.respond(ActionDeleted { uuid, deleted: true })?;
                     d.broadcast(UpdateActionDeleted { uuid })?;
                     self.on_all_actions_changed(d);
@@ -246,6 +205,10 @@ impl Context {
                 else {
                     d.respond(ActionDeleted { uuid, deleted: false })?;
                 }
+            },
+            ReorderAction { uuid, new_pos } => {
+                let res = self.actions.reorder(uuid, new_pos).map_err(|e| e.to_string());
+                d.respond(ActionReordered { uuid, res })?;
             },
             GetMixerConf => {
                 d.respond(UpdateMixerConf { conf: self.mixer.obtain_config() })?;
@@ -282,12 +245,10 @@ impl Context {
         };
         Ok(())
     }
-    pub fn refresh_action_list(&mut self) -> HashMap<Uuid, OpaqueAction> {
+    pub fn make_action_list(&mut self) -> Reply {
         let mut resp = HashMap::new();
-        let uus = self.actions.iter().map(|(x, _)| x.clone()).collect::<Vec<_>>();
-
-        for uu in uus {
-            let _: Result<(), String> = do_with_ctx!(self, &uu, |a: &mut Action| {
+        for uu in self.actions.action_list() {
+            let _: Result<(), String> = do_with_ctx!(self, uu, |a: &mut Action| {
                 if let Ok(data) = a.get_data(self) {
                     resp.insert(uu, data);
                 }
@@ -297,7 +258,8 @@ impl Context {
                 Ok(())
             });
         }
-        resp
+        let order = self.actions.order().clone();
+        Reply::ReplyActionList { list: resp, order }
     }
     pub fn on_action_changed(&mut self, d: &mut CD, action: &mut Action) {
         if let Ok(data) = action.get_data(self) {
@@ -310,9 +272,15 @@ impl Context {
         }
     }
     pub fn on_all_actions_changed(&mut self, d: &mut CD) {
-        let resp = self.refresh_action_list();
-        if let Err(e) = d.broadcast(Reply::ReplyActionList { list: resp }) {
+        let rpl = self.make_action_list();
+        if let Err(e) = d.broadcast(rpl) {
             error!("fixme: error in on_all_actions_changed: {:?}", e);
+        }
+    }
+    pub fn on_order_changed(&mut self, d: &mut CD) {
+        let order = self.actions.order();
+        if let Err(e) = d.broadcast(Reply::UpdateOrder { order: order.clone() }) {
+            error!("fixme: error in on_order_changed: {:?}", e);
         }
     }
     pub fn on_undo_changed(&mut self, d: &mut CD) {
@@ -346,7 +314,7 @@ impl Context {
                 error!("fixme: set_params failed in create_action: {:?}", e);
             }
         }
-        self.changed.insert(uu);
+        self.actions.mark_changed(uu);
         self.actions.insert(uu, act);
         Ok(uu)
     }
@@ -369,10 +337,8 @@ impl Context {
                 desc: format!("create action with type {}", typ)
             }),
             UpdateActionParams { uuid, ref params, ref desc } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let data = a.get_data(self).map_err(|e| e.to_string());
-                    self.changed.insert(uuid);
-                    data
+                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
+                    a.get_data(self).map_err(|e| e.to_string())
                 });
                 res.ok().map(|old| {
                     UndoableChange {
@@ -383,10 +349,8 @@ impl Context {
                 })
             },
             UpdateActionMetadata { uuid, ref meta } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let data = a.get_data(self).map_err(|e| e.to_string());
-                    self.changed.insert(uuid);
-                    data
+                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
+                    a.get_data(self).map_err(|e| e.to_string())
                 });
                 res.ok().map(|old| {
                     UndoableChange {
@@ -397,10 +361,8 @@ impl Context {
                 })
             },
             DeleteAction { uuid } => {
-                let res = do_with_ctx!(self, &uuid, |a: &mut Action| {
-                    let data = a.get_data(self).map_err(|e| e.to_string());
-                    self.changed.insert(uuid);
-                    data
+                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
+                    a.get_data(self).map_err(|e| e.to_string())
                 });
                 res.ok().map(|old| {
                     let typ = old.typ().to_string();
@@ -418,6 +380,15 @@ impl Context {
                     undo: SetMixerConf { conf: old },
                     redo: SetMixerConf { conf: conf.clone() },
                     desc: "modify mixer configuration".into()
+                })
+            },
+            ReorderAction { uuid, new_pos } => {
+                self.actions.position_of(uuid).map(|pos| {
+                    UndoableChange {
+                        undo: ReorderAction { uuid, new_pos: pos },
+                        redo: ReorderAction { uuid, new_pos },
+                        desc: "reorder action".into()
+                    }
                 })
             },
             _ => None

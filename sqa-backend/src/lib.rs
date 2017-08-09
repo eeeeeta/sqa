@@ -17,6 +17,8 @@ extern crate url;
 #[macro_use] extern crate log;
 extern crate fern;
 
+#[macro_use]
+pub mod action_manager;
 pub mod codec;
 pub mod handlers;
 pub mod actions;
@@ -42,7 +44,7 @@ mod jack {
             error!("{}", msg);
         }
         fn on_info(&mut self, msg: &str) {
-            debug!("{}", msg);
+            trace!("{}", msg);
         }
     }
 }

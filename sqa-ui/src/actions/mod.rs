@@ -34,7 +34,11 @@ pub enum ActionInternalMessage {
     CancelSelection,
     ChangeCurPage(Option<u32>),
     CopyPaste(CopyPasteMessage),
-    Rebuild
+    Rebuild,
+    DndReorderBefore,
+    DndReorderAfter,
+    DndRetarget,
+    CloseDndMenu,
 }
 #[derive(Clone)]
 pub enum ActionMessageInner {
@@ -48,7 +52,7 @@ pub enum ActionMessageInner {
     EditAction,
     ChangeName(Option<String>),
     ChangePrewait(Duration),
-    Retarget(Uuid),
+    OpenDndMenu(Uuid),
     CloseButton,
 }
 impl DurationEntryMessage for ActionMessageInner {
@@ -74,7 +78,9 @@ pub struct ActionController {
     sidebar: Stack,
     ctls: HashMap<Uuid, Box<ActionUI>>,
     opas: HashMap<Uuid, OpaqueAction>,
+    order: Vec<Uuid>,
     cur_sel: Option<SelectionDetails>,
+    cur_dnd: Option<(Uuid, Uuid)>,
     clipboard: Option<OpaqueAction>,
     menu: Menu,
     medit: MenuItem,
@@ -86,6 +92,11 @@ pub struct ActionController {
     mrebuild: MenuItem,
     mcreate_audio: MenuItem,
     mcreate_fade: MenuItem,
+    dnd_menu: Menu,
+    mdnd_retarget: MenuItem,
+    mdnd_reorder_before: MenuItem,
+    mdnd_reorder_after: MenuItem,
+    mdnd_close: MenuItem,
     drag_notif: GBox,
     cur_page: Option<u32>,
     sel_handler: u64
@@ -118,12 +129,6 @@ impl TreeSelectGetter {
         }
         None
     }
-    pub fn iter_is_dnd_target(&self, ti: TreeIter) -> bool {
-        if let Some(v) = self.ts.get_value(&ti, 7).get::<bool>() {
-            return v;
-        }
-        false
-    }
     pub fn get(&self) -> Option<Uuid> {
         if let Some((_, ti)) = self.sel.get_selected() {
             return self.iter_to_value(ti)
@@ -145,8 +150,12 @@ macro_rules! bind_action_menu_items {
 impl ActionController {
     pub fn new(b: &Builder) -> Self {
         build!(ActionController using b
-               default tx, cur_page, cur_widget, cur_sel, clipboard, mixer, sel_handler, ctls, opas
-               get view, store, menu, medit, mload, mexec, mdelete, mrebuild, mreset, mpause, mcreate_audio, mcreate_fade, sidebar, drag_notif)
+               default tx, cur_page, cur_widget, cur_sel, clipboard, mixer, sel_handler,
+                       ctls, opas, order, cur_dnd
+               get     view, store, menu, medit, mload, mexec, mdelete, mrebuild, mreset,
+                       mpause, mcreate_audio, mcreate_fade, sidebar, drag_notif,
+                       dnd_menu, mdnd_retarget, mdnd_reorder_before, mdnd_reorder_after,
+                       mdnd_close)
     }
     pub fn bind(&mut self, tx: &UISender) {
         use self::ActionMessageInner::*;
@@ -162,13 +171,22 @@ impl ActionController {
             mpause => PauseAction,
             mload => LoadAction
         }
+        use self::ActionInternalMessage::*;
         bind_menu_items! {
             self, tx,
-            mcreate_audio => ActionInternalMessage::Create("audio"),
-            mcreate_fade => ActionInternalMessage::Create("fade"),
-            mrebuild => ActionInternalMessage::Rebuild
+            mcreate_audio => Create("audio"),
+            mcreate_fade => Create("fade"),
+            mrebuild => Rebuild,
+            mdnd_retarget => DndRetarget,
+            mdnd_reorder_before => DndReorderBefore,
+            mdnd_reorder_after => DndReorderAfter,
+            mdnd_close => CloseDndMenu
         }
         let menu = self.menu.clone();
+        self.dnd_menu.connect_focus_out_event(clone!(tx; |_, _| {
+            tx.send_internal(ActionInternalMessage::CloseDndMenu);
+            Inhibit(false)
+        }));
         self.view.connect_button_press_event(move |_, eb| {
             if eb.get_button() == 3 {
                 if let ::gdk::EventType::ButtonPress = eb.get_event_type() {
@@ -234,13 +252,8 @@ impl ActionController {
             if drag_uu.get().is_some() {
                 let (x, y) = slf.convert_widget_to_bin_window_coords(x, y);
                 if let Some((Some(path), _, _, _)) = slf.get_path_at_pos(x, y) {
-                    if let Some(ti) = tsg.ts.get_iter(&path) {
-                        if !tsg.iter_is_dnd_target(ti) {
-                            dctx.drag_status(gdk::DragAction::empty(), 0);
-                        }
-                        else {
-                            dctx.drag_status(gdk::ACTION_MOVE, 0);
-                        }
+                    if tsg.ts.get_iter(&path).is_some() {
+                        dctx.drag_status(gdk::ACTION_MOVE, 0);
                         return Inhibit(false);
                     }
                 }
@@ -278,7 +291,7 @@ impl ActionController {
                             if let Some(ti) = tsg.ts.get_iter(&path) {
                                 if let Some(uu2) = tsg.iter_to_value(ti) {
                                     debug!("dnd: was dropped onto {}", uu2);
-                                    tx.send_internal((uu2, ActionMessageInner::Retarget(uu)));
+                                    tx.send_internal((uu2, ActionMessageInner::OpenDndMenu(uu)));
                                 }
                             }
                         }
@@ -293,17 +306,26 @@ impl ActionController {
             }
             tx.send_internal(ActionInternalMessage::FilesDropped(uris));
         }));
-
         tx.send_internal(ActionInternalMessage::SelectionChanged);
     }
     fn update_store(&mut self, sel: Option<Uuid>) {
+        trace!("update_store(sel = {:?}) called", sel);
         let tsg = TreeSelectGetter { ts: self.store.clone(), sel: self.view.get_selection() };
         let sel = if sel.is_some() { sel } else {
             signal::signal_handler_block(&tsg.sel, self.sel_handler);
             tsg.get()
         };
         self.store.clear();
-        for (uu, action) in self.opas.iter() {
+        trace!("order looks like {:?}", self.order);
+        for uu in self.order.iter() {
+            let action;
+            if let Some(a) = self.opas.get(uu) {
+                action = a;
+            }
+            else {
+                warn!("UUID {} in order, but not in opas!", uu);
+                continue;
+            }
             let typ = match action.params {
                 ActionParameters::Audio(_) => "audio-x-generic",
                 ActionParameters::Fade(_) => "audio-volume-medium-symbolic"
@@ -386,6 +408,9 @@ impl ActionController {
     }
     pub fn on_action_reply(&mut self, r: Reply) {
         use self::Reply::*;
+        // Helpful Warning: you can't just add new Replies here and expect it to work!
+        // The list of Replies that get forwarded here also needs to be updated.
+        // Go check connection.rs and update it.
         match r {
             UpdateActionInfo { uuid, data } => self.on_action_info(uuid, data),
             UpdateActionDeleted { uuid } => {
@@ -394,7 +419,8 @@ impl ActionController {
                 self.tx.as_mut().unwrap()
                     .send_internal(Message::Statusbar("Action deleted.".into()));
             },
-            ReplyActionList { list } => {
+            UpdateOrder { order } => self.order = order,
+            ReplyActionList { list, order } => {
                 let mut to_remove = self.opas.iter().map(|(&k, _)| k).collect::<HashSet<_>>();
                 for (uu, oa) in list {
                     self.on_action_info(uu, oa);
@@ -404,6 +430,7 @@ impl ActionController {
                     self.opas.remove(&uu);
                     self.ctls.remove(&uu);
                 }
+                self.order = order;
             },
             ActionCreated { res } => {
                 action_reply_notify!(self, res, "Creating action", "Action created.");
@@ -425,6 +452,9 @@ impl ActionController {
             },
             ActionExecuted { res, .. } => {
                 action_reply_notify!(self, res, "Executing action", "Action executed.");
+            },
+            ActionReordered { res, .. } => {
+                action_reply_notify!(self, res, "Reordering action", "Action reordered.");
             },
             x => warn!("actions: unexpected action reply {:?}", x)
         }
@@ -557,6 +587,57 @@ impl ActionController {
                 self.tx.as_mut().unwrap()
                     .send(Command::ActionList);
             },
+            DndReorderBefore => {
+                if let Some((from, to)) = self.cur_dnd.take() {
+                    debug!("dnd: reordering {} before {}", from, to);
+                    if let Some(_) = self.order.iter().position(|&uu| uu == from) {
+                        if let Some(tpos) = self.order.iter().position(|&uu| uu == to) {
+                            let tpos = tpos.saturating_sub(1);
+                            self.tx.as_mut().unwrap()
+                                .send(Command::ReorderAction { uuid: from, new_pos: tpos });
+                        }
+                        else {
+                            warn!("dnd: dest {} doesn't exist in order", to);
+                        }
+                    }
+                    else {
+                        warn!("dnd: source {} doesn't exist in order", to);
+                    }
+                }
+            },
+            DndReorderAfter => {
+                if let Some((from, to)) = self.cur_dnd.take() {
+                    debug!("dnd: reordering {} after {}", from, to);
+                    if let Some(_) = self.order.iter().position(|&uu| uu == from) {
+                        if let Some(tpos) = self.order.iter().position(|&uu| uu == to) {
+                            let tpos = if (tpos + 2) >= self.order.len() { tpos } else { tpos + 1 };
+                            self.tx.as_mut().unwrap()
+                                .send(Command::ReorderAction { uuid: from, new_pos: tpos });
+                        }
+                        else {
+                            warn!("dnd: dest {} doesn't exist in order", to);
+                        }
+                    }
+                    else {
+                        warn!("dnd: source {} doesn't exist in order", to);
+                    }
+                }
+            },
+            DndRetarget => {
+                if let Some((from, to)) = self.cur_dnd.take() {
+                    debug!("dnd: action {} target now = {}", to, from);
+                    if let Some(ctl) = self.ctls.get_mut(&to) {
+                        ctl.on_selection_finished(from);
+                    }
+                    else {
+                        warn!("dnd: target {} doesn't exist", to);
+                    }
+                }
+            },
+            CloseDndMenu => {
+                self.dnd_menu.hide();
+                self.cur_dnd = None;
+            }
         }
     }
     pub fn on_action_msg(&mut self, msg: ActionMessage) {
@@ -593,7 +674,12 @@ impl ActionController {
                         tx.send(Command::UpdateActionMetadata { uuid: msg.0, meta: opa.meta.clone() });
                     }
                 },
-                Retarget(uu) => ctl.on_selection_finished(uu),
+                OpenDndMenu(uu) => {
+                    debug!("dnd: showing menu");
+                    self.cur_dnd = Some((uu, msg.0));
+                    self.mdnd_retarget.set_sensitive(ctl.is_dnd_target());
+                    self.dnd_menu.popup_easy(0, 0);
+                },
                 CloseButton => ctl.close_window(),
                 x => ctl.on_message(x)
             }
