@@ -174,6 +174,18 @@ fn impl_ser(ast: &DeriveInput) -> quote::Tokens {
             to.push(t);
             from.push(f);
         }
+        let into_impl = if to.len() != vars.len() {
+            quote! {}
+        }
+        else {
+            quote! {
+                impl Into<OscMessage> for #ident {
+                    fn into(self) -> OscMessage {
+                        self.to_osc().unwrap()
+                    }
+                }
+            }
+        };
         let fallout_to = if to.len() != vars.len() {
             quote! {
                 _ => None
@@ -204,6 +216,13 @@ fn impl_ser(ast: &DeriveInput) -> quote::Tokens {
                     }
                 }
             }
+            impl TryFrom<OscMessage> for #ident {
+                type Error = OscError;
+                fn try_from(msg: OscMessage) -> OscResult<Self> {
+                    Self::from_osc(&msg.addr, msg.args)
+                }
+            }
+            #into_impl
         }
     }
     else {

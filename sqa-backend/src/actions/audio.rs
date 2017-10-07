@@ -52,7 +52,10 @@ impl SpoolerContext {
                 use self::SpoolerMessage::*;
                 match m {
                     Wakeup => {},
-                    Quit => return
+                    Quit => {
+                        debug!("Killed by quit.");
+                        return;
+                    }
                 }
             }
             if self.bsends[0].buf.size() == self.bsends[0].buf.capacity() {
@@ -91,7 +94,17 @@ impl SpoolerContext {
                 }
             }
             // If we got here, we've sent all the frames!
-            debug!("All frames sent, goodnight!");
+            debug!("All frames sent. Waiting to be killed...");
+            while let Ok(msg) = self.rx.recv() {
+                match msg {
+                    SpoolerMessage::Quit => {
+                        debug!("Killed by quit.");
+                        return;
+                    },
+                    SpoolerMessage::Wakeup => debug!("Waking up now seems a bit stupid...")
+                }
+            }
+            debug!("Killed by dropping the other side of the channel.");
             return;
         }
     }
@@ -136,6 +149,11 @@ impl Controller {
         }
         Ok(path)
     }
+    pub fn open_url(path: &Path, ctx: &mut Context) -> MediaResult<MediaFile> {
+        let uri = path.to_string_lossy();
+        let mf = MediaFile::new(&mut ctx.media, &uri)?;
+        Ok(mf)
+    }
     fn open_file(&mut self, ctx: &mut Context) -> Option<MediaResult<MediaFile>> {
         if let Some(ref uri2) = self.url {
             let uri;
@@ -143,9 +161,7 @@ impl Controller {
                 uri = u;
             }
             else { return None; }
-            let uri = uri.to_string_lossy();
-            let mf = MediaFile::new(&mut ctx.media, &uri);
-            match mf {
+            match Self::open_url(&uri, ctx) {
                 Err(e) => Some(Err(e)),
                 Ok(mf) => {
                     Some(Ok(mf))

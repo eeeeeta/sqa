@@ -6,6 +6,7 @@ version = "0.1.0"
 [dependencies]
 app_dirs = "1.1"
 clap = "2.26"
+derive_is_enum_variant = "0.1.1"
 error-chain = "0.10"
 fern = "0.4"
 futures = "0.1"
@@ -16,6 +17,10 @@ time = "0.1"
 tokio-core = "0.1"
 toml = "0.4"
 url = "1.4"
+
+[dependencies.cairo-rs]
+features = ["v1_12"]
+git = "https://github.com/gtk-rs/cairo"
 
 [dependencies.gdk]
 features = ["v3_16"]

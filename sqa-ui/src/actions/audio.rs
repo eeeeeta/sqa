@@ -1,5 +1,6 @@
 use gtk::prelude::*;
-use gtk::{FileChooserAction, FileChooserButton, Widget};
+use gtk::{FileChooserAction, FileChooserButton, DrawingArea, Widget};
+use cairo::enums::{FontSlant, FontWeight};
 use super::{ActionUI, OpaqueAction, UITemplate, ActionMessageInner};
 use sync::UISender;
 use uuid::Uuid;
@@ -8,11 +9,15 @@ use sqa_backend::codec::Command;
 use sqa_backend::mixer::MixerConf;
 use sqa_backend::actions::{ActionParameters, PlaybackState};
 use sqa_backend::actions::audio::AudioParams;
+use sqa_backend::waveform::{SampleOverview, WaveformReply, WaveformRequest};
+use std::rc::Rc;
+use std::sync::RwLock;
 
 #[derive(Clone)]
 pub enum AudioMessage {
     Slider(usize, PatchedSliderMessage),
-    FileChanged
+    FileChanged,
+    GenerateWaveform
 }
 impl SliderMessage<Patched> for AudioMessage {
     type Message = (Uuid, ActionMessageInner);
@@ -29,7 +34,10 @@ pub struct AudioUI {
     params: AudioParams,
     temp: UITemplate,
     cnf: MixerConf,
-    sb: SliderBox<Patched, AudioMessage>
+    sb: SliderBox<Patched, AudioMessage>,
+    da: DrawingArea,
+    waveform: Rc<RwLock<Option<WaveformReply>>>,
+    cur_req: Option<Uuid>
 }
 
 impl AudioUI {
@@ -38,11 +46,18 @@ impl AudioUI {
         let mut temp = UITemplate::new(uu, tx.clone());
         let params = Default::default();
         let cnf = Default::default();
+        let da = DrawingArea::new();
         let sb = SliderBox::new(0, 0, &tx, uu);
+        let waveform = Rc::new(RwLock::new(None));
+        let cur_req = None;
         temp.get_tab("Basics").append_property("File target", &file);
         let patch = temp.add_tab("Levels &amp; Patch");
         patch.container.pack_start(&sb.grid, false, true, 5);
-        let mut ctx = AudioUI { file, temp, params, cnf, sb };
+        let wave = temp.add_tab("Waveform");
+        wave.container.pack_start(&da, false, true, 5);
+        da.set_vexpand(true);
+        da.set_hexpand(true);
+        let mut ctx = AudioUI { file, temp, params, cnf, sb, da, waveform, cur_req };
         ctx.bind();
         ctx
     }
@@ -52,6 +67,61 @@ impl AudioUI {
         let ref tx = self.temp.tx;
         self.file.connect_file_set(clone!(tx; |_| {
             tx.send_internal((uu, ActionMessageInner::Audio(AudioMessage::FileChanged)));
+        }));
+        let waveform = self.waveform.clone();
+        self.da.connect_draw(clone!(tx; |slf, cr| {
+            debug!("drawing waveform");
+            let allocation = slf.get_allocation();
+            let mid = allocation.height as f64 / 2.0;
+            trace!("allocation: {:?}", allocation);
+            cr.set_source_rgba(0.0, 0.19, 0.22, 1.0);
+            cr.paint();
+            cr.set_line_width(1.0);
+            let wvf = waveform.read().unwrap();
+            if let Some(ref wvf) = *wvf {
+                cr.set_source_rgba(0.67, 0.56, 0.95, 1.0);
+                let bar_width = allocation.width as f64 / wvf.data.len() as f64;
+                let mut x = 0.0;
+                for &SampleOverview { rms, max, min } in wvf.data.iter() {
+                    cr.set_source_rgba(0.67, 0.56, 0.95, 1.0);
+                    let y1 = mid - (max as f64 * mid);
+                    let y2 = mid - (min as f64 * mid);
+                    cr.move_to(x, y1);
+                    cr.line_to(x + bar_width, y1);
+                    cr.line_to(x + bar_width, y2);
+                    cr.line_to(x, y2);
+                    cr.close_path();
+                    cr.fill();
+                    cr.set_source_rgba(0.95, 0.26, 0.21, 1.0);
+                    let y1 = mid - (rms as f64 * mid);
+                    let y2 = mid - (-(rms as f64) * mid);
+                    cr.move_to(x, y1);
+                    cr.line_to(x + bar_width, y1);
+                    cr.line_to(x + bar_width, y2);
+                    cr.line_to(x, y2);
+                    cr.close_path();
+                    cr.fill();
+                    x += bar_width;
+                }
+                cr.set_source_rgba(0.67, 0.56, 0.95, 1.0);
+                cr.move_to(0.0, mid);
+                cr.line_to(allocation.width as _, mid);
+                cr.stroke();
+            }
+            else {
+                cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+                let text = "No waveform yet";
+                cr.set_font_size(52.0);
+                let extents = cr.text_extents(text);
+                let xc = (allocation.width / 2) as f64 - (extents.width / 2.0 + extents.x_bearing);
+                let yc = (allocation.height / 2) as f64 - (extents.height / 2.0 + extents.y_bearing);
+                trace!("text xc, yc = {}, {}", xc, yc);
+                cr.select_font_face("Sans", FontSlant::Normal, FontWeight::Normal);
+                cr.move_to(xc, yc);
+                cr.show_text(text);
+                tx.send_internal((uu, ActionMessageInner::Audio(AudioMessage::GenerateWaveform)));
+            }
+            Inhibit(false)
         }));
     }
     fn on_new_parameters(&mut self, p: &AudioParams) {
@@ -116,6 +186,24 @@ impl ActionUI for AudioUI {
                     self.params.url = self.file.get_uri();
                     self.apply_changes("change audio file target");
                 },
+                GenerateWaveform => {
+                    if let Some(ref uri) = self.params.url {
+                        if self.cur_req.is_none() {
+                            let uuid = Uuid::new_v4();
+                            debug!("sending new waveform request, uuid {}", uuid);
+                            self.cur_req = Some(uuid);
+                            self.temp.tx.send(Command::GenerateWaveform {
+                                uuid,
+                                req: WaveformRequest {
+                                    file: uri.clone(),
+                                    samples_per_pixel: 44_100,
+                                    range_start: None,
+                                    range_end: None
+                                }
+                            });
+                        }
+                    }
+                },
                 Slider(ch, PatchedSliderMessage::VolChanged(val)) => {
                     trace!("audio: slider, ch {} val {}", ch, val);
                     if ch == 0 {
@@ -158,5 +246,14 @@ impl ActionUI for AudioUI {
     }
     fn change_cur_page(&mut self, cp: Option<u32>) {
         self.temp.change_cur_page(cp)
+    }
+    fn on_waveform_reply(&mut self, uu: Uuid, rpl: &WaveformReply) {
+        if let Some(wait) = self.cur_req {
+            if wait == uu {
+                debug!("Got waveform reply! Updating...");
+                *self.waveform.write().unwrap() = Some(rpl.clone());
+                self.da.queue_draw();
+            }
+        }
     }
 }

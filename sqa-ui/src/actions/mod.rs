@@ -19,6 +19,7 @@ use std::time::Duration;
 use widgets::{DurationEntry, DurationEntryMessage};
 use glib::signal;
 use copy::CopyPasteMessage;
+use sqa_backend::waveform::WaveformReply;
 
 pub mod audio;
 pub mod fade;
@@ -113,6 +114,7 @@ pub trait ActionUI {
     fn on_selection_cancelled(&mut self) {}
     fn is_dnd_target(&self) -> bool { false }
     fn change_cur_page(&mut self, Option<u32>);
+    fn on_waveform_reply(&mut self, _uu: Uuid, _rpl: &WaveformReply) {}
 }
 
 #[derive(Clone)]
@@ -455,6 +457,20 @@ impl ActionController {
             },
             ActionReordered { res, .. } => {
                 action_reply_notify!(self, res, "Reordering action", "Action reordered.");
+            },
+            WaveformGenerated { uuid, res } => {
+                debug!("Got waveform reply for uuid {}", uuid);
+                match res {
+                    Ok(rpl) => {
+                        for (_, ctl) in self.ctls.iter_mut() {
+                            ctl.on_waveform_reply(uuid, &rpl);
+                        }
+                    },
+                    Err(e) => {
+                        self.tx.as_mut().unwrap()
+                            .send_internal(Message::Error(format!("Waveform generation failed: {}", e)));
+                    }
+                }
             },
             x => warn!("actions: unexpected action reply {:?}", x)
         }

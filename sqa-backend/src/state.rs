@@ -2,7 +2,7 @@
 
 use tokio_core::reactor::Remote;
 use uuid::Uuid;
-use handlers::{ConnHandler, ConnData};
+use handlers::{ConnHandler, ConnData, ReplyData};
 use codec::{Command, Reply};
 use std::collections::HashMap;
 use actions::{Action, OpaqueAction, ActionParameters, ActionMetadata, PlaybackState};
@@ -10,6 +10,7 @@ use sqa_engine::sync::{AudioThreadMessage};
 use sqa_ffmpeg::MediaContext;
 use mixer::{MixerContext};
 use undo::{UndoableChange, UndoContext};
+use waveform::WaveformContext;
 use errors::*;
 use save::Savefile;
 use handlers;
@@ -20,6 +21,7 @@ pub struct Context {
     pub mixer: MixerContext,
     pub media: MediaContext,
     pub undo: UndoContext,
+    pub waveform: WaveformContext,
     pub actions: ActionManager,
     pub sender: Option<IntSender>,
     pub handle: Option<Handle>,
@@ -41,6 +43,7 @@ impl ConnHandler for Context {
         self.handle = Some(d.handle.clone());
     }
     fn wakeup(&mut self, d: &mut CD) {
+        WaveformContext::on_wakeup(self, d).unwrap();
         ActionManager::on_wakeup(self, d)
     }
     fn internal(&mut self, d: &mut CD, m: ServerMessage) {
@@ -63,12 +66,12 @@ impl ConnHandler for Context {
             _ => {}
         }
     }
-    fn external(&mut self, d: &mut CD, c: Command) -> BackendResult<()> {
+    fn external(&mut self, d: &mut CD, c: Command, rd: ReplyData) -> BackendResult<()> {
         if let Some(ch) = self.cmd_as_undoable(&c) {
             self.undo.register_change(ch);
             self.on_undo_changed(d);
         }
-        let res = self.process_command(d, c);
+        let res = self.process_command(d, c, rd);
         for changed in self.actions.clear_changed() {
             let _: BackendResult<()> = do_with_ctx!(self, changed, |a: &mut Action| {
                 self.on_action_changed(d, a);
@@ -89,6 +92,7 @@ impl Context {
             media: ::sqa_ffmpeg::init().unwrap(),
             undo: UndoContext::new(),
             actions: ActionManager::new(),
+            waveform: WaveformContext::new(),
             sender: None,
             handle: None,
         };
@@ -98,19 +102,25 @@ impl Context {
     pub fn sender(&self) -> &IntSender {
         self.sender.as_ref().unwrap()
     }
-    pub fn process_command(&mut self, d: &mut CD, c: Command) -> BackendResult<()> {
+    pub fn process_command(&mut self, d: &mut CD, c: Command, rd: ReplyData) -> BackendResult<()> {
         use self::Command::*;
         use self::Reply::*;
         match c {
             Ping => {
-                d.respond(Pong)?;
+                d.respond(&rd, Pong)?;
             },
             Version => {
-                d.respond(ServerVersion { ver: super::VERSION.into() })?;
+                d.respond(&rd, ServerVersion { ver: super::VERSION.into() })?;
             },
             Subscribe => {
-                d.subscribe();
-                d.respond(Subscribed)?;
+                d.subscribe(&rd);
+                d.respond(&rd, Subscribed)?;
+            },
+            SubscribeAndAssociate { addr } => {
+                d.subscribe(&rd);
+                d.respond(&rd, Subscribed)?;
+                let res = d.associate(&rd, addr).map_err(|e| e.to_string());
+                d.respond(&rd, Associated { res })?;
             },
             x @ CreateAction { .. } |
             x @ CreateActionWithUuid { .. } |
@@ -141,7 +151,7 @@ impl Context {
                 }
                 let broadcast = met.is_some();
                 let act = self.create_action(&ty, pars, met, old_uu);
-                d.respond(Reply::ActionCreated {
+                d.respond(&rd, Reply::ActionCreated {
                     res: act.map_err(|e| e.to_string())
                 })?;
                 if broadcast {
@@ -152,95 +162,98 @@ impl Context {
                 let res = do_with_ctx!(self, uuid, |a: &mut Action| {
                     a.get_data(self).map_err(|e| e.to_string())
                 });
-                d.respond(ActionInfoRetrieved { uuid, res })?;
+                d.respond(&rd, ActionInfoRetrieved { uuid, res })?;
             },
             UpdateActionParams { uuid, params, .. } => {
                 let res = do_with_ctx!(self, uuid, |a: &mut Action| {
                     a.set_params(params, self, &d.int_sender).map_err(|e| e.to_string())
                 });
-                d.respond(ActionParamsUpdated { uuid, res })?;
+                d.respond(&rd, ActionParamsUpdated { uuid, res })?;
             },
             UpdateActionMetadata { uuid, meta } => {
                 let res = do_with_ctx!(self, uuid, |a: &mut Action| {
                     Ok(a.set_meta(meta))
                 });
-                d.respond(ActionMetadataUpdated { uuid, res })?;
+                d.respond(&rd, ActionMetadataUpdated { uuid, res })?;
             },
             LoadAction { uuid } => {
                 let res = do_with_ctx!(self, uuid, |a: &mut Action| {
                     a.load(self, &d.int_sender).map_err(|e| e.to_string())
                 });
-                d.respond(ActionLoaded { uuid, res })?;
+                d.respond(&rd, ActionLoaded { uuid, res })?;
             },
             ResetAction { uuid } => {
                 let res = do_with_ctx!(self, uuid, |a: &mut Action| {
                     a.reset(self, &d.int_sender);
                     Ok(())
                 });
-                d.respond(ActionReset { uuid, res })?;
+                d.respond(&rd, ActionReset { uuid, res })?;
             },
             PauseAction { uuid } => {
                 let res = do_with_ctx!(self, uuid, |a: &mut Action| {
                     a.pause(self, &d.int_sender);
                     Ok(())
                 });
-                d.respond(ActionMaybePaused { uuid, res })?;
+                d.respond(&rd, ActionMaybePaused { uuid, res })?;
             },
             ExecuteAction { uuid } => {
                 let res = do_with_ctx!(self, uuid, |a: &mut Action| {
                     a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), self, &d.int_sender)
                         .map_err(|e| e.to_string())
                 });
-                d.respond(ActionExecuted { uuid, res })?;
+                d.respond(&rd, ActionExecuted { uuid, res })?;
             },
             ActionList => {
                 self.on_all_actions_changed(d);
             },
             DeleteAction { uuid } => {
                 if self.actions.remove(uuid).is_some() {
-                    d.respond(ActionDeleted { uuid, deleted: true })?;
+                    d.respond(&rd, ActionDeleted { uuid, deleted: true })?;
                     d.broadcast(UpdateActionDeleted { uuid })?;
                     self.on_all_actions_changed(d);
                 }
                 else {
-                    d.respond(ActionDeleted { uuid, deleted: false })?;
+                    d.respond(&rd, ActionDeleted { uuid, deleted: false })?;
                 }
             },
             ReorderAction { uuid, new_pos } => {
                 let res = self.actions.reorder(uuid, new_pos).map_err(|e| e.to_string());
-                d.respond(ActionReordered { uuid, res })?;
+                d.respond(&rd, ActionReordered { uuid, res })?;
             },
             GetMixerConf => {
-                d.respond(UpdateMixerConf { conf: self.mixer.obtain_config() })?;
+                d.respond(&rd, UpdateMixerConf { conf: self.mixer.obtain_config() })?;
             },
             SetMixerConf { conf } => {
-                d.respond(MixerConfSet {res: self.mixer.process_config(conf)
+                d.respond(&rd, MixerConfSet {res: self.mixer.process_config(conf)
                                         .map_err(|e| e.to_string())})?;
-                d.respond(UpdateMixerConf { conf: self.mixer.obtain_config() })?;
+                d.respond(&rd, UpdateMixerConf { conf: self.mixer.obtain_config() })?;
             },
             MakeSavefile { save_to } => {
                 let res = Savefile::save_to_file(self, &save_to);
-                d.respond(SavefileMade { res: res.map_err(|e| e.to_string()) })?;
+                d.respond(&rd, SavefileMade { res: res.map_err(|e| e.to_string()) })?;
             },
             LoadSavefile { load_from, force } => {
                 let res = Savefile::apply_from_file(self, &load_from, Some(d), force);
-                d.respond(SavefileLoaded { res: res.map_err(|e| e.to_string()) })?;
+                d.respond(&rd, SavefileLoaded { res: res.map_err(|e| e.to_string()) })?;
             },
             GetUndoState => {
-                d.respond(ReplyUndoState { ctx: self.undo.state() })?;
+                d.respond(&rd, ReplyUndoState { ctx: self.undo.state() })?;
             },
             Undo => {
                 if let Some(cmd) = self.undo.undo() {
                     self.on_undo_changed(d);
-                    self.process_command(d, cmd)?;
+                    self.process_command(d, cmd, rd)?;
                 }
             },
             Redo => {
                 if let Some(cmd) = self.undo.redo() {
                     self.on_undo_changed(d);
-                    self.process_command(d, cmd)?;
+                    self.process_command(d, cmd, rd)?;
                 }
             },
+            GenerateWaveform { uuid, req } => {
+                WaveformContext::execute_request(self, uuid, req)?;
+            }
             _ => {}
         };
         Ok(())

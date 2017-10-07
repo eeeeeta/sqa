@@ -1,5 +1,5 @@
 #![recursion_limit = "1024"]
-#![feature(slice_patterns, advanced_slice_patterns)]
+#![feature(slice_patterns, advanced_slice_patterns, try_from)]
 extern crate futures;
 extern crate tokio_core;
 extern crate serde;
@@ -16,6 +16,7 @@ extern crate chrono;
 extern crate url;
 #[macro_use] extern crate log;
 extern crate fern;
+extern crate tokio_io;
 
 #[macro_use]
 pub mod action_manager;
@@ -27,13 +28,14 @@ pub mod errors;
 pub mod mixer;
 pub mod save;
 pub mod undo;
+pub mod waveform;
 
 pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 use handlers::Connection;
 use state::Context;
 use tokio_core::reactor::Core;
-use tokio_core::net::UdpSocket;
+use tokio_core::net::{TcpListener, UdpSocket};
 
 mod jack {
     use sqa_engine::sqa_jack::handler::JackLoggingHandler;
@@ -53,7 +55,7 @@ pub fn main() {
         .format(|out, message, record| {
             out.finish(format_args!("[{}] {} {}", record.target(), record.level(), message))
         })
-        .level(log::LogLevelFilter::Trace)
+        .level(log::LogLevelFilter::Debug)
         .level_for("tokio_core", log::LogLevelFilter::Info)
         .level_for("mio", log::LogLevelFilter::Info)
         .chain(::std::io::stdout())
@@ -69,7 +71,8 @@ pub fn main() {
     let hdl = core.handle();
     let addr = "127.0.0.1:1234".parse().unwrap();
     let sock = UdpSocket::bind(&addr, &hdl).unwrap();
-    let conn = Connection::new(sock, core.handle(), ctx);
+    let tcp = TcpListener::bind(&addr, &hdl).unwrap();
+    let conn = Connection::new(sock, tcp, core.handle(), ctx);
     info!("[+] SQA Backend is up & running!");
     core.run(conn).unwrap();
 }

@@ -15,7 +15,9 @@ extern crate clap;
 extern crate app_dirs;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
+extern crate cairo;
 extern crate toml;
+#[macro_use] extern crate derive_is_enum_variant;
 
 use gtk::prelude::*;
 use gtk::{Builder, Window};

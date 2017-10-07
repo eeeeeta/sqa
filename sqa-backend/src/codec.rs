@@ -1,15 +1,21 @@
 use std::net::SocketAddr;
-use tokio_core::net::UdpCodec;
+use tokio_core::net::{TcpStream, UdpCodec};
 use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
 use errors::*;
 use mixer::MixerConf;
 use errors::BackendErrorKind::*;
 use undo::UndoState;
 use actions::{ActionParameters, ActionMetadata, OpaqueAction};
+use waveform::{WaveformRequest, WaveformReply};
 use std::collections::HashMap;
+use tokio_io::codec::length_delimited::Framed;
+use futures::{Stream, Sink, Async, AsyncSink};
 use uuid::Uuid;
+use std::marker::PhantomData;
+use std::convert::TryFrom;
 
 type OscResult<T> = BackendResult<T>;
+type OscError = BackendError;
 
 #[derive(OscSerde, Serialize, Deserialize, Debug, Clone)]
 pub enum Command {
@@ -19,6 +25,8 @@ pub enum Command {
     Version,
     #[oscpath = "/subscribe"]
     Subscribe,
+    #[oscpath = "/subscribe/associate"]
+    SubscribeAndAssociate { #[ser] addr: SocketAddr },
     #[oscpath = "/actions/{typ}/new"]
     CreateAction { #[subst] typ: String },
     #[oscpath = "/actionlist"]
@@ -66,15 +74,11 @@ pub enum Command {
     #[oscpath = "/system/redo"]
     Redo,
     #[oscpath = "/system/undostate"]
-    GetUndoState
+    GetUndoState,
+    #[oscpath = "/waveform/{uuid}/generate"]
+    GenerateWaveform { #[subst] uuid: Uuid, #[ser] req: WaveformRequest }
 }
-impl Into<OscMessage> for Command {
-    fn into(self) -> OscMessage {
-        self.to_osc()
-            .expect("No impl generated, check codec.rs")
-    }
-}
-#[derive(OscSerde, Debug, Clone)]
+#[derive(OscSerde, Serialize, Deserialize, Debug, Clone)]
 pub enum Reply {
     #[oscpath = "/pong"]
     Pong,
@@ -82,6 +86,8 @@ pub enum Reply {
     ServerVersion { #[verbatim = "string"] ver: String },
     #[oscpath = "/reply/subscribe"]
     Subscribed,
+    #[oscpath = "/reply/subscribe/associate"]
+    Associated { #[ser] res: Result<(), String> },
     #[oscpath = "/error/deserfail"]
     DeserFailed { #[verbatim = "string"] err: String },
 
@@ -122,23 +128,31 @@ pub enum Reply {
     #[oscpath = "/reply/system/load"]
     SavefileLoaded { #[ser] res: Result<(), String> },
     #[oscpath = "/reply/system/undostate"]
-    ReplyUndoState { #[ser] ctx: UndoState }
+    ReplyUndoState { #[ser] ctx: UndoState },
+    #[oscpath = "/reply/waveform/{uuid}/generated"]
+    WaveformGenerated { #[subst] uuid: Uuid, #[ser] res: Result<WaveformReply, String> },
+    #[oscpath = "/error/oversized"]
+    OversizedReply
 }
-impl Into<OscMessage> for Reply {
-    fn into(self) -> OscMessage {
-        self.to_osc()
-            .expect("No impl generated, check codec.rs")
-    }
-}
+/// A decoded `Command` (which may or may not have succeeded), and where it came
+/// from.
 #[derive(Debug)]
 pub struct RecvMessage {
+    /// Where the message came from.
     pub addr: SocketAddr,
+    /// The result of message decoding: the string denotes the OSC path invoked.
     pub pkt: BackendResult<(String, Command)>
 }
-#[derive(Debug)]
+/// An OSC message, with an address it should be sent to.
+#[derive(Debug, Clone)]
 pub struct SendMessage {
     pub addr: SocketAddr,
     pub pkt: OscMessage
+}
+/// Some bytes, with an address they should be sent to.
+pub struct SendBytes {
+    pub addr: SocketAddr,
+    pub pkt: Vec<u8>
 }
 pub trait SendMessageExt {
     fn msg_to(&self, c: OscMessage) -> SendMessage;
@@ -163,7 +177,7 @@ impl SqaClientCodec {
 }
 impl UdpCodec for SqaClientCodec {
     type In = BackendResult<Reply>;
-    type Out = Command;
+    type Out = Vec<u8>;
     fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> ::std::io::Result<Self::In> {
         if self.addr != *src {
             return Ok(Err("Received a message from another server.".into()));
@@ -186,16 +200,14 @@ impl UdpCodec for SqaClientCodec {
         Ok(pkt)
     }
     fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> SocketAddr {
-        if let Ok(b) = encoder::encode(&OscPacket::Message(msg.into())) {
-            ::std::mem::replace(buf, b);
-        }
+        ::std::mem::replace(buf, msg);
         self.addr
     }
 }
 pub struct SqaWireCodec;
 impl UdpCodec for SqaWireCodec {
     type In = RecvMessage;
-    type Out = SendMessage;
+    type Out = SendBytes;
     fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> ::std::io::Result<Self::In> {
         let pkt = match decoder::decode(buf) {
             Ok(pkt) => {
@@ -218,10 +230,70 @@ impl UdpCodec for SqaWireCodec {
         })
     }
     fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> SocketAddr {
-        let SendMessage { pkt, addr } = msg;
-        if let Ok(b) = encoder::encode(&OscPacket::Message(pkt)) {
-            ::std::mem::replace(buf, b);
-        }
+        let SendBytes { pkt, addr } = msg;
+        ::std::mem::replace(buf, pkt);
         addr
+    }
+}
+pub struct SqaTcpStream<O> {
+    pub inner: Framed<TcpStream, Vec<u8>>,
+    _p1: PhantomData<O>
+}
+impl<O> SqaTcpStream<O>
+    where O: TryFrom<OscMessage, Error=BackendError> {
+    pub fn new(st: TcpStream) -> Self {
+        Self {
+            inner: Framed::new(st),
+            _p1: PhantomData
+        }
+    }
+}
+impl<O> Stream for SqaTcpStream<O>
+    where O: TryFrom<OscMessage, Error=BackendError> {
+    type Item = BackendResult<O>;
+    type Error = BackendError;
+
+    fn poll(&mut self) -> BackendResult<Async<Option<Self::Item>>> {
+        match self.inner.poll()? {
+            Async::Ready(buf) => {
+                match buf {
+                    Some(buf) => {
+                        let ret = match decoder::decode(&buf) {
+                            Ok(pkt) => {
+                                match pkt {
+                                    OscPacket::Message(m) => {
+                                        match O::try_from(m) {
+                                            Ok(o) => Ok(o),
+                                            Err(e) => Err(e.into())
+                                        }
+                                    },
+                                    _ => Err(BackendErrorKind::UnsupportedOSCBundle.into())
+                                }
+                            },
+                            Err(e) => Err(e.into())
+                        };
+                        Ok(Async::Ready(Some(ret)))
+                    },
+                    None => Ok(Async::Ready(None))
+                }
+            },
+            Async::NotReady => Ok(Async::NotReady)
+        }
+    }
+}
+impl<O> Sink for SqaTcpStream<O>
+    where O: TryFrom<OscMessage, Error=BackendError> {
+    type SinkItem = OscMessage;
+    type SinkError = BackendError;
+
+    fn start_send(&mut self, rpl: OscMessage) -> BackendResult<AsyncSink<OscMessage>> {
+        let pkt = encoder::encode(&OscPacket::Message(rpl.clone()))?;
+        Ok(match self.inner.start_send(pkt)? {
+            AsyncSink::NotReady(_) => AsyncSink::NotReady(rpl),
+            AsyncSink::Ready => AsyncSink::Ready
+        })
+    }
+    fn poll_complete(&mut self) -> BackendResult<Async<()>> {
+        Ok(self.inner.poll_complete()?)
     }
 }
