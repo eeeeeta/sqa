@@ -23,12 +23,14 @@ pub mod action_manager;
 pub mod codec;
 pub mod handlers;
 pub mod actions;
+pub mod commands;
+pub mod undo;
 pub mod state;
 pub mod errors;
 pub mod mixer;
 pub mod save;
-pub mod undo;
 pub mod waveform;
+pub mod async;
 
 pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 

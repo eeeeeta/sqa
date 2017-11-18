@@ -133,7 +133,8 @@ pub struct AudioChannel {
 pub struct AudioParams {
     pub url: Option<String>,
     pub chans: Vec<AudioChannel>,
-    pub master_vol: f32
+    pub master_vol: f32,
+    pub waveform_uuid: Option<Uuid>
 }
 impl Controller {
     pub fn new() -> Self {
@@ -164,6 +165,7 @@ impl Controller {
                 uri = u;
             }
             else { return None; }
+            debug!("opening: {}", uri.to_string_lossy());
             match Self::open_url(&uri, ctx) {
                 Err(e) => Some(Err(e)),
                 Ok(mf) => {
@@ -184,6 +186,8 @@ impl EditableAction for Controller {
     }
     fn set_params(&mut self, mut p: AudioParams, ctx: ControllerParams) {
         if self.params.url != p.url {
+            trace!("urls differ; remaking files etc");
+            p.waveform_uuid = None;
             self.url = match p.url {
                 Some(ref u) => Some(Self::parse_url(u)),
                 None => None

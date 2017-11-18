@@ -1,4 +1,6 @@
 use codec::Command;
+use state::Context;
+use actions::{Action, OpaqueAction};
 
 const MAX_UNDOS: usize = 100;
 
@@ -86,5 +88,81 @@ impl UndoContext {
             undo: undo.and_then(|idx| self.changes.get(idx)).map(|x| x.desc.clone()),
             redo: redo.and_then(|idx| self.changes.get(idx)).map(|x| x.desc.clone())
         }
+    }
+}
+pub fn cmd_as_undoable(ctx: &mut Context, cmd: &Command) -> Option<UndoableChange> {
+    use self::Command::*;
+    match *cmd {
+        CreateActionWithUuid { ref typ, uuid } => Some(UndoableChange {
+            undo: DeleteAction { uuid },
+            redo: CreateActionWithUuid { typ: typ.clone(), uuid },
+            desc: format!("create action with type {}", typ)
+        }),
+        ReviveAction { uuid, ref typ, ref meta, ref params } => Some(UndoableChange {
+            undo: DeleteAction { uuid },
+            redo: ReviveAction { uuid, typ: typ.clone(), meta: meta.clone(), params: params.clone() },
+            desc: format!("revive action of type {}", typ)
+        }),
+        CreateActionWithExtras { uuid, ref typ, ref params } => Some(UndoableChange {
+            undo: DeleteAction { uuid },
+            redo: CreateActionWithExtras { uuid, typ: typ.clone(), params: params.clone() },
+            desc: format!("create action with type {}", typ)
+        }),
+        UpdateActionParams { uuid, ref params, ref desc } => {
+            let res = do_with_ctx!(ctx, uuid, |a: &mut Action| {
+                a.get_data(ctx).map_err(|e| e.to_string())
+            });
+            res.ok().map(|old| {
+                UndoableChange {
+                    undo: UpdateActionParams { uuid, params: old.params, desc: None },
+                    redo: UpdateActionParams { uuid, params: params.clone(), desc: None },
+                    desc: desc.as_ref().map(|x| x.clone()).unwrap_or("update action parameters".into())
+                }
+            })
+        },
+        UpdateActionMetadata { uuid, ref meta } => {
+            let res = do_with_ctx!(ctx, uuid, |a: &mut Action| {
+                a.get_data(ctx).map_err(|e| e.to_string())
+            });
+            res.ok().map(|old| {
+                UndoableChange {
+                    undo: UpdateActionMetadata { uuid, meta: old.meta },
+                    redo: UpdateActionMetadata { uuid, meta: meta.clone() },
+                    desc: "update action metadata".into()
+                }
+            })
+        },
+        DeleteAction { uuid } => {
+            let res = do_with_ctx!(ctx, uuid, |a: &mut Action| {
+                a.get_data(ctx).map_err(|e| e.to_string())
+            });
+            res.ok().map(|old| {
+                let typ = old.typ().to_string();
+                let OpaqueAction { meta, params, .. } = old;
+                UndoableChange {
+                    undo: ReviveAction { uuid, meta, typ, params },
+                    redo: DeleteAction { uuid },
+                    desc: "delete action".into()
+                }
+            })
+        },
+        SetMixerConf { ref conf } => {
+            let old = ctx.mixer.obtain_config();
+            Some(UndoableChange {
+                undo: SetMixerConf { conf: old },
+                redo: SetMixerConf { conf: conf.clone() },
+                desc: "modify mixer configuration".into()
+            })
+        },
+        ReorderAction { uuid, new_pos } => {
+            ctx.actions.position_of(uuid).map(|pos| {
+                UndoableChange {
+                    undo: ReorderAction { uuid, new_pos: pos },
+                    redo: ReorderAction { uuid, new_pos },
+                    desc: "reorder action".into()
+                }
+            })
+        },
+        _ => None
     }
 }

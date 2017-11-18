@@ -1,7 +1,8 @@
 //! Fading audio cues' volumes up'n'down.
 
 use sqa_engine::param::{Parameter, FadeDetails};
-use super::{ActionController, EditableAction, PerformExt, AsyncResult, PlaybackState, ActionType, ControllerParams, ParameterError, DurationInfoInt, DurationInfo};
+use super::{ActionController, EditableAction, AsyncResult, PlaybackState, ActionType, ControllerParams, ParameterError, DurationInfoInt, DurationInfo};
+use async::PerformExt;
 use state::Context;
 use errors::BackendResult;
 use uuid::Uuid;

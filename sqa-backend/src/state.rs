@@ -5,15 +5,15 @@ use uuid::Uuid;
 use handlers::{ConnHandler, ConnData, ReplyData};
 use codec::{Command, Reply};
 use std::collections::HashMap;
-use actions::{Action, OpaqueAction, ActionParameters, ActionMetadata, PlaybackState};
+use actions::{Action, ActionParameters, ActionMetadata, PlaybackState};
 use sqa_engine::sync::{AudioThreadMessage};
 use sqa_ffmpeg::MediaContext;
 use mixer::{MixerContext};
-use undo::{UndoableChange, UndoContext};
+use undo::{self, UndoContext};
 use waveform::WaveformContext;
 use errors::*;
-use save::Savefile;
 use handlers;
+use commands;
 use tokio_core::reactor::Handle;
 use action_manager::ActionManager;
 pub struct Context {
@@ -77,11 +77,11 @@ impl ConnHandler for Context {
         }
     }
     fn external(&mut self, d: &mut CD, c: Command, rd: ReplyData) -> BackendResult<()> {
-        if let Some(ch) = self.cmd_as_undoable(&c) {
+        if let Some(ch) = undo::cmd_as_undoable(self, &c) {
             self.undo.register_change(ch);
             self.on_undo_changed(d);
         }
-        let res = self.process_command(d, c, rd);
+        let res = commands::process_command(self, d, c, rd);
         for changed in self.actions.clear_changed() {
             let _: BackendResult<()> = do_with_ctx!(self, changed, |a: &mut Action| {
                 self.on_action_changed(d, a);
@@ -111,162 +111,6 @@ impl Context {
     }
     pub fn sender(&self) -> &IntSender {
         self.sender.as_ref().unwrap()
-    }
-    pub fn process_command(&mut self, d: &mut CD, c: Command, rd: ReplyData) -> BackendResult<()> {
-        use self::Command::*;
-        use self::Reply::*;
-        match c {
-            Ping => {
-                d.respond(&rd, Pong)?;
-            },
-            Version => {
-                d.respond(&rd, ServerVersion { ver: super::VERSION.into() })?;
-            },
-            Subscribe => {
-                d.subscribe(&rd);
-                d.respond(&rd, Subscribed)?;
-            },
-            SubscribeAndAssociate { addr } => {
-                d.subscribe(&rd);
-                d.respond(&rd, Subscribed)?;
-                let res = d.associate(&rd, addr).map_err(|e| e.to_string());
-                d.respond(&rd, Associated { res })?;
-            },
-            x @ CreateAction { .. } |
-            x @ CreateActionWithUuid { .. } |
-            x @ CreateActionWithExtras { .. } |
-            x @ ReviveAction { .. } => {
-                let ty;
-                let mut pars = None;
-                let mut met = None;
-                let mut old_uu = None;
-                match x {
-                    CreateAction { typ } => ty = typ,
-                    CreateActionWithUuid { typ, uuid } => {
-                        ty = typ;
-                        old_uu = Some(uuid);
-                    },
-                    CreateActionWithExtras { typ, params, uuid } => {
-                        ty = typ;
-                        old_uu = Some(uuid);
-                        pars = Some(params);
-                    },
-                    ReviveAction { uuid, typ, params, meta } => {
-                        old_uu = Some(uuid);
-                        ty = typ;
-                        pars = Some(params);
-                        met = Some(meta);
-                    },
-                    _ => unreachable!()
-                }
-                let broadcast = met.is_some();
-                let act = self.create_action(&ty, pars, met, old_uu);
-                d.respond(&rd, Reply::ActionCreated {
-                    res: act.map_err(|e| e.to_string())
-                })?;
-                if broadcast {
-                    self.on_all_actions_changed(d);
-                }
-            },
-            ActionInfo { uuid } => {
-                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
-                    a.get_data(self).map_err(|e| e.to_string())
-                });
-                d.respond(&rd, ActionInfoRetrieved { uuid, res })?;
-            },
-            UpdateActionParams { uuid, params, .. } => {
-                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
-                    a.set_params(params, self, &d.int_sender).map_err(|e| e.to_string())
-                });
-                d.respond(&rd, ActionParamsUpdated { uuid, res })?;
-            },
-            UpdateActionMetadata { uuid, meta } => {
-                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
-                    Ok(a.set_meta(meta))
-                });
-                d.respond(&rd, ActionMetadataUpdated { uuid, res })?;
-            },
-            LoadAction { uuid } => {
-                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
-                    a.load(self, &d.int_sender).map_err(|e| e.to_string())
-                });
-                d.respond(&rd, ActionLoaded { uuid, res })?;
-            },
-            ResetAction { uuid } => {
-                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
-                    a.reset(self, &d.int_sender);
-                    Ok(())
-                });
-                d.respond(&rd, ActionReset { uuid, res })?;
-            },
-            PauseAction { uuid } => {
-                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
-                    a.pause(self, &d.int_sender);
-                    Ok(())
-                });
-                d.respond(&rd, ActionMaybePaused { uuid, res })?;
-            },
-            ExecuteAction { uuid } => {
-                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
-                    a.execute(::sqa_engine::Sender::<()>::precise_time_ns(), self, &d.int_sender)
-                        .map_err(|e| e.to_string())
-                });
-                d.respond(&rd, ActionExecuted { uuid, res })?;
-            },
-            ActionList => {
-                self.on_all_actions_changed(d);
-            },
-            DeleteAction { uuid } => {
-                if self.actions.remove(uuid).is_some() {
-                    d.respond(&rd, ActionDeleted { uuid, deleted: true })?;
-                    d.broadcast(UpdateActionDeleted { uuid })?;
-                    self.on_all_actions_changed(d);
-                }
-                else {
-                    d.respond(&rd, ActionDeleted { uuid, deleted: false })?;
-                }
-            },
-            ReorderAction { uuid, new_pos } => {
-                let res = self.actions.reorder(uuid, new_pos).map_err(|e| e.to_string());
-                d.respond(&rd, ActionReordered { uuid, res })?;
-            },
-            GetMixerConf => {
-                d.respond(&rd, UpdateMixerConf { conf: self.mixer.obtain_config() })?;
-            },
-            SetMixerConf { conf } => {
-                d.respond(&rd, MixerConfSet {res: self.mixer.process_config(conf)
-                                        .map_err(|e| e.to_string())})?;
-                d.respond(&rd, UpdateMixerConf { conf: self.mixer.obtain_config() })?;
-            },
-            MakeSavefile { save_to } => {
-                let res = Savefile::save_to_file(self, &save_to);
-                d.respond(&rd, SavefileMade { res: res.map_err(|e| e.to_string()) })?;
-            },
-            LoadSavefile { load_from, force } => {
-                let res = Savefile::apply_from_file(self, &load_from, Some(d), force);
-                d.respond(&rd, SavefileLoaded { res: res.map_err(|e| e.to_string()) })?;
-            },
-            GetUndoState => {
-                d.respond(&rd, ReplyUndoState { ctx: self.undo.state() })?;
-            },
-            Undo => {
-                if let Some(cmd) = self.undo.undo() {
-                    self.on_undo_changed(d);
-                    self.process_command(d, cmd, rd)?;
-                }
-            },
-            Redo => {
-                if let Some(cmd) = self.undo.redo() {
-                    self.on_undo_changed(d);
-                    self.process_command(d, cmd, rd)?;
-                }
-            },
-            GenerateWaveform { uuid, req } => {
-                WaveformContext::execute_request(self, uuid, req)?;
-            }
-            _ => {}
-        };
-        Ok(())
     }
     pub fn make_action_list(&mut self) -> Reply {
         let mut resp = HashMap::new();
@@ -340,81 +184,5 @@ impl Context {
         self.actions.mark_changed(uu);
         self.actions.insert(uu, act);
         Ok(uu)
-    }
-    pub fn cmd_as_undoable(&mut self, cmd: &Command) -> Option<UndoableChange> {
-        use self::Command::*;
-        match *cmd {
-            CreateActionWithUuid { ref typ, uuid } => Some(UndoableChange {
-                undo: DeleteAction { uuid },
-                redo: CreateActionWithUuid { typ: typ.clone(), uuid },
-                desc: format!("create action with type {}", typ)
-            }),
-            ReviveAction { uuid, ref typ, ref meta, ref params } => Some(UndoableChange {
-                undo: DeleteAction { uuid },
-                redo: ReviveAction { uuid, typ: typ.clone(), meta: meta.clone(), params: params.clone() },
-                desc: format!("revive action of type {}", typ)
-            }),
-            CreateActionWithExtras { uuid, ref typ, ref params } => Some(UndoableChange {
-                undo: DeleteAction { uuid },
-                redo: CreateActionWithExtras { uuid, typ: typ.clone(), params: params.clone() },
-                desc: format!("create action with type {}", typ)
-            }),
-            UpdateActionParams { uuid, ref params, ref desc } => {
-                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
-                    a.get_data(self).map_err(|e| e.to_string())
-                });
-                res.ok().map(|old| {
-                    UndoableChange {
-                        undo: UpdateActionParams { uuid, params: old.params, desc: None },
-                        redo: UpdateActionParams { uuid, params: params.clone(), desc: None },
-                        desc: desc.as_ref().map(|x| x.clone()).unwrap_or("update action parameters".into())
-                    }
-                })
-            },
-            UpdateActionMetadata { uuid, ref meta } => {
-                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
-                    a.get_data(self).map_err(|e| e.to_string())
-                });
-                res.ok().map(|old| {
-                    UndoableChange {
-                        undo: UpdateActionMetadata { uuid, meta: old.meta },
-                        redo: UpdateActionMetadata { uuid, meta: meta.clone() },
-                        desc: "update action metadata".into()
-                    }
-                })
-            },
-            DeleteAction { uuid } => {
-                let res = do_with_ctx!(self, uuid, |a: &mut Action| {
-                    a.get_data(self).map_err(|e| e.to_string())
-                });
-                res.ok().map(|old| {
-                    let typ = old.typ().to_string();
-                    let OpaqueAction { meta, params, .. } = old;
-                    UndoableChange {
-                        undo: ReviveAction { uuid, meta, typ, params },
-                        redo: DeleteAction { uuid },
-                        desc: "delete action".into()
-                    }
-                })
-            },
-            SetMixerConf { ref conf } => {
-                let old = self.mixer.obtain_config();
-                Some(UndoableChange {
-                    undo: SetMixerConf { conf: old },
-                    redo: SetMixerConf { conf: conf.clone() },
-                    desc: "modify mixer configuration".into()
-                })
-            },
-            ReorderAction { uuid, new_pos } => {
-                self.actions.position_of(uuid).map(|pos| {
-                    UndoableChange {
-                        undo: ReorderAction { uuid, new_pos: pos },
-                        redo: ReorderAction { uuid, new_pos },
-                        desc: "reorder action".into()
-                    }
-                })
-            },
-            _ => None
-        }
     }
 }

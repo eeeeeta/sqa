@@ -48,9 +48,19 @@ impl WaveformContext {
         });
         (sqr_sum / samples.len() as f32).sqrt()
     }
-    pub fn execute_request(ctx: &mut Context, uu: Uuid, req: WaveformRequest) -> BackendResult<()> {
-        debug!("executing waveform request {}: opening media file", uu);
+    pub fn execute_request(ctx: &mut Context, d: &mut CD, uu: Uuid, req: WaveformRequest) -> BackendResult<()> {
+        debug!("executing waveform request {}", uu);
+        if ctx.waveform.active.get(&uu).is_some() {
+            debug!("Waveform request is already in progress!");
+            return Ok(());
+        }
+        if let Some(res) = ctx.waveform.completed.get(&uu) {
+            debug!("Waveform request already completed, rebroadcasting");
+            d.broadcast(Reply::WaveformGenerated { uuid: uu, res: Ok(res.clone()) })?;
+            return Ok(());
+        }
         let path = AudioController::parse_url(&req.file)?;
+        debug!("opening: {}", path.to_string_lossy());
         let mut file = AudioController::open_url(&path, ctx)?;
         let dur = file.duration();
         let start = req.range_start.unwrap_or(Duration::new(0, 0));
@@ -80,25 +90,19 @@ impl WaveformContext {
                 let mut gmin = 0.0;
                 let mut max = 0.0;
                 let mut gmax = 0.0;
-                for frame in &mut file {
+                'outer: for frame in &mut file {
                     match frame {
                         Ok(mut frame) => {
-                            let pts = frame.pts().to_std().unwrap();
-                            trace!("new frame pts={:?}", pts);
                             for (ch, sample) in &mut frame {
                                 let sample = sample.f32();
                                 if ch == 0 {
                                     if rms_range.len() as u32 >= req.samples_per_pixel {
-                                        trace!("making new overview, len={} min={} max={} rms={}", rms_range.len(), min, max, Self::calculate_rms(&rms_range));
                                         ret.push(SampleOverview {
                                             min, max,
                                             rms: Self::calculate_rms(&rms_range)
                                         });
                                         if max > gmax { gmax = max };
                                         if min < gmin { gmin = min };
-                                        if pts >= end {
-                                            break;
-                                        }
                                         rms_range = vec![];
                                         min = 0.0;
                                         max = 0.0;
@@ -114,7 +118,9 @@ impl WaveformContext {
                         },
                         Err(e) => {
                             match *e.kind() {
-                                ::sqa_ffmpeg::errors::ErrorKind::InvalidData => {},
+                                ::sqa_ffmpeg::errors::ErrorKind::InvalidData => {
+                                    debug!("Invalid data in waveform reader, not doing anything");
+                                },
                                 _ => bail!("File read error: {:?}", e)
                             }
                         }

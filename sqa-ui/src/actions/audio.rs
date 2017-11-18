@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{FileChooserAction, FileChooserButton, DrawingArea, Widget};
+use gtk::{FileChooserAction, FileChooserButton, DrawingArea, Widget, Align, Image, Button, Overlay};
 use cairo::enums::{FontSlant, FontWeight};
 use super::{ActionUI, OpaqueAction, UITemplate, ActionMessageInner};
 use sync::UISender;
@@ -17,7 +17,8 @@ use std::sync::RwLock;
 pub enum AudioMessage {
     Slider(usize, PatchedSliderMessage),
     FileChanged,
-    GenerateWaveform
+    GenerateWaveform,
+    InvalidateWaveform
 }
 impl SliderMessage<Patched> for AudioMessage {
     type Message = (Uuid, ActionMessageInner);
@@ -35,29 +36,40 @@ pub struct AudioUI {
     temp: UITemplate,
     cnf: MixerConf,
     sb: SliderBox<Patched, AudioMessage>,
+    invalidate: Button,
     da: DrawingArea,
-    waveform: Rc<RwLock<Option<WaveformReply>>>,
-    cur_req: Option<Uuid>
+    waveform: Rc<RwLock<Option<WaveformReply>>>
 }
-
 impl AudioUI {
     pub fn new(uu: Uuid, tx: UISender) -> Self {
         let file = FileChooserButton::new("Audio file", FileChooserAction::Open);
         let mut temp = UITemplate::new(uu, tx.clone());
         let params = Default::default();
         let cnf = Default::default();
+        let overlay = Overlay::new();
         let da = DrawingArea::new();
         let sb = SliderBox::new(0, 0, &tx, uu);
         let waveform = Rc::new(RwLock::new(None));
-        let cur_req = None;
+        let invalidate = Button::new();
         temp.get_tab("Basics").append_property("File target", &file);
         let patch = temp.add_tab("Levels &amp; Patch");
         patch.container.pack_start(&sb.grid, false, true, 5);
         let wave = temp.add_tab("Waveform");
-        wave.container.pack_start(&da, false, true, 5);
+        overlay.add(&da);
+        invalidate.set_always_show_image(true);
+        invalidate.set_image(&Image::new_from_stock("gtk-refresh", 4));
+        invalidate.set_valign(Align::Start);
+        invalidate.set_margin_end(5);
+        invalidate.set_margin_top(5);
+        invalidate.set_halign(Align::End);
+        invalidate.set_sensitive(false);
+        overlay.add_overlay(&invalidate);
+        wave.container.pack_start(&overlay, false, true, 5);
         da.set_vexpand(true);
         da.set_hexpand(true);
-        let mut ctx = AudioUI { file, temp, params, cnf, sb, da, waveform, cur_req };
+        overlay.set_vexpand(true);
+        overlay.set_hexpand(true);
+        let mut ctx = AudioUI { file, temp, params, cnf, sb, da, waveform, invalidate };
         ctx.bind();
         ctx
     }
@@ -67,6 +79,10 @@ impl AudioUI {
         let ref tx = self.temp.tx;
         self.file.connect_file_set(clone!(tx; |_| {
             tx.send_internal((uu, ActionMessageInner::Audio(AudioMessage::FileChanged)));
+        }));
+        self.invalidate.connect_clicked(clone!(tx; |_| {
+            trace!("invalidate button clicked");
+            tx.send_internal((uu, ActionMessageInner::Audio(AudioMessage::InvalidateWaveform)));
         }));
         let waveform = self.waveform.clone();
         self.da.connect_draw(clone!(tx; |slf, cr| {
@@ -132,6 +148,10 @@ impl AudioUI {
         else {
             self.file.unselect_all();
         }
+        if p.waveform_uuid != self.params.waveform_uuid {
+            trace!("audio: invalidating waveform");
+            self.update_waveform(None);
+        }
         self.params = p.clone();
         if p.chans.len() != self.sb.n_sliders() || self.cnf.defs.len() != self.sb.n_output() {
             trace!("audio: recreating sliders!");
@@ -160,6 +180,11 @@ impl AudioUI {
             desc: Some(desc.into())
         });
     }
+    fn update_waveform(&mut self, wvf: Option<WaveformReply>) {
+        self.invalidate.set_sensitive(wvf.is_some());
+        *self.waveform.write().unwrap() = wvf;
+        self.da.queue_draw();
+    }
 }
 impl ActionUI for AudioUI {
     fn on_update(&mut self, p: &OpaqueAction) {
@@ -186,22 +211,34 @@ impl ActionUI for AudioUI {
                     self.params.url = self.file.get_uri();
                     self.apply_changes("change audio file target");
                 },
+                InvalidateWaveform => {
+                    if self.params.waveform_uuid.is_some() {
+                        self.params.waveform_uuid = None;
+                        self.update_waveform(None);
+                        self.apply_changes("invalidate waveform");
+                    }
+                },
                 GenerateWaveform => {
-                    if let Some(ref uri) = self.params.url {
-                        if self.cur_req.is_none() {
-                            let uuid = Uuid::new_v4();
-                            debug!("sending new waveform request, uuid {}", uuid);
-                            self.cur_req = Some(uuid);
-                            self.temp.tx.send(Command::GenerateWaveform {
-                                uuid,
-                                req: WaveformRequest {
-                                    file: uri.clone(),
-                                    samples_per_pixel: 44_100,
-                                    range_start: None,
-                                    range_end: None
-                                }
-                            });
+                    if self.params.url.is_some() {
+                        let uuid = if let Some(uu) = self.params.waveform_uuid {
+                            uu
                         }
+                        else {
+                            let uuid = Uuid::new_v4();
+                            self.params.waveform_uuid = Some(uuid);
+                            self.apply_changes("generate new waveform");
+                            uuid
+                        };
+                        debug!("sending waveform request, uuid {}", uuid);
+                        self.temp.tx.send(Command::GenerateWaveform {
+                            uuid,
+                            req: WaveformRequest {
+                                file: self.params.url.as_ref().unwrap().clone(),
+                                samples_per_pixel: 44_100,
+                                range_start: None,
+                                range_end: None
+                            }
+                        });
                     }
                 },
                 Slider(ch, PatchedSliderMessage::VolChanged(val)) => {
@@ -248,11 +285,10 @@ impl ActionUI for AudioUI {
         self.temp.change_cur_page(cp)
     }
     fn on_waveform_reply(&mut self, uu: Uuid, rpl: &WaveformReply) {
-        if let Some(wait) = self.cur_req {
+        if let Some(wait) = self.params.waveform_uuid {
             if wait == uu {
                 debug!("Got waveform reply! Updating...");
-                *self.waveform.write().unwrap() = Some(rpl.clone());
-                self.da.queue_draw();
+                self.update_waveform(Some(rpl.clone()));
             }
         }
     }

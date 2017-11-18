@@ -7,3 +7,4 @@ target
 *#
 .gdb_history
 *.sqa
+*.rs.old
