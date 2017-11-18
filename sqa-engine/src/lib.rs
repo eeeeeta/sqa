@@ -64,6 +64,8 @@ pub struct Sender<T> {
     active: Arc<AtomicBool>,
     /// Whether this stream is dead (rw)
     alive: Arc<AtomicBool>,
+    /// Whether this stream will die when its buffer runs out (rw)
+    kill_when_empty: Arc<AtomicBool>,
     /// When (from the system's monotonic clock) the player should begin playback (rw)
     start_time: Arc<AtomicU64>,
     /// Which channel number this stream is patched to (rw)
@@ -86,6 +88,14 @@ pub type BufferSender = Sender<Producer<f32>>;
 /// A `Sender` which cannot write data to its `Player`'s buffer.
 pub type PlainSender = Sender<()>;
 impl<T> Sender<T> {
+    /// Set whether this stream will die when its buffer runs out.
+    pub fn set_kill_when_empty(&mut self, val: bool) {
+        self.kill_when_empty.store(val, Relaxed);
+    }
+    /// Query whether this stream will die when its buffer runs out.
+    pub fn kill_when_empty(&mut self) -> bool {
+        self.kill_when_empty.load(Relaxed)
+    }
     /// Set whether this stream will play samples or not.
     ///
     /// This essentially halts all processing related to the sender's `Player`.
@@ -196,6 +206,7 @@ impl<T> Sender<T> {
             output_patch: self.output_patch.clone(),
             volume: self.volume.clone(),
             master_vol: self.master_vol.clone(),
+            kill_when_empty: self.kill_when_empty.clone(),
             buf: (),
             sample_rate: self.sample_rate,
             original: false,
@@ -318,6 +329,7 @@ impl EngineContext {
         let (p, c) = bounded_spsc_queue::make(STREAM_BUFFER_SIZE);
         let active = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicBool::new(false));
+        let kill_when_empty = Arc::new(AtomicBool::new(false));
         let position = Arc::new(AtomicU64::new(0));
         let start_time = Arc::new(AtomicU64::new(0));
         let default_volume = Box::new(Parameter::Raw(1.0));
@@ -338,6 +350,7 @@ impl EngineContext {
             output_patch: output_patch.clone(),
             volume: volume.clone(),
             master_vol: master_vol.clone(),
+            kill_when_empty: kill_when_empty.clone(),
             uuid: uu,
             half_sent: false,
             empty_sent: false
@@ -353,6 +366,7 @@ impl EngineContext {
             sample_rate: sample_rate,
             volume: volume.clone(),
             master_vol: master_vol.clone(),
+            kill_when_empty: kill_when_empty.clone(),
             original: true,
             uuid: uu
         }

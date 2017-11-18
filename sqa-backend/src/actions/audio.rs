@@ -94,6 +94,9 @@ impl SpoolerContext {
                 }
             }
             // If we got here, we've sent all the frames!
+            for bsend in self.bsends.iter_mut() {
+                bsend.set_kill_when_empty(true);
+            }
             debug!("All frames sent. Waiting to be killed...");
             while let Ok(msg) = self.rx.recv() {
                 match msg {

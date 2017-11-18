@@ -49,6 +49,16 @@ impl ConnHandler for Context {
     fn internal(&mut self, d: &mut CD, m: ServerMessage) {
         match m {
             ServerMessage::Audio(msg) => {
+                use self::AudioThreadMessage::*;
+                match msg {
+                    PlayerAdded(uu) => debug!("player added: {}", uu),
+                    PlayerRejected(ref p) => warn!("player rejected: {}", p.uuid),
+                    PlayerRemoved(ref p) => debug!("player removed: {}", p.uuid),
+                    PlayerInvalidOutpatch(uu) => trace!("player has invalid outpatch: {}", uu),
+                    PlayerBufHalf(uu) => trace!("player buf at half: {}", uu),
+                    PlayerBufEmpty(uu) => warn!("player buf at empty: {}", uu),
+                    Xrun => warn!("audio thread xrun")
+                }
                 for (uu, mut act) in self.actions.remove_all_for_editing().into_iter() {
                     act.accept_audio_message(self, &d.int_sender, &msg);
                     self.actions.insert_after_editing(uu, act);

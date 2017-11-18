@@ -54,8 +54,14 @@ macro_rules! bind_buttons {
 }
 impl UITemplate {
     pub fn new(uu: Uuid, tx: UISender) -> Self {
+        let pwin = PropertyWindow::new_with_handlers("Edit action", clone!(tx; |slf, _| {
+            trace!("uitemplate separate window closed");
+            slf.hide();
+            tx.send_internal(super::ActionInternalMessage::SelectionChanged);
+            Inhibit(true)
+        }));
         let mut ret = UITemplate {
-            pwin: PropertyWindow::new("Edit action"),
+            pwin: pwin,
             close_btn: Button::new_with_mnemonic("_Close"),
             pause_btn: Button::new_with_mnemonic("_Pause"),
             load_btn: Button::new_with_mnemonic("_Load"),

@@ -21,6 +21,7 @@ pub struct Player {
     pub position: Arc<AtomicU64>,
     pub active: Arc<AtomicBool>,
     pub alive: Arc<AtomicBool>,
+    pub kill_when_empty: Arc<AtomicBool>,
     pub output_patch: Arc<AtomicUsize>,
     pub volume: Arc<AtomicPtr<Parameter<f32>>>,
     pub master_vol: Arc<AtomicPtr<Parameter<f32>>>,
@@ -59,7 +60,7 @@ pub struct DeviceContext {
     pub holes: ArrayVec<[usize; MAX_CHANS]>,
     pub control: Consumer<AudioThreadCommand>,
     pub length: Arc<AtomicUsize>,
-    pub sender: AudioThreadSender,
+    pub(crate) sender: AudioThreadSender,
     pub sample_rate: u64
 }
 impl DeviceContext {
@@ -135,7 +136,10 @@ impl JackHandler for DeviceContext {
                 pos += player.buf.skip_n((sample_delta - pos) as usize) as u64;
             }
             if pos < sample_delta || player.buf.size() < out.nframes() as usize {
-                if !player.empty_sent {
+                if player.kill_when_empty.load(Relaxed) {
+                    player.alive.store(false, Relaxed);
+                }
+                else if !player.empty_sent {
                     self.sender.send(PlayerBufEmpty(player.uuid));
                     player.empty_sent = true;
                 }

@@ -49,9 +49,7 @@ pub struct AudioThreadHandle {
     rx: Consumer<AudioThreadMessage>
 }
 impl AudioThreadHandle {
-    /// This function MUST NOT be used by consumers of the library.
-    /// It's just here because I can't help it.
-    pub unsafe fn make() -> (AudioThreadHandle, AudioThreadSender) {
+    pub(crate) unsafe fn make() -> (AudioThreadHandle, AudioThreadSender) {
         let (p, c) = bounded_spsc_queue::make(CONTROL_BUFFER_SIZE);
         let arc = Arc::new((Mutex::new(()), Condvar::new()));
         (AudioThreadHandle {
@@ -112,11 +110,7 @@ impl AudioThreadHandle {
         self.rx.try_pop()
     }
 }
-/// Hesssk! My `struct`! Not for you!
-///
-/// This struct MUST NOT (and in fact, can't) be used by consumers of the library.
-/// It's just here because I can't help it.
-pub struct AudioThreadSender {
+pub(crate) struct AudioThreadSender {
     inner: Arc<(Mutex<()>, Condvar)>,
     tx: Producer<AudioThreadMessage>,
     written_t: u64,
@@ -124,11 +118,11 @@ pub struct AudioThreadSender {
 }
 impl AudioThreadSender {
     #[inline(always)]
-    pub fn init(&mut self, t: u64) {
+    pub(crate) fn init(&mut self, t: u64) {
         self.cur_t = t;
     }
     #[inline(always)]
-    pub fn send(&mut self, data: AudioThreadMessage) {
+    pub(crate) fn send(&mut self, data: AudioThreadMessage) {
         self.written_t = self.cur_t;
         if let Some(remnant) = self.tx.try_push(data) {
             // If we can't send the data to the main thread for deallocation,
@@ -137,7 +131,7 @@ impl AudioThreadSender {
         }
     }
     #[inline(always)]
-    pub fn notify(&mut self) {
+    pub(crate) fn notify(&mut self) {
         if self.written_t == self.cur_t {
             self.inner.1.notify_one();
         }

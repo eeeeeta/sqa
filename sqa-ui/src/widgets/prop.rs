@@ -1,9 +1,10 @@
 use gtk::prelude::*;
 use gtk::{Window, Box, ButtonBox, Button, Label, Image, Builder, IsA, Widget, Orientation, IconSize, Inhibit};
+use gdk::Event;
 use util;
 
 pub struct PropertyWindow {
-    window: Window,
+    pub window: Window,
     pub header_lbl: Label,
     pub subheader_lbl: Label,
     pub header_img: Image,
@@ -12,16 +13,14 @@ pub struct PropertyWindow {
     pub button_box: ButtonBox
 }
 impl PropertyWindow {
-    pub fn new(title: &str) -> Self {
-        let b = Builder::new_from_string(util::INTERFACE_SRC);
-        let ctx = build!(PropertyWindow using b
-                         get window, header_lbl, subheader_lbl, header_img,
-                         props_box, props_box_box, button_box);
-        ctx.window.connect_delete_event(move |slf, _| {
-            slf.hide();
-            Inhibit(true)
-        });
-        ctx.window.connect_key_press_event(move |slf, ek| {
+    fn setup(&self, title: &str, bind_delete: bool) {
+        if bind_delete {
+            self.window.connect_delete_event(move |slf, _| {
+                slf.hide();
+                Inhibit(true)
+            });
+        }
+        self.window.connect_key_press_event(move |slf, ek| {
             if ek.get_keyval() == ::gdk::enums::key::Escape {
                 slf.hide();
                 Inhibit(true)
@@ -30,7 +29,24 @@ impl PropertyWindow {
                 Inhibit(false)
             }
         });
-        ctx.window.set_title(title);
+        self.window.set_title(title);
+    }
+    pub fn new_with_handlers<F>(title: &str, on_delete: F) -> Self
+        where F: Fn(&Window, &Event) -> Inhibit + 'static {
+        let b = Builder::new_from_string(util::INTERFACE_SRC);
+        let ctx = build!(PropertyWindow using b
+                         get window, header_lbl, subheader_lbl, header_img,
+                         props_box, props_box_box, button_box);
+        ctx.window.connect_delete_event(on_delete);
+        ctx.setup(title, false);
+        ctx
+    }
+    pub fn new(title: &str) -> Self {
+        let b = Builder::new_from_string(util::INTERFACE_SRC);
+        let ctx = build!(PropertyWindow using b
+                         get window, header_lbl, subheader_lbl, header_img,
+                         props_box, props_box_box, button_box);
+        ctx.setup(title, true);
         ctx
     }
     pub fn update_header<T: AsRef<str>, U: AsRef<str>>(&self, img_stock: &str, header: T, subheader: U) {
